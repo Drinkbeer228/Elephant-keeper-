@@ -731,8 +731,10 @@
           // Любопытство, исследование вольера, интерес к окружающим объектам и обогащению
           idleDurationMin: 6,
           idleDurationMax: 12,
-          restDurationMin: 8,
-          restDurationMax: 15,
+          // ЭТАП 28 FIX: отдых заметно длиннее (было 8..15 с — слоны спали
+          // считанные секунды). Ориентир 25..45 с игрового времени.
+          restDurationMin: 26,
+          restDurationMax: 42,
           wanderDurationMin: 5,
           wanderDurationMax: 10,
           restChance: 0.30,
@@ -796,8 +798,9 @@
           // Переменчивость поведения, частая смена занятий, отвлечения на шорохи и почесывания
           idleDurationMin: 2.5,
           idleDurationMax: 5.5,
-          restDurationMin: 4.0,
-          restDurationMax: 8.0,
+          // ЭТАП 28 FIX: 25..34 с (было 4..8 с)
+          restDurationMin: 25.0,
+          restDurationMax: 34.0,
           wanderDurationMin: 3.5,
           wanderDurationMax: 7.0,
           restChance: 0.22,
@@ -862,8 +865,9 @@
           // Склонность к более длительному отдыху, потребность во внимании к аппетиту и активности
           idleDurationMin: 3.0,
           idleDurationMax: 6.0,
-          restDurationMin: 10.0,
-          restDurationMax: 20.0, // Долгий глубокий отдых
+          // ЭТАП 28 FIX: 30..45 с (было 10..20 с) — самый долгий глубокий отдых
+          restDurationMin: 30.0,
+          restDurationMax: 45.0, // Долгий глубокий отдых
           wanderDurationMin: 3.0,
           wanderDurationMax: 6.0,
           restChance: 0.42, // Выраженная склонность к покою на мягком настиле
@@ -953,8 +957,13 @@
       // ворота 620..710, кормушки, автопоилку и зону отдыха)
       const washZone = { x: 150, y: 545, r: 85 };
 
-      // Стойка садового инвентаря (вилы для уборки мокрого сена), южная стена вольера
-      const forkRack = { x: 300, y: 558 };
+      // ЭТАП 28 FIX: стойка вил перенесена из южной части вольера слонов (300,558)
+      // в верхнюю хозяйственную зону кипера. Место выбрано по фактическим
+      // коллайдерам obstacles: между столом дежурного (x 300..400, y 65..130) и
+      // кормовыми складами (x до 235), на свободном коридоре y 130..185 перед
+      // главным ограждением (y 185..203). Не пересекает ни один объект; кипер
+      // свободно подходит снизу (проверено тем же AABB-тестом, что и obstacles).
+      const forkRack = { x: 272, y: 150 };
 
       // Инвентарь и режим ведения слона за лакомством
       const keeperState = {
@@ -1811,7 +1820,9 @@
             if (player.wheelbarrowKg >= player.wheelbarrowMaxKg) {
               return { label: 'ПОЛНА', icon: '⚠️', color: '#e74c3c', hold: false };
             }
-            return { label: 'ЛОПАТА', icon: '🧹', color: '#d35400', hold: true };
+            // ЭТАП 28 FIX: уборка лопатой теперь непрерывная — подсказка
+            // отражает удержание кнопки (ранее «ЛОПАТА» вводило в заблуждение).
+            return { label: 'ДЕРЖИТЕ: ЛОПАТА', icon: '🧹', color: '#d35400', hold: true };
           }
         }
 
@@ -3728,7 +3739,14 @@
           }
         }
 
-        if (nearPile && actionPressed) {
+        // ЭТАП 28 FIX: уборка лопатой — НЕПРЕРЫВНОЕ действие. Прогресс
+        // накапливается при удержании Space / сенсорной кнопки (actionHeld),
+        // а не по однопиксельному флагу actionPressed (из-за чего уборка была
+        // невозможна: флаг живёт один кадр, else-ветка сбрасывала прогресс).
+        // Старт разрешён и при пустых руках, и с ведром в руке (ведро просто
+        // остаётся при кипере); начинать нельзя во время мойки/педикюра.
+        const shovelCanStart = !player.isDoingPedicure && !player.isWashing;
+        if (nearPile && (actionHeld || player.isShoveling) && shovelCanStart) {
           // Если тачка уже заполнена до отказа (60/60 кг)
           if (player.wheelbarrowKg >= player.wheelbarrowMaxKg) {
             player.isShoveling = false;
@@ -4539,7 +4557,13 @@
                 performSleepUrination(el);
               }
 
-              if (el.stateTimer <= 0 || el.energy >= 96) {
+              // ЭТАП 28 FIX: раньше выход был по `el.energy >= 96` — слониха
+              // просыпалась сразу после восстановления сил, не доживая до конца
+              // таймера отдыха. Теперь будит только истёкший stateTimer;
+              // энергия лишь ограничивает сверху (не глубже 100). Принудительные
+              // пробуждения при физиологических событиях сохранены выше по коду
+              // (мочеиспускание во сне обрабатывается отдельно).
+              if (el.stateTimer <= 0) {
                 el.state = 'IDLE';
                 el.stateTimer = el.idleDurationMin;
                 el.trunkAngle = 0.22;
@@ -4600,8 +4624,18 @@
               // Прибытие к обычной целевой точке
               if (distToTarget <= 14) {
                 el.state = Math.random() < el.restChance ? 'REST' : 'IDLE';
-                el.stateTimer = el.idleDurationMin + Math.random() * (el.idleDurationMax - el.idleDurationMin);
-                el.statusText = el.state === 'REST' ? 'Отдыхает' : 'Осматривается';
+                // ЭТАП 28 FIX: при переходе в REST таймер обязан быть длительностью
+                // отдыха, а не случайной idle-паузой (3..12 с) — иначе слониха
+                // «просыпалась» почти сразу. fatigueBonus сохранён как в основном
+                // пути выбора состояния.
+                if (el.state === 'REST') {
+                  const fatigueBonus = el.energy < 45 ? 6 : 0;
+                  el.stateTimer = el.restDurationMin + fatigueBonus + Math.random() * (el.restDurationMax - el.restDurationMin);
+                  el.statusText = 'Устроилась на мягком настиле';
+                } else {
+                  el.stateTimer = el.idleDurationMin + Math.random() * (el.idleDurationMax - el.idleDurationMin);
+                  el.statusText = 'Осматривается';
+                }
               } else {
                 // ЭТАП 27: прохождение по мокрому участку настила постепенно пачкает ноги
                 const wetUnder = wetSpots.find(w => Math.hypot(el.x - w.x, el.y - w.y) < w.r + el.radius * 0.4);
@@ -5276,7 +5310,7 @@
           ctx.textAlign = 'center';
           ctx.fillStyle = '#7fd0ff';
           ctx.font = 'bold 10px monospace';
-          ctx.fillText(`МОЙКА ${Math.round(keeperState.washProgress * 100)}% — ЖМИТЕ [SPACE]`, wel.x, wel.y - wel.radius - 44);
+          ctx.fillText(`МОЙКА ${Math.round(keeperState.washProgress * 100)}% — ДЕРЖИТЕ [SPACE]`, wel.x, wel.y - wel.radius - 44);
           ctx.textAlign = 'left';
         }
 
