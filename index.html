@@ -1002,6 +1002,29 @@
       // (Tab остаётся назначенным планшету смены — переназначений нет).
       let journalOpen = false;
 
+      // UX-рефакторинг: компактная иконка взаимодействия над объектом.
+      // Показывается только когда кипер входит в радиус действия объекта
+      // (замена постоянных текстовых подписей на игровом поле).
+      function drawInteractIcon(x, y) {
+        const bob = Math.sin(worldAnimTime * 4) * 2;
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 12, 10, 0.78)';
+        ctx.beginPath();
+        ctx.arc(x, y + bob, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#f1c40f';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y + bob, 11, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('✋', x, y + bob + 4);
+        ctx.textAlign = 'left';
+        ctx.restore();
+      }
+
       // UX-рефакторинг: единый компактный индикатор активных проблем в верхней
       // панели. Критические условия берутся из существующих игровых данных —
       // вторая система событий не создаётся.
@@ -1676,7 +1699,15 @@
           return;
         }
 
-        // 4. Открытие планшета смены во время игры
+        // 4. UX-рефакторинг: журнал дежурного (клавиша J) — поверх игры,
+        // без паузы и без изменения игровой логики.
+        if (e.code === 'KeyJ' && (gameState === 'PLAYING' || gameState === 'PAUSED')) {
+          journalOpen = !journalOpen;
+          sfx.playStep();
+          return;
+        }
+
+        // 5. Открытие планшета смены во время игры
         if ((gameState === 'PLAYING' || (gameState === 'QTE_URINE' && qteState.result !== null)) && (e.code === 'Tab' || e.code === 'KeyT')) {
           if (gameState === 'QTE_URINE') qteState.returnState = 'SHIFT_TABLET';
           gameState = 'SHIFT_TABLET';
@@ -5048,17 +5079,16 @@
         ctx.font = 'bold 10px monospace';
         ctx.fillText('ВЕДРА ПРОБ', 740, 52);
 
-        // Контекстная подсказка у стойки
+        // UX-рефакторинг: постоянная подпись «СТОЙКА [SPACE]» убрана.
+        // Иконка взаимодействия появляется только в радиусе действия;
+        // текстовая подсказка — тоже только рядом со стойкой.
         const distToRack = Math.hypot(player.x - 768, player.y - 120);
         if (distToRack < 55) {
+          drawInteractIcon(768, 96);
           ctx.fillStyle = player.carrying === 'bucket' ? '#f39c12' : (player.carrying === 'none' ? '#3498db' : '#e74c3c');
           ctx.font = 'bold 10px monospace';
           const rackHint = player.carrying === 'bucket' ? 'ВЕРНУТЬ [SPACE]' : (player.carrying === 'none' ? 'ВЗЯТЬ [SPACE]' : 'РУКИ ЗАНЯТЫ');
           ctx.fillText(rackHint, 730, 142);
-        } else {
-          ctx.fillStyle = '#dcd3be';
-          ctx.font = '9px monospace';
-          ctx.fillText('СТОЙКА [SPACE]', 734, 142);
         }
 
         // --- 4. Контейнер утилизации навоза ---
@@ -5152,7 +5182,11 @@
         const distToValve = Math.hypot(player.x - waterTrough.valveX, player.y - waterTrough.valveY);
         const nearWaterZone = distToValve < 60 || (player.x >= 420 && player.x <= 560 && player.y >= 540 && player.y <= 650);
 
+        // UX-рефакторинг: постоянный процент поилки с поля убран (доступен в
+        // журнале тревог и при приближении). Рядом с кипером — компактная
+        // полоска уровня воды вместо длинной надписи.
         if (nearWaterZone) {
+          drawInteractIcon(waterTrough.valveX, waterTrough.valveY - 26);
           if (waterTrough.isRefilling) {
             ctx.fillStyle = '#3498db';
             ctx.font = 'bold 11px monospace';
@@ -5160,16 +5194,24 @@
           } else if (waterTrough.water >= 100) {
             ctx.fillStyle = '#2ecc71';
             ctx.font = 'bold 10px monospace';
-            ctx.fillText('ПОИЛКА ПОЛНАЯ (100%)', waterTrough.x - 10, waterTrough.y - 12);
+            ctx.fillText('💧 100%', waterTrough.x - 8, waterTrough.y - 12);
           } else {
             ctx.fillStyle = '#f39c12';
             ctx.font = 'bold 10px monospace';
-            ctx.fillText(`ВЕНТИЛЬ [ДЕРЖАТЬ SPACE]: ${Math.round(waterTrough.water)}%`, waterTrough.x - 50, waterTrough.y - 12);
+            ctx.fillText('💧 ДЕРЖАТЬ SPACE', waterTrough.x - 32, waterTrough.y - 12);
+            // Компактная полоска уровня воды
+            ctx.fillStyle = '#120e0c';
+            ctx.fillRect(waterTrough.x - 32, waterTrough.y - 8, 64, 5);
+            ctx.fillStyle = waterTrough.water < 30 ? '#e74c3c' : '#3498db';
+            ctx.fillRect(waterTrough.x - 31, waterTrough.y - 7, 62 * Math.max(0, waterTrough.water) / 100, 3);
           }
-        } else {
-          ctx.fillStyle = waterTrough.water > 20 ? '#2c3e50' : '#c0392b';
-          ctx.font = 'bold 10px monospace';
-          ctx.fillText(`ПОИЛКА: ${Math.round(waterTrough.water)}%`, waterTrough.x + 4, waterTrough.y - 10);
+        } else if (waterTrough.water <= 15) {
+          // Вне радиуса остаётся только минимальный критический маркер —
+          // он не текст-подпись на поле, а маленький значок у самой поилки.
+          ctx.fillStyle = '#e74c3c';
+          ctx.beginPath();
+          ctx.arc(waterTrough.x + 44, waterTrough.y - 8, 4, 0, Math.PI * 2);
+          ctx.fill();
         }
 
         // --- 6. Бревно-чесалка и предмет обогащения среды для слоних (Этап 10) ---
@@ -5254,22 +5296,25 @@
           ctx.stroke();
           ctx.restore();
 
-          // Подсказка у участка: чем убирать и сколько осталось
+          // Подсказка у участка: чем убирать и сколько осталось.
+          // UX-рефакторинг: длинная надпись заменена короткой (полный
+          // алгоритм уборки — в журнале тревог [J]).
           const dist = Math.hypot(player.x - w.x, player.y - w.y);
           if (dist < w.r + 40) {
             ctx.textAlign = 'center';
             if (!player.hasPitchfork) {
               ctx.fillStyle = '#f1c40f';
               ctx.font = 'bold 10px monospace';
-              ctx.fillText('МОКРОЕ СЕНО — НУЖНЫ ВИЛЫ СО СТОЙКИ', w.x, w.y - w.r * 0.7);
+              ctx.fillText('🛠️ НУЖНЫ ВИЛЫ', w.x, w.y - w.r * 0.7);
             } else if (player.wheelbarrowKg >= player.wheelbarrowMaxKg) {
               ctx.fillStyle = '#e74c3c';
               ctx.font = 'bold 10px monospace';
-              ctx.fillText('ТАЧКА ПОЛНА — ВЫГРУЗИТЕ УТИЛЬ', w.x, w.y - w.r * 0.7);
+              ctx.fillText('⚠️ ТАЧКА ПОЛНА', w.x, w.y - w.r * 0.7);
             } else {
+              drawInteractIcon(w.x, w.y - w.r * 0.85);
               ctx.fillStyle = '#7fd0ff';
               ctx.font = 'bold 10px monospace';
-              ctx.fillText(`ЗАЖАТЬ [SPACE] — УБРАТЬ ВИЛАМИ (${Math.round(w.amount)} кг)`, w.x, w.y - w.r * 0.7);
+              ctx.fillText(`ДЕРЖАТЬ [SPACE] · ${Math.round(w.amount)} кг`, w.x, w.y - w.r * 0.7);
             }
             // Прогресс уборки кольцом вокруг участка
             if (player.forkProgress > 0 && player.hasPitchfork) {
@@ -5320,11 +5365,18 @@
           ctx.arc(washZone.x - 16 + i * 3.5, washZone.y - washZone.r - 33 + dropY, 1.6, 0, Math.PI * 2);
           ctx.fill();
         }
-        ctx.fillStyle = '#bfe3ff';
-        ctx.font = 'bold 10px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('🚿 ЗОНА МОЙКИ', washZone.x, washZone.y + 4);
-        ctx.textAlign = 'left';
+        // UX-рефакторинг: постоянная текстовая подпись «ЗОНА МОЙКИ» убрана —
+        // синяя пунктирная зона и лейка читаются визуально; значок мойки и
+        // короткая подсказка появляются только при подведении грязного слона.
+        const washEl = elephants.find(e => Math.hypot(e.x - washZone.x, e.y - washZone.y) < washZone.r && e.footDirt >= 25);
+        if (washEl && player.carrying === 'none' && !player.isShoveling && !player.isDoingPedicure && !keeperState.washingElephant) {
+          drawInteractIcon(washZone.x, washZone.y - washZone.r - 8);
+          ctx.fillStyle = '#bfe3ff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('🚿 ДЕРЖАТЬ [SPACE]', washZone.x, washZone.y + 6);
+          ctx.textAlign = 'left';
+        }
         ctx.restore();
 
         // Активная мойка — кольцо прогресса вокруг промываемой слонихи
@@ -5358,9 +5410,17 @@
           ctx.lineWidth = 1;
           ctx.stroke();
         }
-        ctx.fillStyle = '#f5d76e';
-        ctx.font = 'bold 9px monospace';
-        ctx.fillText('СТОЛ ЛАКОМСТВ [SPACE]', treatTable.x - 44, treatTable.y + 26);
+        // UX-рефакторинг: постоянная подпись «СТОЛ ЛАКОМСТВ [SPACE]» убрана —
+        // только бананы на столе; подсказка появляется в радиусе действия.
+        if (Math.hypot(player.x - treatTable.x, player.y - treatTable.y) < 55 &&
+            !player.isShoveling && !player.isDoingPedicure && !player.isWashing) {
+          drawInteractIcon(treatTable.x, treatTable.y - 26);
+          ctx.fillStyle = '#f5d76e';
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(player.carrying === 'treat' ? 'ВЕРНУТЬ [SPACE]' : (keeperState.treatsStock > 0 && player.carrying === 'none' ? 'ВЗЯТЬ [SPACE]' : ''), treatTable.x, treatTable.y + 26);
+          ctx.textAlign = 'left';
+        }
 
         // --- Стойка садового инвентаря (вилы) ---
         ctx.strokeStyle = '#5d4a2f';
@@ -5388,9 +5448,20 @@
             ctx.stroke();
           }
         }
-        ctx.fillStyle = '#cbb894';
-        ctx.font = 'bold 9px monospace';
-        ctx.fillText(player.hasPitchfork ? 'ВИЛЫ У ВАС' : 'СТОЙКА: ВИЛЫ [SPACE]', forkRack.x - 48, forkRack.y + 30);
+        // UX-рефакторинг: постоянная подпись стойки вил убрана; иконка и
+        // короткая подсказка — только в радиусе взаимодействия.
+        if (Math.hypot(player.x - forkRack.x, player.y - forkRack.y) < 55 &&
+            !player.isShoveling && !player.isDoingPedicure && !player.isWashing) {
+          drawInteractIcon(forkRack.x, forkRack.y - 38);
+          ctx.fillStyle = '#cbb894';
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(player.hasPitchfork ? 'ВИЛЫ У ВАС · ВЕРНУТЬ [SPACE]' : 'ВЗЯТЬ ВИЛЫ [SPACE]', forkRack.x, forkRack.y + 30);
+          ctx.textAlign = 'left';
+        } else if (player.hasPitchfork) {
+          // Вне радиуса ничего не рисуем: статус «вилы у вас» виден по
+          // иконке инструмента над головой кипера (renderPlayer).
+        }
       }
 
       function renderDungPiles() {
@@ -5511,14 +5582,14 @@
 
           const dist = Math.hypot(player.x - sx, player.y - sy);
           if (dist < 48) {
+            drawInteractIcon(sx, sy - 26);
             ctx.fillStyle = '#27ae60';
             ctx.font = 'bold 10px monospace';
-            ctx.fillText('СОБРАТЬ СЕНО [SPACE]', sx - 55, sy - 16);
-          } else {
-            ctx.fillStyle = '#8b5a2b';
-            ctx.font = '9px monospace';
-            ctx.fillText('РАССЫПАНО СЕНО', sx - 42, sy - 14);
+            ctx.fillText('СОБРАТЬ [SPACE]', sx - 38, sy - 10);
           }
+          // UX-рефакторинг: постоянная подпись «РАССЫПАНО СЕНО» вне радиуса
+          // убрана — сам пучок сена виден на поле, подсказка появляется при
+          // приближении кипера.
         }
 
         // 3. Засохший бортик кормушки
@@ -5842,22 +5913,25 @@
           ctx.font = 'bold 12px sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText('🍌', el.x, el.y - el.radius - 54 + bob);
-          ctx.fillStyle = '#f1c40f';
-          ctx.font = 'bold 10px monospace';
-          ctx.fillText('ВЕДЁТСЯ ЗА ЛАКОМСТВОМ', el.x, el.y - el.radius - 76);
+          // UX-рефакторинг: длинная надпись «ВЕДЁТСЯ ЗА ЛАКОМСТВОМ» убрана —
+          // жёлтый значок с бананом и линия привязи к киперу достаточны.
           if (distToPlayer < el.radius + 60 && player.carrying === 'treat') {
-            ctx.fillStyle = '#2ecc71';
-            ctx.font = 'bold 11px monospace';
-            ctx.fillText('ДАТЬ ЛАКОМСТВО [SPACE]', el.x, el.y + el.radius + 20);
+            drawInteractIcon(el.x, el.y + el.radius + 14);
           }
         }
 
-        // ЭТАП 27R: грязные ноги — компактный индикатор в бейдже слонихи
+        // UX-рефакторинг: текстовый статус «НОГИ: ...» заменён компактным
+        // значком 🦶 (красный — требуется мойка, оранжевый — загрязнены).
+        // Точная степень грязи доступна в карточке осмотра [F].
         if (el.footDirt >= 25 && el.state !== 'FOLLOW') {
           ctx.textAlign = 'center';
-          ctx.fillStyle = el.footDirt >= 60 ? '#e74c3c' : '#e67e22';
-          ctx.font = 'bold 9px monospace';
-          ctx.fillText(`НОГИ: ${getFootDirtStatus(el).toUpperCase()}`, el.x, el.y + el.radius + 20);
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText('🦶', el.x + el.radius * 0.75, el.y + el.radius + 18);
+          ctx.strokeStyle = el.footDirt >= 60 ? '#e74c3c' : '#e67e22';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(el.x + el.radius * 0.75, el.y + el.radius + 14, 9, 0, Math.PI * 2);
+          ctx.stroke();
         }
 
         // Имя и полоска сытости
@@ -5888,14 +5962,16 @@
           ctx.font = 'bold 13px sans-serif';
           ctx.fillText('🧪', el.x, el.y - el.radius - 49 + pulse);
 
-          ctx.fillStyle = hasBucket ? '#2ecc71' : '#f1c40f';
-          ctx.font = 'bold 11px monospace';
-          ctx.fillText(`НУЖЕН АНАЛИЗ! (${Math.ceil(el.peeUrgencyTimer)}c)`, el.x, el.y - el.radius - 74);
+          // UX-рефакторинг: длинная надпись «НУЖЕН АНАЛИЗ! (Nc)» заменена
+          // компактным счётчиком секунд в самом бейдже.
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px monospace';
+          ctx.fillText(`${Math.max(0, Math.ceil(el.peeUrgencyTimer))}с`, el.x, el.y - el.radius - 36 + pulse);
 
           if (distToPlayer < el.radius + 55) {
             ctx.fillStyle = hasBucket ? '#2ecc71' : '#e74c3c';
             ctx.font = 'bold 11px monospace';
-            const peeHint = hasBucket ? 'ВЗЯТЬ АНАЛИЗ В ВЕДРО [SPACE]' : 'НУЖНО ВЕДРО СО СТОЙКИ!';
+            const peeHint = hasBucket ? 'ВЗЯТЬ АНАЛИЗ [SPACE]' : 'НУЖНО ВЕДРО СО СТОЙКИ!';
             ctx.fillText(peeHint, el.x, el.y + el.radius + 20);
           }
         } else if (el.isWantingPedicure) {
@@ -5908,9 +5984,11 @@
           ctx.font = 'bold 13px sans-serif';
           ctx.fillText('🦶', el.x, el.y - el.radius - 49 + pulse);
 
-          ctx.fillStyle = '#e056fd';
-          ctx.font = 'bold 11px monospace';
-          ctx.fillText(`ПЕДИКЮР! (${Math.ceil(el.pedicureUrgencyTimer)}c)`, el.x, el.y - el.radius - 74);
+          // UX-рефакторинг: надпись «ПЕДИКЮР! (Nc)» заменена компактным
+          // счётчиком секунд в бейдже.
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 9px monospace';
+          ctx.fillText(`${Math.max(0, Math.ceil(el.pedicureUrgencyTimer))}с`, el.x, el.y - el.radius - 36 + pulse);
 
           if (distToPlayer < el.radius + 55) {
             ctx.fillStyle = '#ffffff';
@@ -5926,20 +6004,17 @@
             }
           }
         } else if (distToPlayer < el.radius + 45) {
-          // Контекстный бейдж текущего поведения и подсказка осмотра [F]
-          ctx.fillStyle = 'rgba(20, 16, 14, 0.82)';
-          ctx.fillRect(el.x - 75, el.y + el.radius + 8, 150, 30);
-          ctx.strokeStyle = '#d4af37';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(el.x - 75, el.y + el.radius + 8, 150, 30);
-
+          // UX-рефакторинг: постоянный текстовый статус поведения и «Жажда: N%»
+          // убраны. Рядом с кипером — только значок поведения и подсказка
+          // осмотра; точные показатели доступны в карточке [F].
+          const stateIcon = el.state === 'REST' ? '💤' : (el.state === 'EAT' ? '🌾' : (el.state === 'DRINK' ? '💧' : (el.thirst > 60 ? '💧' : '👁️')));
+          ctx.textAlign = 'center';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillText(stateIcon, el.x, el.y + el.radius + 24);
           ctx.fillStyle = '#f5eedb';
-          ctx.font = 'bold 10px sans-serif';
-          ctx.fillText(el.statusText || 'Осматривается', el.x, el.y + el.radius + 21);
-
-          ctx.fillStyle = el.thirst > 60 ? '#e67e22' : '#3498db';
           ctx.font = '9px monospace';
-          ctx.fillText(`Жажда: ${Math.round(el.thirst)}% · ОСМОТР [F]`, el.x, el.y + el.radius + 33);
+          ctx.fillText('ОСМОТР [F]', el.x, el.y + el.radius + 37);
+          ctx.textAlign = 'left';
         }
 
         ctx.textAlign = 'left';
@@ -6048,6 +6123,23 @@
           ctx.fillStyle = '#8b5a2b';
           ctx.fillRect(6.5, -5.5, 2, 2.5);
           ctx.fillRect(12, -2.5, 2, 2.5);
+        } else if (player.hasPitchfork) {
+          // UX-рефакторинг: компактный визуальный маркер — вилы взяты со
+          // стойки (замена постоянной подписи «ВИЛЫ У ВАС» у стойки).
+          ctx.strokeStyle = '#8b5a2b';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(9, 6);
+          ctx.lineTo(9, -13);
+          ctx.stroke();
+          ctx.strokeStyle = '#95a5a6';
+          ctx.lineWidth = 2;
+          for (let i = -1; i <= 1; i++) {
+            ctx.beginPath();
+            ctx.moveTo(9 + i * 3, -13);
+            ctx.lineTo(9 + i * 3, -19);
+            ctx.stroke();
+          }
         } else if (player.carrying === 'none') {
           // Рабочая лопата дежурного кипера
           ctx.fillStyle = '#8b5a2b';
@@ -6106,9 +6198,8 @@
         // Проход / Ворота (x: 620..710)
         ctx.fillStyle = '#8e795c';
         ctx.fillRect(618, 182, 98, 16);
-        ctx.fillStyle = '#2c3e50';
-        ctx.font = '9px monospace';
-        ctx.fillText('ПРОХОД К СЛОНАМ', 624, 194);
+        // UX-рефакторинг: постоянная подпись «ПРОХОД К СЛОНАМ» убрана —
+        // светлый проход между секциями сам указывает на себя.
       }
 
       // Частицы
@@ -6253,7 +6344,30 @@
         ctx.fillStyle = '#9c8e7c';
         ctx.font = '10px monospace';
         ctx.fillText('SPACE: Действ.', 722, 21);
-        ctx.fillText('F: Осмотр', 722, 32);
+        ctx.fillText('F/J: Осмотр/Журн', 722, 32);
+
+        // UX-рефакторинг: единый компактный индикатор активных проблем
+        // (значок тревоги + счётчик). Красный — только критические события.
+        // Клик/тап по нему и клавиша J открывают панель журнала.
+        const hudAlerts = getActiveAlerts();
+        const critCount = hudAlerts.filter(a => a.critical).length;
+        if (hudAlerts.length > 0) {
+          ctx.fillStyle = journalOpen ? '#39464b' : (critCount > 0 ? '#4a1d1d' : '#3a2f14');
+          ctx.fillRect(714, 40, 103, 22);
+          ctx.strokeStyle = critCount > 0 ? '#e74c3c' : '#f39c12';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(714, 40, 103, 22);
+          ctx.fillStyle = critCount > 0 ? '#ff6b6b' : '#f1c40f';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(`⚠ ${hudAlerts.length}`, 722, 55);
+          ctx.fillStyle = '#c5baaa';
+          ctx.font = '9px monospace';
+          ctx.fillText(journalOpen ? 'ЖУРНАЛ [J]▲' : 'ЖУРНАЛ [J]', 752, 54);
+        } else {
+          ctx.fillStyle = '#2ecc71';
+          ctx.font = '9px monospace';
+          ctx.fillText('✓ ПРОБЛЕМ НЕТ', 722, 54);
+        }
 
         // Кнопка планшета смены (Tab / T)
         ctx.fillStyle = gameState === 'SHIFT_TABLET' ? '#39464b' : '#2d251f';
@@ -6324,26 +6438,13 @@
             ctx.fillText('📌 ВСЕ ЗАДАЧИ ТЕКУЩЕГО ЧАСА ВЫПОЛНЕНЫ! Свободный обход вольера', 18, 55);
           }
 
-          // Правая часть: критические предупреждения или текущая фаза
+          // Правая часть: фаза смены. Длинные предупреждения заменены
+          // единым индикатором тревог слева от этой полосы (UX-рефакторинг).
           ctx.textAlign = 'right';
-          if (waterTrough.water <= 15) {
-            ctx.fillStyle = '#e74c3c';
-            ctx.font = 'bold 11px monospace';
-            ctx.fillText('⚠️ КРИТИЧЕСКИЙ ДЕФИЦИТ ВОДЫ (< 15%)! Откройте кран', 980, 55);
-          } else if (player.wheelbarrowKg >= 60) {
-            ctx.fillStyle = '#e67e22';
-            ctx.font = 'bold 11px monospace';
-            ctx.fillText('⚠️ ТАЧКА ПОЛНА (60 кг)! Разгрузите в контейнер', 980, 55);
-          } else if (dungPiles.length >= 4) {
-            ctx.fillStyle = '#f39c12';
-            ctx.font = 'bold 11px monospace';
-            ctx.fillText(`⚠️ В ВОЛЬЕРЕ ${dungPiles.length} КУЧ НАВОЗА! Слоны замедлены`, 980, 55);
-          } else {
-            const curPh = getCurrentPhase();
-            ctx.fillStyle = '#c5baaa';
-            ctx.font = '11px monospace';
-            ctx.fillText(`${curPh.title}`, 980, 55);
-          }
+          const curPh = getCurrentPhase();
+          ctx.fillStyle = '#c5baaa';
+          ctx.font = '11px monospace';
+          ctx.fillText(`${curPh.title}`, 980, 55);
           ctx.textAlign = 'left';
         }
 
@@ -6360,8 +6461,69 @@
         ctx.font = '10px sans-serif';
         ctx.fillStyle = '#e0d6c3';
         logs.slice(0, 3).forEach((log, i) => {
-          ctx.fillText(`[${log.time}] ${log.text}`, 195, CANVAS_HEIGHT - 50 + i * 17);
+          const rep = (log.count && log.count > 1) ? ` ×${log.count}` : '';
+          ctx.fillText(`[${log.time}] ${log.text}${rep}`, 195, CANVAS_HEIGHT - 50 + i * 17);
         });
+
+        // UX-рефакторинг: раскрытая панель журнала событий (клавиша J или
+        // тап по индикатору тревог / нижнему журналу).
+        if (journalOpen) renderJournalPanel();
+      }
+
+      // UX-рефакторинг: компактная панель журнала дежурного — полная история
+      // с счётчиками повторов «×N» и список активных тревог из единой системы
+      // getActiveAlerts() (вторая система событий не создаётся).
+      function renderJournalPanel() {
+        const panelW = 420;
+        const panelH = 330;
+        const px = CANVAS_WIDTH - panelW - 12;
+        const py = 68;
+        ctx.fillStyle = 'rgba(18, 14, 12, 0.93)';
+        ctx.fillRect(px, py, panelW, panelH);
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px, py, panelW, panelH);
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 13px "Segoe UI", sans-serif';
+        ctx.fillText('📋 ЖУРНАЛ ДЕЖУРНОГО', px + 14, py + 24);
+        ctx.fillStyle = '#9c8e7c';
+        ctx.font = '10px monospace';
+        ctx.fillText('[J] — закрыть', px + panelW - 100, py + 24);
+
+        // Активные тревоги (из единой системы getActiveAlerts)
+        const alerts = getActiveAlerts();
+        let yy = py + 46;
+        ctx.fillStyle = alerts.length ? '#e67e22' : '#2ecc71';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(alerts.length ? `⚠ АКТИВНЫЕ ПРОБЛЕМЫ (${alerts.length}):` : '✓ АКТИВНЫХ ПРОБЛЕМ НЕТ', px + 14, yy);
+        yy += 18;
+        ctx.font = '10px "Segoe UI", sans-serif';
+        for (const a of alerts.slice(0, 5)) {
+          ctx.fillStyle = a.critical ? '#ff6b6b' : a.color;
+          ctx.fillText(`${a.icon} ${a.text}`, px + 18, yy);
+          yy += 15;
+        }
+        if (alerts.length > 5) {
+          ctx.fillStyle = '#9c8e7c';
+          ctx.fillText(`… и ещё ${alerts.length - 5}`, px + 18, yy);
+          yy += 15;
+        }
+
+        // История событий с временем и счётчиком повторов
+        yy += 8;
+        ctx.fillStyle = '#c5baaa';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('ИСТОРИЯ СМЕНЫ:', px + 14, yy);
+        yy += 18;
+        ctx.font = '10px "Segoe UI", sans-serif';
+        for (const log of logs) {
+          const rep = (log.count && log.count > 1) ? ` ×${log.count}` : '';
+          ctx.fillStyle = log.text.startsWith('⚠') || log.text.startsWith('💧') || log.text.startsWith('⚡') ? '#f1c40f' : '#e0d6c3';
+          ctx.fillText(`[${log.time}] ${log.text}${rep}`, px + 18, yy);
+          yy += 16;
+          if (yy > py + panelH - 12) break;
+        }
       }
 
       // ==========================================
