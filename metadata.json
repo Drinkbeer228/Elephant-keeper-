@@ -1,0 +1,6 @@
+{
+  "name": "Симулятор дежурного кипера слоновника",
+  "description": "Полноценная 2D ретро-игра в стиле пиксель-арт: уход за слонихами Одри, Марго и Претти, уборка навоза, кормление, сбор анализов и инспекция.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

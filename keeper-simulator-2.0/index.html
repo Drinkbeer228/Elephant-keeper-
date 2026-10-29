@@ -1,0 +1,2744 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Симулятор дежурного кипера слоновника 2.0</title>
+    <meta name="description" content="Полноценная 2D ретро-игра в стиле пиксель-арт: уход за слонихами Одри, Марго и Претти, уборка навоза, кормление, сбор анализов и инспекция." />
+    <meta property="og:title" content="Симулятор дежурного кипера слоновника 2.0" />
+    <meta property="og:description" content="2D ретро-симулятор дежурного кипера слоновника: уход за слонихами, уборка, кормление, анализы и инспекция." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      html, body {
+        width: 100%;
+        height: 100%;
+        background-color: #1a1614;
+        color: #f5eedb;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #game-wrapper {
+        position: relative;
+        width: min(100vw, 147.0588235vh);
+        height: min(100vh, 68vw);
+        flex: 0 0 auto;
+        aspect-ratio: 1000 / 680;
+        background: #000;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 0 2px #3c2a1e;
+        border-radius: 4px;
+        overflow: hidden;
+        touch-action: none;
+      }
+      canvas#gameCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        touch-action: none;
+      }
+      /* Скрытый div root для React Vite совместимости */
+      #root {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <div id="game-wrapper">
+      <canvas id="gameCanvas" width="1000" height="680"></canvas>
+    </div>
+
+    <script>
+      /**
+       * СИМУЛЯТОР ДЕЖУРНОГО КИПЕРА СЛОНОВНИКА
+       * Полностью автономная 2D ретро-игра на чистом Canvas API и Web Audio API
+       */
+
+      // ==========================================
+      // 1. АУДИОСИНТЕЗАТОР (WEB AUDIO API)
+      // ==========================================
+      class SoundFX {
+        constructor() {
+          this.ctx = null;
+          this.muted = false;
+        }
+
+        init() {
+          if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+              this.ctx = new AudioCtx();
+            }
+          }
+          if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+          }
+        }
+
+        toggleMute() {
+          this.muted = !this.muted;
+          return this.muted;
+        }
+
+        // Шаг кипера по соломе/бетону
+        playStep() {
+          if (this.muted || !this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const filter = this.ctx.createBiquadFilter();
+
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.08);
+
+          filter.type = 'lowpass';
+          filter.frequency.value = 350;
+
+          gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.08);
+        }
+
+        // Скрежет лопаты по полу
+        playShovel() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          // Белый шум для шороха
+          const bufferSize = this.ctx.sampleRate * 0.2;
+          const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+          }
+          const noise = this.ctx.createBufferSource();
+          noise.buffer = buffer;
+
+          const filter = this.ctx.createBiquadFilter();
+          filter.type = 'bandpass';
+          filter.frequency.setValueAtTime(1400, now);
+          filter.Q.value = 3.0;
+
+          const gain = this.ctx.createGain();
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+          noise.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          noise.start(now);
+        }
+
+        // Разгрузка тачки / падение тюка сена
+        playThud() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(140, now);
+          osc.frequency.exponentialRampToValueAtTime(30, now + 0.25);
+
+          gain.gain.setValueAtTime(0.25, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now);
+          osc.stop(now + 0.25);
+        }
+
+        // Бульканье / всплеск ведра с анализом
+        playSplash() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(450, now);
+          osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+          osc.frequency.exponentialRampToValueAtTime(300, now + 0.25);
+
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now);
+          osc.stop(now + 0.25);
+        }
+
+        // Трубный звук слона (FM-модуляция для богатого живого рева)
+        playElephantTrumpet() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+
+          const carrier = this.ctx.createOscillator();
+          const modulator = this.ctx.createOscillator();
+          const modGain = this.ctx.createGain();
+          const mainGain = this.ctx.createGain();
+          const filter = this.ctx.createBiquadFilter();
+
+          carrier.type = 'sawtooth';
+          modulator.type = 'sine';
+
+          carrier.frequency.setValueAtTime(160, now);
+          carrier.frequency.linearRampToValueAtTime(380, now + 0.3);
+          carrier.frequency.linearRampToValueAtTime(440, now + 0.6);
+          carrier.frequency.exponentialRampToValueAtTime(180, now + 1.1);
+
+          modulator.frequency.setValueAtTime(35, now);
+          modGain.gain.setValueAtTime(180, now);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(900, now);
+          filter.frequency.linearRampToValueAtTime(2200, now + 0.4);
+          filter.frequency.exponentialRampToValueAtTime(400, now + 1.1);
+
+          mainGain.gain.setValueAtTime(0.001, now);
+          mainGain.gain.linearRampToValueAtTime(0.3, now + 0.15);
+          mainGain.gain.setValueAtTime(0.3, now + 0.7);
+          mainGain.gain.exponentialRampToValueAtTime(0.001, now + 1.1);
+
+          modulator.connect(carrier.frequency);
+          carrier.connect(filter);
+          filter.connect(mainGain);
+          mainGain.connect(this.ctx.destination);
+
+          modulator.start(now);
+          carrier.start(now);
+          modulator.stop(now + 1.15);
+          carrier.stop(now + 1.15);
+        }
+
+        // Победный аккорд / успешное действие
+        playSuccess() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          const notes = [440, 554, 659, 880];
+          notes.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.12, now + idx * 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.08);
+            osc.stop(now + idx * 0.08 + 0.35);
+          });
+        }
+
+        // Сигнал тревоги/внимания (нужен анализ мочи)
+        playAlert() {
+          if (this.muted || !this.ctx) return;
+          const now = this.ctx.currentTime;
+          [660, 880].forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.15, now + idx * 0.15);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now + idx * 0.15);
+            osc.stop(now + idx * 0.15 + 0.25);
+          });
+        }
+      }
+
+      const sfx = new SoundFX();
+
+      // ==========================================
+      // 2. ИГРОВЫЕ ДАННЫЕ И СУЩНОСТИ
+      // ==========================================
+      const CANVAS_WIDTH = 1000;
+      const CANVAS_HEIGHT = 680;
+
+      // Зоны и стены (AABB коллизии)
+      const obstacles = [
+        // Периметр здания слоновника
+        { x: 0, y: 0, w: CANVAS_WIDTH, h: 48 }, // Верхняя стена
+        { x: 0, y: CANVAS_HEIGHT - 20, w: CANVAS_WIDTH, h: 20 }, // Нижняя стена
+        { x: 0, y: 0, w: 20, h: CANVAS_HEIGHT }, // Левая стена
+        { x: CANVAS_WIDTH - 20, y: 0, w: 20, h: CANVAS_HEIGHT }, // Правая стена
+
+        // Главное ограждение между зоной кипера и слоновником (y ~ 190)
+        // Ворота находятся на x: 620..710
+        { x: 20, y: 185, w: 590, h: 18 },
+        { x: 720, y: 185, w: 260, h: 18 },
+
+        // Мебель зоны кипера
+        { x: 300, y: 65, w: 100, h: 65 }, // Стол дежурного кипера
+        { x: 825, y: 55, w: 130, h: 65 }, // Контейнер навоза (компактный для удобного подъезда)
+
+        // Склад фуража
+        { x: 35, y: 55, w: 90, h: 70 },  // Склад сена
+        { x: 145, y: 55, w: 90, h: 70 }, // Склад каши и овощей
+
+        // Общий открытый вольер без внутренних перегородок (удалены x: 330 и x: 670)
+        { x: 470, y: 590, w: 70, h: 60 }, // Автопоилка внизу
+      ];
+
+      // Кормушки 3 слоних
+      const feeders = [
+        { id: 'audrey', name: 'Кормушка Одри', x: 130, y: 215, w: 80, h: 36, food: 40, initialFood: 40, maxFood: 100, lastFoodType: null },
+        { id: 'margo', name: 'Кормушка Марго', x: 470, y: 215, w: 80, h: 36, food: 30, initialFood: 30, maxFood: 100, lastFoodType: null },
+        { id: 'pretty', name: 'Кормушка Претти', x: 800, y: 215, w: 80, h: 36, food: 50, initialFood: 50, maxFood: 100, lastFoodType: null }
+      ];
+
+      // Поилка: жажда растет в течение смены, слоны пьют только чистую воду.
+      const waterTrough = {
+        level: 100,
+        maxLevel: 100,
+        isClean: true,
+        valveOpen: false,
+        isChecked: false,
+        cleanProgress: 0,
+        refillProgress: 0,
+        dirtyEvents: 0
+      };
+
+      // Три слонихи
+      const elephants = [
+        {
+          id: 'audrey',
+          name: 'Одри',
+          age: 42,
+          role: 'Матриарх, спокойная',
+          x: 180,
+          y: 420,
+          targetX: 180,
+          targetY: 420,
+          vx: 0,
+          vy: 0,
+          speed: 27, // пиксели в секунду
+          color: '#636b73',
+          darkColor: '#474e55',
+          earColor: '#d6a29f',
+          radius: 46,
+          satiety: 65, // %
+          mood: 'Спокойная',
+          earAngle: 0,
+          trunkAngle: 0,
+          walkCycle: 0,
+          peeTimer: 45, // Секунды до желания сдать пробу
+          isWantingPee: false,
+          peeUrgencyTimer: 0,
+          pooTimer: 35,
+          pedicureTimer: 40,
+          isWantingPedicure: false,
+          pedicureUrgencyTimer: 0,
+          tailWiggle: 0,
+          health: 'Отличное',
+          earsStatus: 'Чистые, ухоженные',
+          trunkStatus: 'Влажный, подвижный',
+          feetStatus: 'Подошвы в норме, трещин нет',
+          lastInspected: 'Не проводился',
+          personality: 'calm',
+          preferredFood: 'hay',
+          thirst: 10,
+          behaviorTimer: 2,
+          inspectionsCount: 0,
+          morningInspected: false,
+          eveningInspected: false,
+          lastFedAt: 'До начала смены'
+        },
+        {
+          id: 'margo',
+          name: 'Марго',
+          age: 28,
+          role: 'Любопытная, общительная',
+          x: 500,
+          y: 380,
+          targetX: 500,
+          targetY: 380,
+          vx: 0,
+          vy: 0,
+          speed: 33, // пиксели в секунду
+          color: '#727982',
+          darkColor: '#535a63',
+          earColor: '#dfaba8',
+          radius: 42,
+          satiety: 45,
+          mood: 'Игривая',
+          earAngle: 0,
+          trunkAngle: 0,
+          walkCycle: 0,
+          peeTimer: 30,
+          isWantingPee: false,
+          peeUrgencyTimer: 0,
+          pooTimer: 25,
+          pedicureTimer: 65,
+          isWantingPedicure: false,
+          pedicureUrgencyTimer: 0,
+          tailWiggle: 0,
+          health: 'Хорошее',
+          earsStatus: 'Без повреждений',
+          trunkStatus: 'Дыхание ровное, чистый',
+          feetStatus: 'Ногти подстрижены',
+          lastInspected: 'Не проводился',
+          personality: 'curious',
+          preferredFood: 'mash',
+          thirst: 14,
+          behaviorTimer: 1.4,
+          inspectionsCount: 0,
+          morningInspected: false,
+          eveningInspected: false,
+          lastFedAt: 'До начала смены'
+        },
+        {
+          id: 'pretty',
+          name: 'Претти',
+          age: 14,
+          role: 'Молодая, активная непоседа',
+          x: 780,
+          y: 450,
+          targetX: 780,
+          targetY: 450,
+          vx: 0,
+          vy: 0,
+          speed: 42, // пиксели в секунду
+          color: '#828994',
+          darkColor: '#606771',
+          earColor: '#e8b8b6',
+          radius: 38,
+          satiety: 55,
+          mood: 'Бодрая',
+          earAngle: 0,
+          trunkAngle: 0,
+          walkCycle: 0,
+          peeTimer: 60,
+          isWantingPee: false,
+          peeUrgencyTimer: 0,
+          pooTimer: 45,
+          pedicureTimer: 85,
+          isWantingPedicure: false,
+          pedicureUrgencyTimer: 0,
+          tailWiggle: 0,
+          health: 'Прекрасное',
+          earsStatus: 'Очень подвижные',
+          trunkStatus: 'Тянется к угощениям',
+          feetStatus: 'Кожа упругая, здоровая',
+          lastInspected: 'Не проводился',
+          personality: 'playful',
+          preferredFood: 'hay',
+          thirst: 8,
+          behaviorTimer: 1,
+          inspectionsCount: 0,
+          morningInspected: false,
+          eveningInspected: false,
+          lastFedAt: 'До начала смены'
+        }
+      ];
+
+      // Игрок (Дежурный кипер)
+      const player = {
+        x: 650,
+        y: 130,
+        vx: 0,
+        vy: 0,
+        speed: 162, // пиксели в секунду
+        radius: 16,
+        dir: 'down', // up, down, left, right
+        isMoving: false,
+        walkAnim: 0,
+        carrying: 'none', // 'none', 'hay', 'mash', 'bucket'
+        wheelbarrowKg: 0,
+        wheelbarrowMaxKg: 60,
+        isShoveling: false,
+        shovelProgress: 0, // 0..1
+        isDoingPedicure: false,
+        pedicureProgress: 0,
+        targetPile: null
+      };
+
+      // Кучи навоза
+      let dungPiles = [
+        { id: 1, x: 260, y: 360, kg: 15, rot: 0.3 },
+        { id: 2, x: 560, y: 480, kg: 18, rot: 1.1 }
+      ];
+      let nextPileId = 3;
+
+      // Летящие частицы (сено, искры, брызги)
+      let particles = [];
+
+      // Журнал событий
+      const logs = [
+        { time: '08:00', text: 'Смена началась. Слонихи приветствуют дежурного кипера!' }
+      ];
+      function addLog(text) {
+        const timeStr = `${String(gameTime.hour).padStart(2, '0')}:${String(Math.floor(gameTime.minute)).padStart(2, '0')}`;
+        logs.unshift({ time: timeStr, text });
+        if (logs.length > 50) logs.pop();
+      }
+
+      // Игровое время и статистика
+      const gameTime = {
+        hour: 8,
+        minute: 0,
+        secondAccum: 0,
+        isShiftEnded: false
+      };
+
+      const stats = {
+        manureCleanedKg: 0,
+        foodDelivered: 0,
+        urineSamplesCollected: 0,
+        missedUrineSamples: 0,
+        pedicuresDone: 0,
+        missedPedicures: 0,
+        inspectionsDone: 0,
+        troughRefilled: false,
+        waterChecks: 0,
+        cleanlinessChecks: 0,
+        handoverCompleted: false,
+        totalScore: 0
+      };
+
+      const shiftTaskDefinitions = [
+        { id: 'morning-audrey', phase: 0, label: 'Осмотреть Одри', deadline: 630, category: 'wellbeing' },
+        { id: 'morning-margo', phase: 0, label: 'Осмотреть Марго', deadline: 630, category: 'wellbeing' },
+        { id: 'morning-pretty', phase: 0, label: 'Осмотреть Прэтти', deadline: 630, category: 'wellbeing' },
+        { id: 'check-water', phase: 0, label: 'Проверить уровень и чистоту воды', deadline: 630, category: 'hygiene' },
+        { id: 'check-cleanliness', phase: 0, label: 'Проверить чистоту и начать уборку', deadline: 630, category: 'hygiene' },
+        { id: 'fill-audrey', phase: 1, label: 'Пополнить кормушку Одри', deadline: 870, category: 'care' },
+        { id: 'fill-margo', phase: 1, label: 'Пополнить кормушку Марго', deadline: 870, category: 'care' },
+        { id: 'fill-pretty', phase: 1, label: 'Пополнить кормушку Прэтти', deadline: 870, category: 'care' },
+        { id: 'urine-sample', phase: 1, label: 'Отобрать плановую пробу мочи', deadline: 870, category: 'care' },
+        { id: 'manure-cleanup', phase: 1, label: 'Убрать навоз и вывезти отходы', deadline: 870, category: 'hygiene' },
+        { id: 'trough-service', phase: 2, label: 'Обслужить поилку и вентиль', deadline: 1050, category: 'hygiene' },
+        { id: 'pedicure', phase: 2, label: 'Провести расчистку стоп', deadline: 1050, category: 'care' },
+        { id: 'evening-audrey', phase: 3, label: 'Вечерний осмотр Одри', deadline: 1200, category: 'wellbeing' },
+        { id: 'evening-margo', phase: 3, label: 'Вечерний осмотр Марго', deadline: 1200, category: 'wellbeing' },
+        { id: 'evening-pretty', phase: 3, label: 'Вечерний осмотр Прэтти', deadline: 1200, category: 'wellbeing' },
+        { id: 'unload-wheelbarrow', phase: 3, label: 'Полностью разгрузить тачку', deadline: 1200, category: 'hygiene' },
+        { id: 'handover', phase: 3, label: 'Подготовить журнал и сдать смену', deadline: 1200, category: 'care' }
+      ];
+      let shiftTasks = {};
+
+      function minuteOfDay() { return gameTime.hour * 60 + gameTime.minute; }
+      function currentShiftPhase() {
+        const minute = minuteOfDay();
+        if (minute < 630) return 0;
+        if (minute < 870) return 1;
+        if (minute < 1050) return 2;
+        return 3;
+      }
+      function formatGameTime() {
+        return `${String(gameTime.hour).padStart(2, '0')}:${String(Math.floor(gameTime.minute)).padStart(2, '0')}`;
+      }
+      function resetShiftPlan() {
+        shiftTasks = {};
+        shiftTaskDefinitions.forEach(task => { shiftTasks[task.id] = { completed: false, completedAt: null }; });
+      }
+      function markTask(id, detail = '') {
+        const task = shiftTasks[id];
+        if (!task || task.completed) return false;
+        task.completed = true;
+        task.completedAt = minuteOfDay();
+        task.detail = detail;
+        return true;
+      }
+      function taskComplete(id) { return !!shiftTasks[id]?.completed; }
+      function checkShiftTasks() {
+        if (stats.manureCleanedKg >= 20) markTask('manure-cleanup', 'Убрано не менее 20 кг навоза');
+        if (stats.pedicuresDone > 0) markTask('pedicure');
+        if (stats.urineSamplesCollected > 0) markTask('urine-sample');
+        if (waterTrough.isClean && waterTrough.level >= 80 && stats.troughRefilled) markTask('trough-service');
+        if (minuteOfDay() >= 1050 && player.wheelbarrowKg <= 0) markTask('unload-wheelbarrow', 'Тачка пуста к вечерней сдаче');
+      }
+      resetShiftPlan();
+
+      // Состояния игры. Модальные карточки и планшет останавливают симуляцию.
+      // 'TITLE', 'PLAYING', 'INSPECTION_MODAL', 'SHIFT_TABLET', 'QTE_URINE', 'PAUSED', 'SHIFT_REPORT'
+      let gameState = 'TITLE';
+      let inspectingElephant = null;
+
+      // Данные мини-игры реакции (Ловля анализа)
+      const qteState = {
+        active: false,
+        elephant: null,
+        sliderPos: 0, // 0..100
+        sliderDir: 1,
+        speed: 95, // Скорость бегунка
+        targetMin: 38,
+        targetMax: 62,
+        result: null // 'perfect', 'good', 'miss'
+      };
+
+      // Клавиатурный ввод
+      const keys = {};
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Tab') e.preventDefault();
+        keys[e.code] = true;
+        if (e.repeat) return;
+
+        sfx.init();
+        if (e.code === 'KeyM') {
+          sfx.toggleMute();
+          addLog(sfx.muted ? 'Звук выключен' : 'Звук включен');
+        }
+
+        if (gameState === 'INSPECTION_MODAL') {
+          if (['Escape', 'KeyF', 'Enter', 'Space'].includes(e.code)) {
+            gameState = 'PLAYING';
+            inspectingElephant = null;
+          }
+          return;
+        }
+        if (gameState === 'SHIFT_TABLET') {
+          if (['Escape', 'Tab', 'KeyT', 'Enter'].includes(e.code)) gameState = 'PLAYING';
+          return;
+        }
+        if (e.code === 'KeyP' || e.code === 'Escape') {
+          if (gameState === 'PLAYING') gameState = 'PAUSED';
+          else if (gameState === 'PAUSED') gameState = 'PLAYING';
+        }
+
+        if (gameState === 'PLAYING' && (e.code === 'Tab' || e.code === 'KeyT')) {
+          gameState = 'SHIFT_TABLET';
+        }
+        if (gameState === 'TITLE' && (e.code === 'Space' || e.code === 'Enter')) {
+          gameState = 'PLAYING';
+          sfx.playSuccess();
+          sfx.playElephantTrumpet();
+          addLog('Кипер заступил на пост. Смена 08:00–20:00 началась.');
+        }
+        if (gameState === 'SHIFT_REPORT' && (e.code === 'Space' || e.code === 'Enter')) restartShift();
+
+        if (e.code === 'KeyF' && gameState === 'PLAYING') tryInspectElephant();
+        if ((e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyE') && gameState === 'QTE_URINE') finishUrineQTE();
+      });
+
+      window.addEventListener('keyup', (e) => {
+        keys[e.code] = false;
+      });
+
+      // ==========================================
+      // НАЭКРАННОЕ СЕНСОРНОЕ УПРАВЛЕНИЕ (TOUCH & MOUSE)
+      // ==========================================
+      const canvas = document.getElementById('gameCanvas');
+      const ctx = canvas.getContext('2d');
+
+      const touchControls = {
+        dpad: { cx: 95, cy: 590, r: 58, active: false },
+        actionBtn: { cx: 925, cy: 590, r: 42, active: false },
+        inspectBtn: { cx: 815, cy: 590, r: 32, active: false },
+        knob: { x: 0, y: 0 },
+        isMouseDown: false
+      };
+
+      const virtualKeys = {
+        up: false,
+        down: false,
+        left: false,
+        right: false,
+        action: false
+      };
+
+      function getCanvasCoords(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = CANVAS_WIDTH / rect.width;
+        const scaleY = CANVAS_HEIGHT / rect.height;
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      }
+
+      function processTouchPoints(pointList, isStart) {
+        sfx.init();
+
+        virtualKeys.up = false;
+        virtualKeys.down = false;
+        virtualKeys.left = false;
+        virtualKeys.right = false;
+        virtualKeys.action = false;
+        touchControls.dpad.active = false;
+        touchControls.actionBtn.active = false;
+        touchControls.inspectBtn.active = false;
+        touchControls.knob.x = 0;
+        touchControls.knob.y = 0;
+
+        for (let i = 0; i < pointList.length; i++) {
+          const pt = pointList[i];
+
+          // 1. Проверка интерактивных экранов (Start, Pause, Reset, QTE, Modals, Sound)
+          if (isStart) {
+            // Кнопки планшета, паузы и звука в HUD
+            if (pt.y >= 7 && pt.y <= 40 && pt.x >= 790 && pt.x <= 850 && gameState === 'PLAYING') {
+              gameState = 'SHIFT_TABLET';
+              continue;
+            }
+            if (pt.y >= 7 && pt.y <= 40 && pt.x >= 855 && pt.x <= 915) {
+              gameState = gameState === 'PLAYING' ? 'PAUSED' : (gameState === 'PAUSED' ? 'PLAYING' : gameState);
+              continue;
+            }
+            if (pt.y >= 7 && pt.y <= 40 && pt.x >= 920 && pt.x <= 980) {
+              sfx.toggleMute();
+              addLog(sfx.muted ? 'Звук выключен' : 'Звук включен');
+              continue;
+            }
+
+            if (gameState === 'TITLE') {
+              if (pt.x >= 380 && pt.x <= 620 && pt.y >= 480 && pt.y <= 540) {
+                gameState = 'PLAYING';
+                sfx.playSuccess();
+                sfx.playElephantTrumpet();
+                addLog('Кипер заступил на пост. Удачи на смене!');
+              }
+              continue;
+            }
+
+            if (gameState === 'SHIFT_REPORT') {
+              if (pt.x >= 380 && pt.x <= 620 && pt.y >= 565 && pt.y <= 625) {
+                restartShift();
+              }
+              continue;
+            }
+
+            if (gameState === 'INSPECTION_MODAL') {
+              if (pt.x >= 330 && pt.x <= 670 && pt.y >= 535 && pt.y <= 600) {
+                gameState = 'PLAYING';
+                inspectingElephant = null;
+                sfx.playSuccess();
+              }
+              continue;
+            }
+
+            if (gameState === 'SHIFT_TABLET') {
+              if (pt.x >= 350 && pt.x <= 650 && pt.y >= 580 && pt.y <= 625) gameState = 'PLAYING';
+              continue;
+            }
+
+            if (gameState === 'QTE_URINE') {
+              finishUrineQTE();
+              continue;
+            }
+
+            if (gameState === 'PAUSED') {
+              gameState = 'PLAYING';
+              continue;
+            }
+          }
+
+          if (gameState !== 'PLAYING') continue;
+
+          // 2. Джойстик движения (D-pad) в левом нижнем углу
+          const distDpad = Math.hypot(pt.x - touchControls.dpad.cx, pt.y - touchControls.dpad.cy);
+          if (distDpad <= touchControls.dpad.r + 28) {
+            touchControls.dpad.active = true;
+            const angle = Math.atan2(pt.y - touchControls.dpad.cy, pt.x - touchControls.dpad.cx);
+            const distClamped = Math.min(distDpad, 30);
+            touchControls.knob.x = Math.cos(angle) * distClamped;
+            touchControls.knob.y = Math.sin(angle) * distClamped;
+
+            const dx = pt.x - touchControls.dpad.cx;
+            const dy = pt.y - touchControls.dpad.cy;
+            const deadzone = 10;
+
+            if (dy < -deadzone) virtualKeys.up = true;
+            if (dy > deadzone) virtualKeys.down = true;
+            if (dx < -deadzone) virtualKeys.left = true;
+            if (dx > deadzone) virtualKeys.right = true;
+            continue;
+          }
+
+          // 3. Кнопка действия (SPACE / 🔨) в правом нижнем углу
+          const distAction = Math.hypot(pt.x - touchControls.actionBtn.cx, pt.y - touchControls.actionBtn.cy);
+          if (distAction <= touchControls.actionBtn.r + 16) {
+            touchControls.actionBtn.active = true;
+            virtualKeys.action = true;
+            continue;
+          }
+
+          // 4. Кнопка осмотра слонихи (F / 👁️)
+          const distInspect = Math.hypot(pt.x - touchControls.inspectBtn.cx, pt.y - touchControls.inspectBtn.cy);
+          if (distInspect <= touchControls.inspectBtn.r + 16) {
+            touchControls.inspectBtn.active = true;
+            if (isStart) {
+              tryInspectElephant();
+            }
+            continue;
+          }
+        }
+      }
+
+      // События Touch для смартфонов и планшетов (Multi-touch)
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const points = [];
+        for (let i = 0; i < e.touches.length; i++) {
+          points.push(getCanvasCoords(e.touches[i].clientX, e.touches[i].clientY));
+        }
+        processTouchPoints(points, true);
+      }, { passive: false });
+
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const points = [];
+        for (let i = 0; i < e.touches.length; i++) {
+          points.push(getCanvasCoords(e.touches[i].clientX, e.touches[i].clientY));
+        }
+        processTouchPoints(points, false);
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        const points = [];
+        for (let i = 0; i < e.touches.length; i++) {
+          points.push(getCanvasCoords(e.touches[i].clientX, e.touches[i].clientY));
+        }
+        processTouchPoints(points, false);
+      }, { passive: false });
+
+      canvas.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        processTouchPoints([], false);
+      }, { passive: false });
+
+      // События мыши для тестирования и кликов на ПК
+      canvas.addEventListener('mousedown', (e) => {
+        touchControls.isMouseDown = true;
+        const pt = getCanvasCoords(e.clientX, e.clientY);
+        processTouchPoints([pt], true);
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!touchControls.isMouseDown) return;
+        const pt = getCanvasCoords(e.clientX, e.clientY);
+        processTouchPoints([pt], false);
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (touchControls.isMouseDown) {
+          touchControls.isMouseDown = false;
+          processTouchPoints([], false);
+        }
+      });
+
+      function restartShift() {
+        gameTime.hour = 8;
+        gameTime.minute = 0;
+        gameTime.secondAccum = 0;
+        gameTime.isShiftEnded = false;
+
+        Object.assign(stats, {
+          manureCleanedKg: 0, foodDelivered: 0, urineSamplesCollected: 0,
+          missedUrineSamples: 0, pedicuresDone: 0, missedPedicures: 0,
+          inspectionsDone: 0, troughRefilled: false, waterChecks: 0,
+          cleanlinessChecks: 0, handoverCompleted: false, totalScore: 0
+        });
+        Object.assign(waterTrough, {
+          level: 100, maxLevel: 100, isClean: true, valveOpen: false,
+          isChecked: false, cleanProgress: 0, refillProgress: 0, dirtyEvents: 0
+        });
+        feeders.forEach(feeder => { feeder.food = feeder.initialFood; feeder.lastFoodType = null; });
+        resetShiftPlan();
+
+        player.x = 650;
+        player.y = 130;
+        player.vx = 0;
+        player.vy = 0;
+        player.carrying = 'none';
+        player.wheelbarrowKg = 0;
+        player.isShoveling = false;
+        player.shovelProgress = 0;
+        player.isDoingPedicure = false;
+        player.pedicureProgress = 0;
+        player.targetPile = null;
+        player.isMoving = false;
+        player.walkAnim = 0;
+        player.dir = 'down';
+        stepSoundTimer = 0;
+
+        elephants.forEach((el, i) => {
+          const base = [65, 45, 55][i];
+          el.x = [180, 500, 780][i];
+          el.y = [420, 380, 450][i];
+          el.targetX = el.x;
+          el.targetY = el.y;
+          el.vx = 0;
+          el.vy = 0;
+          el.satiety = base;
+          el.thirst = [10, 14, 8][i];
+          el.isWantingPee = false;
+          el.peeUrgencyTimer = 0;
+          el.peeTimer = [45, 30, 60][i];
+          el.isWantingPedicure = false;
+          el.pedicureUrgencyTimer = 0;
+          el.pedicureTimer = [40, 65, 42][i];
+          el.pooTimer = [35, 25, 45][i];
+          el.missingBucketHintShown = false;
+          el.earAngle = 0;
+          el.trunkAngle = 0;
+          el.walkCycle = 0;
+          el.behaviorTimer = [3, 1.5, 1][i];
+          el.mood = ['Спокойная', 'Любопытная', 'Бодрая'][i];
+          el.health = ['Обычное состояние', 'Обычное состояние', 'Обычное состояние'][i];
+          el.feetStatus = 'Требуется плановое наблюдение';
+          el.lastInspected = 'Не проводился';
+          el.inspectionsCount = 0;
+          el.morningInspected = false;
+          el.eveningInspected = false;
+          el.lastFedAt = 'До начала смены';
+        });
+
+        dungPiles = [
+          { id: 1, x: 260, y: 360, kg: 15, rot: 0.3 },
+          { id: 2, x: 560, y: 480, kg: 18, rot: 1.1 }
+        ];
+        nextPileId = 3;
+        particles = [];
+        logs.length = 0;
+        inspectingElephant = null;
+        qteState.active = false;
+        qteState.elephant = null;
+        qteState.result = null;
+        waterTrough.valveOpen = false;
+        virtualKeys.up = virtualKeys.down = virtualKeys.left = virtualKeys.right = virtualKeys.action = false;
+        gameState = 'PLAYING';
+        sfx.playSuccess();
+        addLog('Начата новая дневная смена. Планшет кипера: Tab / T / кнопка «ПЛАН».');
+      }
+
+      // ==========================================
+      // 3. ФИЗИКА, КОЛЛИЗИИ И ВЗАИМОДЕЙСТВИЯ
+      // ==========================================
+      function checkCollision(x, y, radius) {
+        // Проверка со статическими препятствиями
+        for (const obs of obstacles) {
+          const closestX = Math.max(obs.x, Math.min(x, obs.x + obs.w));
+          const closestY = Math.max(obs.y, Math.min(y, obs.y + obs.h));
+          const dx = x - closestX;
+          const dy = y - closestY;
+          if (dx * dx + dy * dy < radius * radius) {
+            return true;
+          }
+        }
+        // Проверка со слонами (чтобы кипер не наступал на туловище)
+        for (const el of elephants) {
+          const dx = x - el.x;
+          const dy = y - el.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < radius + el.radius * 0.7) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // Проверка осмотра: карточка паузит мир, очки даются за обходы по расписанию.
+      function tryInspectElephant() {
+        for (const el of elephants) {
+          const dist = Math.hypot(player.x - el.x, player.y - el.y);
+          if (dist >= el.radius + 45) continue;
+
+          const minute = minuteOfDay();
+          const isMorningWindow = minute >= 480 && minute < 630;
+          const isEveningWindow = minute >= 1050 && minute < 1200;
+          const roundKey = isMorningWindow ? 'morning' : (isEveningWindow ? 'evening' : null);
+          const alreadyDone = roundKey === 'morning' ? el.morningInspected : (roundKey === 'evening' ? el.eveningInspected : false);
+
+          inspectingElephant = el;
+          gameState = 'INSPECTION_MODAL';
+          el.lastInspected = formatGameTime();
+          el.inspectionsCount++;
+          stats.inspectionsDone++;
+          if (roundKey && !alreadyDone) {
+            if (roundKey === 'morning') {
+              el.morningInspected = true;
+              markTask(`morning-${el.id}`, `Осмотр в ${formatGameTime()}`);
+            } else {
+              el.eveningInspected = true;
+              markTask(`evening-${el.id}`, `Осмотр в ${formatGameTime()}`);
+            }
+            stats.totalScore += 35;
+            addLog(`Плановый ${roundKey === 'morning' ? 'утренний' : 'вечерний'} осмотр: ${el.name}.`);
+          } else {
+            addLog(`Повторное наблюдение за ${el.name} в ${formatGameTime()}. Дополнительные очки не начисляются.`);
+          }
+          sfx.playSuccess();
+          return;
+        }
+        addLog('Для осмотра нужно подойти ближе к одной из слоних.');
+      }
+
+      // Запуск ловли анализа (QTE)
+      function triggerUrineEvent(elephant) {
+        elephant.isWantingPee = true;
+        elephant.peeUrgencyTimer = 22; // 22 секунды на реакцию
+        sfx.playAlert();
+        addLog(`⚠️ Внимание! ${elephant.name} хочет в туалет! Подбегите с ведром для анализа!`);
+      }
+
+      function startUrineQTE(elephant) {
+        gameState = 'QTE_URINE';
+        qteState.active = true;
+        qteState.elephant = elephant;
+        qteState.sliderPos = 10;
+        qteState.sliderDir = 1;
+        qteState.result = null;
+        sfx.playAlert();
+      }
+
+      function finishUrineQTE() {
+        if (!qteState.active) return;
+        const pos = qteState.sliderPos;
+        const isPerfect = pos >= qteState.targetMin + 5 && pos <= qteState.targetMax - 5;
+        const isGood = pos >= qteState.targetMin && pos <= qteState.targetMax;
+
+        if (isPerfect) {
+          qteState.result = 'perfect';
+          stats.urineSamplesCollected++;
+          stats.totalScore += 100;
+          sfx.playSplash();
+          sfx.playSuccess();
+          addLog(`✨ Идеально! Взята чистая проба мочи (${qteState.elephant.name}). +100 очков!`);
+        } else if (isGood) {
+          qteState.result = 'good';
+          stats.urineSamplesCollected++;
+          stats.totalScore += 50;
+          sfx.playSplash();
+          addLog(`👍 Проба мочи успешно собрана (${qteState.elephant.name}). +50 очков!`);
+        } else {
+          qteState.result = 'miss';
+          stats.missedUrineSamples++;
+          addLog(`💦 Не удалось корректно отобрать пробу у ${qteState.elephant.name}.`);
+        }
+        if (qteState.result === 'perfect' || qteState.result === 'good') markTask('urine-sample', 'Проба успешно собрана');
+        qteState.elephant.isWantingPee = false;
+        if (qteState.result === 'perfect' || qteState.result === 'good') player.carrying = 'none';
+        qteState.elephant.missingBucketHintShown = false;
+        qteState.elephant.peeTimer = 70 + Math.random() * 40;
+
+        setTimeout(() => {
+          gameState = 'PLAYING';
+          qteState.active = false;
+        }, 1100);
+      }
+
+      // ==========================================
+      // 4. ГЛАВНЫЙ ИГРОВОЙ ЦИКЛ ОБНОВЛЕНИЯ
+      // ==========================================
+      let lastTime = performance.now();
+      let stepSoundTimer = 0;
+
+      function update(dt) {
+        if (gameState === 'QTE_URINE') {
+          if (qteState.active && qteState.result === null) {
+            qteState.sliderPos += qteState.sliderDir * qteState.speed * dt;
+            if (qteState.sliderPos >= 96) { qteState.sliderPos = 96; qteState.sliderDir = -1; }
+            else if (qteState.sliderPos <= 4) { qteState.sliderPos = 4; qteState.sliderDir = 1; }
+          }
+          return;
+        }
+        if (gameState !== 'PLAYING') return;
+
+        // 1. Обновление игрового времени (Смена 08:00–20:00: игровая минута длится 0,8 секунды реального времени)
+        gameTime.secondAccum += dt;
+        if (gameTime.secondAccum >= 0.8) {
+          gameTime.secondAccum -= 0.8;
+          gameTime.minute += 1;
+          if (gameTime.minute >= 60) {
+            gameTime.minute = 0;
+            gameTime.hour += 1;
+
+            // Ежечасный слоновий трубный рев
+            if (gameTime.hour < 20) {
+              sfx.playElephantTrumpet();
+              addLog(`Часы слоновника: ${String(gameTime.hour).padStart(2, '0')}:00. Проверьте кормушки и чистоту.`);
+            }
+          }
+
+          // Постепенное падение сытости слонов
+          elephants.forEach(el => {
+            el.satiety = Math.max(10, el.satiety - 0.25);
+          });
+
+          // Завершение смены в 20:00
+          if (gameTime.hour >= 20 && !gameTime.isShiftEnded) {
+            gameTime.isShiftEnded = true;
+            gameState = 'SHIFT_REPORT';
+            sfx.playSuccess();
+            sfx.playElephantTrumpet();
+            return;
+          }
+        }
+
+        // 2. Управление движением кипера (Клавиатура WASD/Стрелки + Сенсорный стик)
+        let moveX = 0;
+        let moveY = 0;
+        if (keys['KeyW'] || keys['ArrowUp'] || virtualKeys.up) moveY -= 1;
+        if (keys['KeyS'] || keys['ArrowDown'] || virtualKeys.down) moveY += 1;
+        if (keys['KeyA'] || keys['ArrowLeft'] || virtualKeys.left) moveX -= 1;
+        if (keys['KeyD'] || keys['ArrowRight'] || virtualKeys.right) moveX += 1;
+
+        if (moveX !== 0 && moveY !== 0) {
+          // Нормализация вектора при диагонали
+          moveX *= 0.7071;
+          moveY *= 0.7071;
+        }
+
+        player.isMoving = moveX !== 0 || moveY !== 0;
+
+        if (player.isMoving) {
+          if (Math.abs(moveX) > Math.abs(moveY)) {
+            player.dir = moveX > 0 ? 'right' : 'left';
+          } else {
+            player.dir = moveY > 0 ? 'down' : 'up';
+          }
+
+          player.walkAnim += dt * 8;
+          stepSoundTimer += dt;
+          if (stepSoundTimer > 0.3) {
+            sfx.playStep();
+            stepSoundTimer = 0;
+          }
+
+          // Скольжение по осям X и Y независимо
+          const newX = player.x + moveX * player.speed * dt;
+          if (!checkCollision(newX, player.y, player.radius)) {
+            player.x = newX;
+          }
+
+          const newY = player.y + moveY * player.speed * dt;
+          if (!checkCollision(player.x, newY, player.radius)) {
+            player.y = newY;
+          }
+        } else {
+          player.walkAnim = 0;
+        }
+
+        // 3. Взаимодействия игрока по клавишам Space / E / Сенсорной кнопке действия
+        const actionPressed = keys['Space'] || keys['KeyE'] || virtualKeys.action;
+
+        // А) Уборка навоза лопатой в тачку
+        let nearPile = null;
+        for (const pile of dungPiles) {
+          const dist = Math.hypot(player.x - pile.x, player.y - pile.y);
+          if (dist < 42) {
+            nearPile = pile;
+            break;
+          }
+        }
+
+        if (nearPile && actionPressed && player.wheelbarrowKg < player.wheelbarrowMaxKg) {
+          player.isShoveling = true;
+          player.shovelProgress += dt * 1.5;
+          if (Math.random() < dt * 12) sfx.playShovel();
+
+          // Создаем частички разлетающейся соломы/грязи
+          if (Math.random() < dt * 24) {
+            particles.push({
+              x: nearPile.x + (Math.random() - 0.5) * 16,
+              y: nearPile.y + (Math.random() - 0.5) * 16,
+              vx: (Math.random() - 0.5) * 40,
+              vy: -20 - Math.random() * 30,
+              life: 0.4,
+              maxLife: 0.4,
+              color: '#8b5a2b',
+              size: 3
+            });
+          }
+
+          if (player.shovelProgress >= 1) {
+            const freeCapacity = Math.max(0, player.wheelbarrowMaxKg - player.wheelbarrowKg);
+            const collectedKg = Math.min(freeCapacity, nearPile.kg);
+            const remainingKg = Math.max(0, nearPile.kg - collectedKg);
+            player.wheelbarrowKg += collectedKg;
+            stats.manureCleanedKg += collectedKg;
+            stats.totalScore += collectedKg * 2;
+            if (remainingKg <= 0.01) dungPiles = dungPiles.filter(p => p.id !== nearPile.id);
+            else nearPile.kg = remainingKg;
+            markTask('check-cleanliness', 'Чистота проверена во время уборки');
+            stats.cleanlinessChecks = Math.max(stats.cleanlinessChecks, 1);
+            if (stats.manureCleanedKg >= 20) markTask('manure-cleanup', 'Убрано не менее 20 кг навоза');
+            player.isShoveling = false;
+            player.shovelProgress = 0;
+            sfx.playThud();
+            addLog(remainingKg > 0.01
+              ? `В тачку загружено ${collectedKg} кг. В куче осталось ${remainingKg} кг; тачка ${player.wheelbarrowKg}/${player.wheelbarrowMaxKg} кг.`
+              : `Убрано ${collectedKg} кг навоза (${player.wheelbarrowKg}/${player.wheelbarrowMaxKg} кг в тачке).`);
+          }
+        } else {
+          player.isShoveling = false;
+          player.shovelProgress = 0;
+        }
+
+        // Б) Разгрузка тачки в большой контейнер утиля (срабатывает слева, снизу и вплотную)
+        const nearDumpster = player.x >= 780 && player.x <= 975 && player.y >= 50 && player.y <= 175;
+        if (nearDumpster && actionPressed && player.wheelbarrowKg > 0) {
+          const unloadedKg = player.wheelbarrowKg;
+          sfx.playThud();
+          addLog(`Выгружено ${unloadedKg} кг навоза в контейнер.`);
+          stats.totalScore += 25;
+          player.wheelbarrowKg = 0;
+          if (minuteOfDay() >= 1050) markTask('unload-wheelbarrow', 'Тачка полностью разгружена вечером');
+        }
+
+        // В) Стойка чистых лабораторных ведер. Один предмет можно нести за раз.
+        const nearBucketRack = Math.hypot(player.x - 760, player.y - 130) < 52;
+        if (nearBucketRack && actionPressed && !player.isShoveling && !player.isDoingPedicure && player.carrying === 'none') {
+          player.carrying = 'bucket';
+          sfx.playThud();
+          addLog('Взято чистое лабораторное ведро. Теперь можно отобрать пробу мочи.');
+        }
+
+        // Г) Взятие корма на складе фуража (сено / овощная каша)
+        const nearHay = Math.hypot(player.x - 80, player.y - 120) < 55;
+        const nearMash = Math.hypot(player.x - 190, player.y - 120) < 55;
+
+        if (actionPressed && !player.isShoveling && !player.isDoingPedicure) {
+          if (nearHay && player.carrying === 'none') {
+            player.carrying = 'hay';
+            sfx.playThud();
+            addLog('Кипер взял тюк отборного лугового сена.');
+          } else if (nearMash && player.carrying === 'none') {
+            player.carrying = 'mash';
+            sfx.playThud();
+            addLog('Кипер взял таз с теплой кашей и морковью.');
+          }
+        }
+
+        // Г) Раскладка корма в кормушки слонов
+        for (const feeder of feeders) {
+          const dist = Math.hypot(player.x - (feeder.x + feeder.w / 2), player.y - (feeder.y + feeder.h / 2));
+          if (dist < 55 && actionPressed) {
+            if (player.carrying === 'hay' || player.carrying === 'mash') {
+              const foodType = player.carrying;
+              const amount = foodType === 'hay' ? 35 : 45;
+              const delivered = Math.min(amount, feeder.maxFood - feeder.food);
+              if (delivered > 0) {
+                feeder.food += delivered;
+                feeder.lastFoodType = foodType;
+                stats.foodDelivered += 1;
+                stats.totalScore += 30;
+                markTask(`fill-${feeder.id}`, `${foodType === 'hay' ? 'Сено' : 'Овощная каша'}: +${Math.round(delivered)}%`);
+                sfx.playThud();
+                addLog(`${foodType === 'hay' ? 'Сено' : 'Овощная каша'} доставлено в ${feeder.name} (+${Math.round(delivered)}%).`);
+              } else {
+                addLog(`${feeder.name} уже заполнена. Выберите другую кормушку.`);
+              }
+              player.carrying = 'none';
+              break;
+            }
+          }
+        }
+
+        // Д) Сдача журнала у стола дежурного в вечерней фазе.
+        const nearDutyDesk = Math.hypot(player.x - 350, player.y - 142) < 58;
+        if (nearDutyDesk && actionPressed && minuteOfDay() >= 1050 && !stats.handoverCompleted) {
+          if (player.wheelbarrowKg > 0) {
+            addLog('Перед сдачей смены необходимо разгрузить тачку у контейнера навоза.');
+          } else {
+            stats.handoverCompleted = true;
+            markTask('handover', 'Журнал подготовлен к передаче');
+            stats.totalScore += 20;
+            addLog('Журнал дежурства подготовлен. Вечерняя передача смены зарегистрирована.');
+          }
+        }
+
+        // Е) Проверка ловли мочи. Для пробы требуется чистое лабораторное ведро.
+        for (const el of elephants) {
+          if (el.isWantingPee) {
+            const dist = Math.hypot(player.x - el.x, player.y - el.y);
+            if (dist < el.radius + 55 && actionPressed && gameState === 'PLAYING') {
+              if (player.carrying !== 'bucket') {
+                if (!el.missingBucketHintShown) {
+                  addLog(`Для отбора пробы у ${el.name} нужно взять чистое лабораторное ведро на стойке.`);
+                  el.missingBucketHintShown = true;
+                }
+              } else {
+                startUrineQTE(el);
+                break;
+              }
+            }
+          } else {
+            el.missingBucketHintShown = false;
+          }
+        }
+
+        // Е) Расчистка ногтей (Педикюр по зажатию Space / E)
+        let targetPedicureEl = null;
+        for (const el of elephants) {
+          if (el.isWantingPedicure && Math.hypot(player.x - el.x, player.y - el.y) < el.radius + 55) {
+            targetPedicureEl = el;
+            break;
+          }
+        }
+        if (targetPedicureEl && actionPressed && gameState === 'PLAYING' && !player.isShoveling) {
+          player.isDoingPedicure = true;
+          player.pedicureProgress += dt * 0.6; // ~1.7 сек на расчистку
+          if (Math.random() < dt * 15) sfx.playShovel();
+          if (player.pedicureProgress >= 1) {
+            targetPedicureEl.isWantingPedicure = false;
+            targetPedicureEl.pedicureTimer = targetPedicureEl.personality === 'playful' ? 32 + Math.random() * 18 : 65 + Math.random() * 40;
+            targetPedicureEl.feetStatus = `Расчищены в ${formatGameTime()}`;
+            markTask('pedicure', `Расчищены стопы: ${targetPedicureEl.name}`);
+            player.isDoingPedicure = false;
+            player.pedicureProgress = 0;
+            stats.pedicuresDone++;
+            stats.totalScore += 80;
+            sfx.playSuccess();
+            addLog(`💅 Проведен педикюр слонихе ${targetPedicureEl.name}! +80 очков.`);
+          }
+        } else {
+          player.isDoingPedicure = false;
+          player.pedicureProgress = 0;
+        }
+
+        // 4. Состояние, потребности и индивидуальный ИИ трех слоних
+        elephants.forEach(el => {
+          const now = performance.now() / 1000;
+          const earFactor = el.personality === 'calm' ? 0.16 : (el.personality === 'curious' ? 0.30 : 0.46);
+          el.earAngle = Math.sin(now * (el.personality === 'playful' ? 2.8 : 1.5) + el.age) * earFactor;
+          el.trunkAngle = Math.sin(now * (el.personality === 'curious' ? 2.7 : 1.3) + el.age * 2) * (el.personality === 'curious' ? 0.52 : 0.30);
+          el.tailWiggle = Math.sin(now * (el.personality === 'playful' ? 3.5 : 1.6) + el.age) * (el.personality === 'calm' ? 0.20 : 0.42);
+          el.thirst = Math.min(100, el.thirst + dt * (el.personality === 'calm' ? 0.085 : (el.personality === 'curious' ? 0.10 : 0.12)));
+
+          // Таймеры туалета и образования навоза
+          el.pooTimer -= dt;
+          if (el.pooTimer <= 0) {
+            el.pooTimer = 40 + Math.random() * 35;
+            if (dungPiles.length < 8) {
+              const pileX = el.x + (Math.random() - 0.5) * 50;
+              const pileY = el.y + 35 + Math.random() * 20;
+              dungPiles.push({ id: nextPileId++, x: Math.max(50, Math.min(CANVAS_WIDTH - 50, pileX)), y: Math.max(240, Math.min(CANVAS_HEIGHT - 65, pileY)), kg: 12 + Math.floor(Math.random() * 8), rot: Math.random() * Math.PI });
+              addLog(`Слониха ${el.name} оставила свежую кучу навоза.`);
+            }
+          }
+
+          if (!el.isWantingPee) {
+            el.peeTimer -= dt;
+            if (el.peeTimer <= 0) triggerUrineEvent(el);
+          } else {
+            el.peeUrgencyTimer -= dt;
+            if (el.peeUrgencyTimer <= 0) {
+              el.isWantingPee = false;
+              el.peeTimer = 50 + Math.random() * 30;
+              stats.missedUrineSamples++;
+              addLog(`Слониха ${el.name} уже справила нужду. Проба упущена.`);
+            }
+          }
+
+          if (!el.isWantingPedicure) {
+            el.pedicureTimer -= dt * (el.personality === 'playful' ? 1.6 : 1);
+            if (el.pedicureTimer <= 0 && !el.isWantingPee) {
+              el.isWantingPedicure = true;
+              el.pedicureUrgencyTimer = 28;
+              sfx.playAlert();
+              addLog(`У слонихи ${el.name} требуется плановая расчистка стоп.`);
+            }
+          } else {
+            el.pedicureUrgencyTimer -= dt;
+            if (el.pedicureUrgencyTimer <= 0) {
+              el.isWantingPedicure = false;
+              el.pedicureTimer = 55 + Math.random() * 35;
+              stats.missedPedicures++;
+              addLog(`Время расчистки стоп для ${el.name} упущено.`);
+            }
+          }
+
+          // Реальное поедание из индивидуальной кормушки
+          const myFeeder = feeders.find(f => f.id === el.id);
+          if (myFeeder && myFeeder.food > 0 && el.satiety < 95) {
+            const distToFeeder = Math.hypot(el.x - (myFeeder.x + myFeeder.w / 2), el.y - (myFeeder.y + 60));
+            if (distToFeeder < 70) {
+              const eatAmount = dt * (el.personality === 'curious' && myFeeder.lastFoodType === 'mash' ? 8 : 6);
+              myFeeder.food = Math.max(0, myFeeder.food - eatAmount);
+              el.satiety = Math.min(100, el.satiety + eatAmount * 1.2);
+              el.lastFedAt = formatGameTime();
+              if (Math.random() < dt * 2) particles.push({ x: myFeeder.x + Math.random() * myFeeder.w, y: myFeeder.y + Math.random() * myFeeder.h, vx: (Math.random() - 0.5) * 15, vy: (Math.random() - 0.5) * 15, life: 0.6, maxLife: 0.6, color: '#e6c86e', size: 2.5 });
+            }
+          }
+
+          // Приоритет потребностей: питье > еда > характерное поведение
+          const distToTrough = Math.hypot(el.x - 505, el.y - 550);
+          if (el.thirst >= 28 && waterTrough.level > 0 && waterTrough.isClean) {
+            if (distToTrough < 62) {
+              el.targetX = el.x;
+              el.targetY = el.y;
+              const drink = Math.min(dt * 1.3, waterTrough.level);
+              waterTrough.level = Math.max(0, waterTrough.level - drink);
+              el.thirst = Math.max(0, el.thirst - dt * 5.0);
+              el.mood = el.personality === 'calm' ? 'Спокойно пьёт' : (el.personality === 'curious' ? 'Утоляет жажду' : 'Играет у поилки');
+              if (el.personality === 'playful' && Math.random() < dt * 0.025) {
+                waterTrough.isClean = false;
+                waterTrough.dirtyEvents++;
+                addLog('Прэтти наплескала в поилку солому и грязь. Нужна очистка перед наполнением.');
+              }
+            } else {
+              el.targetX = 505 + (el.personality === 'playful' ? 18 : 0);
+              el.targetY = 548;
+            }
+          } else if (el.satiety < 42 && myFeeder && myFeeder.food > 0) {
+            el.targetX = myFeeder.x + myFeeder.w / 2;
+            el.targetY = myFeeder.y + 65;
+          } else {
+            el.behaviorTimer -= dt;
+            const distToPlayer = Math.hypot(el.x - player.x, el.y - player.y);
+            if (el.behaviorTimer <= 0 || Math.hypot(el.x - el.targetX, el.y - el.targetY) < 14) {
+              el.behaviorTimer = el.personality === 'calm' ? 5 + Math.random() * 5 : (el.personality === 'curious' ? 2 + Math.random() * 3 : 1.2 + Math.random() * 2.4);
+              if (el.personality === 'calm') {
+                el.targetX = 135 + Math.random() * 115;
+                el.targetY = 300 + Math.random() * 210;
+                el.mood = 'Спокойная';
+              } else if (el.personality === 'curious' && distToPlayer < 185 && player.y > 220) {
+                const angle = Math.atan2(el.y - player.y, el.x - player.x);
+                el.targetX = player.x + Math.cos(angle) * (el.radius + 55);
+                el.targetY = player.y + Math.sin(angle) * (el.radius + 55);
+                el.mood = 'Любопытствует';
+              } else if (el.personality === 'playful' && Math.random() < 0.42) {
+                // Претти исследует подвесную игрушку в центре зала
+                el.targetX = 690 + Math.random() * 45;
+                el.targetY = 300 + Math.random() * 45;
+                el.mood = 'Играет';
+              } else {
+                el.targetX = 80 + Math.random() * 840;
+                el.targetY = 270 + Math.random() * 285;
+                el.mood = el.personality === 'curious' ? 'Любопытная' : 'Бодрая';
+              }
+            }
+          }
+
+          const dx = el.targetX - el.x;
+          const dy = el.targetY - el.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 8) {
+            const speedPx = el.speed;
+            el.vx = (dx / dist) * speedPx;
+            el.vy = (dy / dist) * speedPx;
+            const nextX = Math.max(58, Math.min(CANVAS_WIDTH - 58, el.x + el.vx * dt));
+            const nextY = Math.max(255, Math.min(CANVAS_HEIGHT - 72, el.y + el.vy * dt));
+            el.x = nextX;
+            el.y = nextY;
+            el.walkCycle += dt * (el.personality === 'playful' ? 4.6 : 3.2);
+          }
+        });
+
+        // 5. Поилка: кипер проверяет чашу, очищает ее и держит вентиль открытым для наполнения.
+        const nearTrough = Math.hypot(player.x - 505, player.y - 565) < 48;
+        const nearValve = Math.hypot(player.x - 560, player.y - 565) < 44;
+        if (nearTrough && actionPressed && !nearValve) {
+          if (!waterTrough.isClean) {
+            waterTrough.cleanProgress += dt;
+            if (waterTrough.cleanProgress >= 1.6) {
+              waterTrough.isClean = true;
+              waterTrough.cleanProgress = 0;
+              addLog('Поилка очищена от загрязнений. Теперь можно наполнять свежей водой.');
+              sfx.playSplash();
+            }
+          } else if (!waterTrough.isChecked) {
+            waterTrough.isChecked = true;
+            stats.waterChecks++;
+            markTask('check-water', `Уровень воды ${Math.round(waterTrough.level)}%`);
+            addLog(`Поилка проверена: ${Math.round(waterTrough.level)}% воды, состояние чаши удовлетворительное.`);
+          }
+        } else if (!actionPressed) {
+          waterTrough.cleanProgress = Math.max(0, waterTrough.cleanProgress - dt * 0.5);
+        }
+        if (nearValve && actionPressed) {
+          if (!waterTrough.isClean) {
+            waterTrough.valveOpen = false;
+            if (!waterTrough.dirtyValveHintShown) {
+              addLog('Сначала очистите чашу поилки, затем открывайте вентиль чистой воды.');
+              waterTrough.dirtyValveHintShown = true;
+            }
+          } else {
+            if (!waterTrough.valveOpen) addLog('Вентиль чистой воды открыт. Удерживайте действие для наполнения поилки.');
+            waterTrough.valveOpen = true;
+            waterTrough.level = Math.min(waterTrough.maxLevel, waterTrough.level + dt * 22);
+            if (waterTrough.level >= 80) stats.troughRefilled = true;
+            if (waterTrough.level >= waterTrough.maxLevel) {
+              waterTrough.level = waterTrough.maxLevel;
+              markTask('trough-service', 'Поилка наполнена свежей водой');
+            }
+          }
+        } else {
+          waterTrough.valveOpen = false;
+          waterTrough.dirtyValveHintShown = false;
+        }
+
+        // Проверка журнала и условий задач смены
+        checkShiftTasks();
+
+        // 6. Обновление частиц
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.life -= dt;
+          if (p.life <= 0) particles.splice(i, 1);
+        }
+      }
+
+      // ==========================================
+      // 5. ГРАФИЧЕСКИЙ РЕНДЕР (CANVAS 2D PIXEL-ART)
+      // ==========================================
+      function render() {
+        ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // А) Пол слоновника
+        renderFloor();
+
+        // Б) Разметка зон и оборудование
+        renderEnvironmentObjects();
+
+        // В) Кучи навоза
+        renderDungPiles();
+
+        // Г) Кормушки и поилка
+        renderFeeders();
+
+        // Д) Три слонихи
+        elephants.forEach(el => renderElephant(el));
+
+        // Е) Кипер (Игрок)
+        renderPlayer();
+
+        // Ж) Ограждения и передние элементы (для создания глубины)
+        renderFencesAndForewalls();
+
+        // З) Частицы
+        renderParticles();
+
+        // И) Освещение времени суток
+        renderAmbientLighting();
+
+        // К) HUD (Верхний интерфейс, журнал, индикаторы)
+        renderHUD();
+
+        // Л) Модальные окна поверх канваса
+        if (gameState === 'TITLE') {
+          renderTitleScreen();
+        } else if (gameState === 'INSPECTION_MODAL') {
+          renderInspectionModal();
+        } else if (gameState === 'SHIFT_TABLET') {
+          renderShiftTablet();
+        } else if (gameState === 'QTE_URINE') {
+          renderUrineQTE();
+        } else if (gameState === 'PAUSED') {
+          renderPauseScreen();
+        } else if (gameState === 'SHIFT_REPORT') {
+          renderShiftReport();
+        }
+      }
+
+      // Отрисовка пола (дерево в зоне кипера, соломенно-бетонный песок в загоне)
+      function renderFloor() {
+        // 1. Верхний коридор кипера (деревянные доски)
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, 195);
+
+        // Рисуем текстуру досок
+        ctx.fillStyle = '#543618';
+        for (let y = 10; y < 195; y += 22) {
+          ctx.fillRect(0, y, CANVAS_WIDTH, 2);
+        }
+        ctx.fillStyle = '#7a5229';
+        for (let x = 60; x < CANVAS_WIDTH; x += 110) {
+          ctx.fillRect(x, 0, 2, 195);
+        }
+
+        // 2. Основная зона слоновника (теплая песчано-бетонная основа с соломой)
+        ctx.fillStyle = '#c8b693';
+        ctx.fillRect(0, 195, CANVAS_WIDTH, CANVAS_HEIGHT - 195);
+
+        // Общий соломенный настил на весь слоновник
+        ctx.fillStyle = '#e5ce82';
+        ctx.fillRect(40, 240, 920, 380);
+
+        // Прорисовка мелких травинок и соломинок пикселями
+        ctx.fillStyle = '#d4bc6c';
+        for (let i = 0; i < 90; i++) {
+          const sx = 40 + ((i * 123) % (CANVAS_WIDTH - 80));
+          const sy = 240 + ((i * 347) % (CANVAS_HEIGHT - 280));
+          ctx.fillRect(sx, sy, 6, 2);
+          ctx.fillRect(sx + 2, sy - 2, 2, 5);
+        }
+      }
+
+      // Отрисовка стационарных зон (фураж, отдых, утиль)
+      function renderEnvironmentObjects() {
+        // --- 1. Склад сена (тюки) ---
+        ctx.fillStyle = '#3e2717';
+        ctx.fillRect(35, 55, 90, 70);
+        // Тюки сена
+        ctx.fillStyle = '#e6c86e';
+        ctx.fillRect(40, 60, 38, 28);
+        ctx.fillRect(82, 60, 38, 28);
+        ctx.fillRect(58, 92, 42, 28);
+        // Веревки на тюках
+        ctx.fillStyle = '#8b5a2b';
+        ctx.fillRect(52, 60, 3, 28);
+        ctx.fillRect(94, 60, 3, 28);
+        ctx.fillRect(72, 92, 3, 28);
+
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '10px monospace';
+        ctx.fillText('СЕНО [SPACE]', 40, 50);
+
+        // --- 2. Склад каши и сочных овощей ---
+        ctx.fillStyle = '#3e2717';
+        ctx.fillRect(145, 55, 90, 70);
+        // Тазы с кашей
+        ctx.fillStyle = '#3a6b88';
+        ctx.beginPath();
+        ctx.arc(170, 80, 18, 0, Math.PI * 2);
+        ctx.arc(210, 100, 16, 0, Math.PI * 2);
+        ctx.fill();
+        // Каша внутри
+        ctx.fillStyle = '#d89b4b';
+        ctx.beginPath();
+        ctx.arc(170, 80, 14, 0, Math.PI * 2);
+        ctx.arc(210, 100, 12, 0, Math.PI * 2);
+        ctx.fill();
+        // Морковки
+        ctx.fillStyle = '#e86a24';
+        ctx.fillRect(166, 75, 8, 3);
+        ctx.fillRect(206, 96, 7, 3);
+
+        ctx.fillStyle = '#f5eedb';
+        ctx.fillText('КАША [SPACE]', 150, 50);
+
+        // --- 3. Стойка чистых лабораторных ведер ---
+        ctx.fillStyle = '#4b3829';
+        ctx.fillRect(724, 78, 72, 52);
+        ctx.fillStyle = '#8b6a45';
+        ctx.fillRect(729, 82, 62, 6);
+        ctx.fillRect(729, 121, 62, 5);
+        for (let bx = 736; bx <= 778; bx += 21) {
+          ctx.fillStyle = '#d7dce0';
+          ctx.fillRect(bx, 91, 14, 25);
+          ctx.fillStyle = '#68737b';
+          ctx.fillRect(bx + 2, 96, 10, 4);
+          ctx.strokeStyle = '#d7dce0';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(bx + 7, 91, 7, Math.PI, 0);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '9px monospace';
+        ctx.fillText('ЧИСТЫЕ ВЕДРА [E]', 718, 72);
+
+        // --- 4. Стол зоны отдыха кипера ---
+        ctx.fillStyle = '#5c3a21';
+        ctx.fillRect(300, 65, 100, 65);
+        ctx.fillStyle = '#7a4e2d';
+        ctx.fillRect(304, 69, 92, 57);
+        // Журнал дежурств на столе
+        ctx.fillStyle = '#f5f0db';
+        ctx.fillRect(315, 78, 26, 32);
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillRect(320, 84, 16, 2);
+        ctx.fillRect(320, 90, 16, 2);
+        ctx.fillRect(320, 96, 12, 2);
+        // Настольная лампа
+        ctx.fillStyle = '#27ae60';
+        ctx.beginPath();
+        ctx.arc(375, 85, 10, 0, Math.PI * 2);
+        ctx.fill();
+        // Кружка чая
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(355, 100, 10, 12);
+
+        ctx.fillStyle = '#d2b48c';
+        ctx.fillText('ПОСТ ДЕЖУРНОГО', 305, 58);
+
+        // --- 4. Контейнер утилизации навоза ---
+        ctx.fillStyle = '#1e4d2b';
+        ctx.fillRect(820, 55, 140, 80);
+        ctx.fillStyle = '#2a693b';
+        ctx.fillRect(825, 60, 130, 70);
+        // Ребра жесткости контейнера
+        ctx.fillStyle = '#163820';
+        for (let rx = 845; rx < 950; rx += 25) {
+          ctx.fillRect(rx, 60, 4, 70);
+        }
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('КОНТЕЙНЕР НАВОЗА', 830, 48);
+        ctx.font = '10px monospace';
+        ctx.fillText('РАЗГРУЗКА ТАЧКИ [SPACE]', 825, 150);
+
+        // --- Подвесная игрушка для исследовательского поведения Прэтти ---
+        ctx.strokeStyle = '#59432d';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(710, 240); ctx.lineTo(710, 285); ctx.stroke();
+        ctx.fillStyle = '#d97706';
+        ctx.beginPath(); ctx.arc(710 + Math.sin(performance.now() * 0.002) * 3, 294, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '9px monospace';
+        ctx.fillText('ИГРУШКА', 682, 235);
+
+        // --- Поилка с динамическим уровнем воды и обслуживаемым вентилем ---
+        ctx.fillStyle = '#555';
+        ctx.fillRect(465, 590, 80, 60);
+        ctx.fillStyle = '#263946';
+        ctx.fillRect(470, 595, 70, 50);
+        const waterHeight = 44 * (waterTrough.level / waterTrough.maxLevel);
+        ctx.fillStyle = waterTrough.isClean ? '#3498db' : '#8c8a54';
+        ctx.fillRect(473, 642 - waterHeight, 64, waterHeight);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.48)';
+        const wave = Math.sin(performance.now() * 0.003) * 5;
+        if (waterTrough.level > 0) {
+          ctx.fillRect(477 + wave, 642 - waterHeight + 4, 20, 3);
+          ctx.fillRect(500 - wave, 642 - waterHeight + 10, 22, 3);
+        }
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText(`ПОИЛКА ${Math.round(waterTrough.level)}%`, 472, 582);
+        ctx.fillStyle = waterTrough.isClean ? '#4bd18c' : '#e6a23c';
+        ctx.fillText(waterTrough.isClean ? 'ВОДА ЧИСТАЯ' : 'ТРЕБУЕТ ОЧИСТКИ', 444, 662);
+
+        // Вентиль доступен киперу с верхней стороны поилки.
+        ctx.fillStyle = '#444';
+        ctx.fillRect(550, 552, 24, 8);
+        ctx.fillRect(558, 545, 8, 22);
+        ctx.strokeStyle = waterTrough.valveOpen ? '#4ade80' : '#b7b7b7';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(550, 548);
+        ctx.lineTo(574, 548);
+        ctx.stroke();
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '9px monospace';
+        ctx.fillText(waterTrough.valveOpen ? 'ВЕНТИЛЬ ОТКРЫТ' : 'ВЕНТИЛЬ [E]', 540, 540);
+      }
+
+      // Кормушки слонов
+      function renderFeeders() {
+        feeders.forEach(f => {
+          // Корпус кормушки (деревянно-металлический лоток)
+          ctx.fillStyle = '#4a3319';
+          ctx.fillRect(f.x, f.y, f.w, f.h);
+          ctx.fillStyle = '#694925';
+          ctx.fillRect(f.x + 3, f.y + 3, f.w - 6, f.h - 6);
+
+          // Сено/еда внутри кормушки
+          if (f.food > 0) {
+            const foodH = (f.h - 8) * (f.food / f.maxFood);
+            ctx.fillStyle = '#d4b34e';
+            ctx.fillRect(f.x + 5, f.y + f.h - 4 - foodH, f.w - 10, foodH);
+            // Фрагменты овощей
+            ctx.fillStyle = '#e67e22';
+            ctx.fillRect(f.x + 12, f.y + f.h - 12, 6, 4);
+            ctx.fillRect(f.x + 40, f.y + f.h - 16, 7, 5);
+          }
+
+          // Решетка кормушки
+          ctx.fillStyle = '#2b2b2b';
+          for (let gx = f.x + 12; gx < f.x + f.w; gx += 16) {
+            ctx.fillRect(gx, f.y, 3, f.h);
+          }
+
+          // Текст названия и наполненности
+          ctx.fillStyle = '#333';
+          ctx.font = '10px monospace';
+          ctx.fillText(`${f.name}: ${Math.round(f.food)}%`, f.x - 5, f.y - 6);
+        });
+      }
+
+      // Кучи навоза
+      function renderDungPiles() {
+        dungPiles.forEach(p => {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot);
+
+          // Тень кучи
+          ctx.fillStyle = 'rgba(0,0,0,0.25)';
+          ctx.beginPath();
+          const sizeScale = Math.max(0.28, Math.min(1, p.kg / 18));
+          ctx.ellipse(2, 4, 18 * sizeScale, 12 * sizeScale, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Несколько округлых бугорков навоза
+          ctx.fillStyle = '#5c3a17';
+          ctx.beginPath();
+          ctx.arc(-6 * sizeScale, 0, 10 * sizeScale, 0, Math.PI * 2);
+          ctx.arc(6 * sizeScale, -2 * sizeScale, 11 * sizeScale, 0, Math.PI * 2);
+          ctx.arc(0, -6 * sizeScale, 9 * sizeScale, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#7a4e21';
+          ctx.beginPath();
+          ctx.arc(-4 * sizeScale, -2 * sizeScale, 7 * sizeScale, 0, Math.PI * 2);
+          ctx.arc(4 * sizeScale, -4 * sizeScale, 8 * sizeScale, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.restore();
+
+          // Если игрок рядом, рисуем подсказку «SPACE - Убрать»
+          const dist = Math.hypot(player.x - p.x, player.y - p.y);
+          if (dist < 46) {
+            ctx.fillStyle = '#2c3e50';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText(`УБОРКА [SPACE] (${p.kg} кг)`, p.x - 55, p.y - 20);
+
+            // Индикатор прогресса уборки
+            if (player.isShoveling && player.shovelProgress > 0) {
+              ctx.strokeStyle = '#27ae60';
+              ctx.lineWidth = 4;
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * player.shovelProgress);
+              ctx.stroke();
+            }
+          }
+        });
+      }
+
+      // Отрисовка слонихи
+      function renderElephant(el) {
+        ctx.save();
+        ctx.translate(el.x, el.y);
+
+        // 1. Большая мягкая тень под слоном
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+        ctx.beginPath();
+        ctx.ellipse(0, 12, el.radius * 1.05, el.radius * 0.75, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Хвост с кисточкой
+        ctx.save();
+        ctx.rotate(el.tailWiggle);
+        ctx.strokeStyle = el.darkColor;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, el.radius * 0.6);
+        ctx.quadraticCurveTo(8, el.radius * 0.9, 4, el.radius * 1.15);
+        ctx.stroke();
+        // Кисточка
+        ctx.fillStyle = '#2c3036';
+        ctx.fillRect(1, el.radius * 1.12, 6, 6);
+        ctx.restore();
+
+        // 3. Задние и передние толстые ноги
+        const legOffset = Math.sin(el.walkCycle) * 6;
+        ctx.fillStyle = el.darkColor;
+        // Задние ноги
+        ctx.fillRect(-el.radius * 0.65, el.radius * 0.2 + legOffset, 16, 20);
+        ctx.fillRect(el.radius * 0.35, el.radius * 0.2 - legOffset, 16, 20);
+        // Передние ноги
+        ctx.fillRect(-el.radius * 0.75, -el.radius * 0.3 - legOffset, 16, 20);
+        ctx.fillRect(el.radius * 0.45, -el.radius * 0.3 + legOffset, 16, 20);
+
+        // Ногти (белые полукружия)
+        ctx.fillStyle = '#e8ecef';
+        ctx.fillRect(-el.radius * 0.63, el.radius * 0.2 + legOffset + 16, 4, 4);
+        ctx.fillRect(-el.radius * 0.55, el.radius * 0.2 + legOffset + 16, 4, 4);
+        ctx.fillRect(el.radius * 0.37, el.radius * 0.2 - legOffset + 16, 4, 4);
+        ctx.fillRect(el.radius * 0.45, el.radius * 0.2 - legOffset + 16, 4, 4);
+
+        // 4. Массивное туловище
+        ctx.fillStyle = el.color;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, el.radius, el.radius * 0.82, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Морщины и складки кожи
+        ctx.strokeStyle = el.darkColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(-10, -5, el.radius * 0.5, 0.4, 1.2);
+        ctx.arc(8, 6, el.radius * 0.45, 0.6, 1.5);
+        ctx.stroke();
+
+        // 5. Голова слонихи
+        ctx.fillStyle = el.color;
+        ctx.beginPath();
+        ctx.arc(0, -el.radius * 0.5, el.radius * 0.52, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 6. Большие уши, покачивающиеся в такт
+        // Левое ухо
+        ctx.save();
+        ctx.translate(-el.radius * 0.45, -el.radius * 0.6);
+        ctx.rotate(-el.earAngle);
+        ctx.fillStyle = el.color;
+        ctx.beginPath();
+        ctx.ellipse(-14, 0, 18, 26, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = el.earColor;
+        ctx.beginPath();
+        ctx.ellipse(-14, 0, 12, 18, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Правое ухо
+        ctx.save();
+        ctx.translate(el.radius * 0.45, -el.radius * 0.6);
+        ctx.rotate(el.earAngle);
+        ctx.fillStyle = el.color;
+        ctx.beginPath();
+        ctx.ellipse(14, 0, 18, 26, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = el.earColor;
+        ctx.beginPath();
+        ctx.ellipse(14, 0, 12, 18, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 7. Глаза с добрыми ресничками
+        ctx.fillStyle = '#1e2022';
+        ctx.beginPath();
+        ctx.arc(-12, -el.radius * 0.55, 3.5, 0, Math.PI * 2);
+        ctx.arc(12, -el.radius * 0.55, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-13, -el.radius * 0.57, 1.5, 1.5);
+        ctx.fillRect(11, -el.radius * 0.57, 1.5, 1.5);
+
+        // 8. Аккуратные бивни (бивники)
+        ctx.fillStyle = '#fffdf5';
+        ctx.fillRect(-10, -el.radius * 0.35, 4, 10);
+        ctx.fillRect(6, -el.radius * 0.35, 4, 10);
+
+        // 9. Хобот с подвижным кончиком
+        ctx.save();
+        ctx.strokeStyle = el.color;
+        ctx.lineWidth = 14;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, -el.radius * 0.35);
+        const trunkEndOffset = Math.sin(el.trunkAngle) * 16;
+        ctx.quadraticCurveTo(trunkEndOffset * 0.6, -el.radius * 0.05, trunkEndOffset, el.radius * 0.2);
+        ctx.stroke();
+
+        ctx.strokeStyle = el.darkColor;
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(0, -el.radius * 0.35);
+        ctx.quadraticCurveTo(trunkEndOffset * 0.6, -el.radius * 0.05, trunkEndOffset, el.radius * 0.2);
+        ctx.stroke();
+
+        // Кольца на хоботе
+        ctx.strokeStyle = '#474e55';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(trunkEndOffset * 0.3, -el.radius * 0.15, 6, 0.2, 1.2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.restore();
+
+        // --- 10. Статусный бейдж над головой слонихи ---
+        const distToPlayer = Math.hypot(player.x - el.x, player.y - el.y);
+
+        // Имя и полоска сытости
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(el.x - 45, el.y - el.radius - 38, 90, 24);
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(el.name, el.x, el.y - el.radius - 24);
+
+        // Индикатор сытости (зеленый / желтый / красный)
+        const satWidth = 80;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(el.x - satWidth / 2, el.y - el.radius - 20, satWidth, 5);
+        ctx.fillStyle = el.satiety > 65 ? '#2ecc71' : (el.satiety > 35 ? '#f39c12' : '#e74c3c');
+        ctx.fillRect(el.x - satWidth / 2, el.y - el.radius - 20, satWidth * (el.satiety / 100), 5);
+
+        // Сигнал готовности к сдаче анализа мочи!
+        if (el.isWantingPee) {
+          const pulse = Math.sin(performance.now() * 0.008) * 4;
+          ctx.fillStyle = '#e74c3c';
+          ctx.beginPath();
+          ctx.arc(el.x, el.y - el.radius - 54 + pulse, 16, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText('🧪', el.x, el.y - el.radius - 49 + pulse);
+
+          ctx.fillStyle = '#f1c40f';
+          ctx.font = 'bold 11px monospace';
+          ctx.fillText(`НУЖЕН АНАЛИЗ! (${Math.ceil(el.peeUrgencyTimer)}c)`, el.x, el.y - el.radius - 74);
+
+          if (distToPlayer < el.radius + 55) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillText('ЖМИТЕ [SPACE]', el.x, el.y + el.radius + 20);
+          }
+        } else if (el.isWantingPedicure) {
+          const pulse = Math.sin(performance.now() * 0.008) * 4;
+          ctx.fillStyle = '#8e44ad'; // Фиолетовый кружок
+          ctx.beginPath();
+          ctx.arc(el.x, el.y - el.radius - 54 + pulse, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 13px sans-serif';
+          ctx.fillText('🦶', el.x, el.y - el.radius - 49 + pulse);
+
+          ctx.fillStyle = '#e056fd';
+          ctx.font = 'bold 11px monospace';
+          ctx.fillText(`ПЕДИКЮР! (${Math.ceil(el.pedicureUrgencyTimer)}c)`, el.x, el.y - el.radius - 74);
+
+          if (distToPlayer < el.radius + 55) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.fillText('РАСЧИСТИТЬ НОГТИ [ЗАЖАТЬ SPACE]', el.x, el.y + el.radius + 20);
+
+            if (player.isDoingPedicure && player.pedicureProgress > 0) {
+              ctx.strokeStyle = '#9b59b6';
+              ctx.lineWidth = 5;
+              ctx.beginPath();
+              ctx.arc(el.x, el.y, el.radius + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * player.pedicureProgress);
+              ctx.stroke();
+            }
+          }
+        } else if (distToPlayer < el.radius + 45) {
+          // Подсказка осмотра [F]
+          ctx.fillStyle = '#2c3e50';
+          ctx.font = 'bold 10px monospace';
+          ctx.fillText('ОСМОТР [F]', el.x, el.y + el.radius + 18);
+        }
+
+        ctx.textAlign = 'left';
+      }
+
+      // Отрисовка игрока (Дежурного кипера)
+      function renderPlayer() {
+        ctx.save();
+        ctx.translate(player.x, player.y);
+
+        // Тень кипера
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+        ctx.beginPath();
+        ctx.ellipse(0, 10, 14, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Анимация ног при ходьбе
+        const legSwing = Math.sin(player.walkAnim) * 5;
+
+        // Ноги и сапоги
+        ctx.fillStyle = '#2d4030'; // Штаны комбинезона
+        ctx.fillRect(-7, 2 + legSwing, 5, 8);
+        ctx.fillRect(2, 2 - legSwing, 5, 8);
+
+        ctx.fillStyle = '#1c1b18'; // Кожаные сапоги
+        ctx.fillRect(-8, 9 + legSwing, 6, 4);
+        ctx.fillRect(2, 9 - legSwing, 6, 4);
+
+        // Тело в киперской униформе (песочно-зеленый жакет)
+        ctx.fillStyle = '#3a5a40';
+        ctx.fillRect(-9, -10, 18, 14);
+
+        // Желтый бейдж зоопарка на груди
+        ctx.fillStyle = '#f4a261';
+        ctx.fillRect(1, -7, 5, 4);
+
+        // Голова и киперская фуражка
+        ctx.fillStyle = '#f8c291'; // Кожа лица
+        ctx.beginPath();
+        ctx.arc(0, -14, 7, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Глаза в зависимости от направления
+        ctx.fillStyle = '#2c3e50';
+        if (player.dir === 'down') {
+          ctx.fillRect(-3, -15, 2, 2);
+          ctx.fillRect(1, -15, 2, 2);
+        } else if (player.dir === 'left') {
+          ctx.fillRect(-5, -15, 2, 2);
+        } else if (player.dir === 'right') {
+          ctx.fillRect(3, -15, 2, 2);
+        }
+
+        // Зеленая кепка с козырьком
+        ctx.fillStyle = '#283618';
+        ctx.beginPath();
+        ctx.arc(0, -17, 8, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = '#1f2b13';
+        if (player.dir === 'down') ctx.fillRect(-7, -17, 14, 3);
+        else if (player.dir === 'left') ctx.fillRect(-9, -17, 11, 3);
+        else if (player.dir === 'right') ctx.fillRect(-2, -17, 11, 3);
+
+        // Переносимый предмет
+        if (player.carrying === 'hay') {
+          // Тюк сена в руках
+          ctx.fillStyle = '#e6c86e';
+          ctx.fillRect(-12, -4, 24, 14);
+          ctx.fillStyle = '#8b5a2b';
+          ctx.fillRect(-3, -4, 3, 14);
+        } else if (player.carrying === 'mash') {
+          // Таз с кашей
+          ctx.fillStyle = '#3a6b88';
+          ctx.beginPath();
+          ctx.arc(0, 2, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#d89b4b';
+          ctx.beginPath();
+          ctx.arc(0, 2, 7, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Визуализация тачки кипера рядом с ним
+        ctx.save();
+        ctx.translate(player.dir === 'left' ? -22 : 22, 2);
+        // Колесо тачки
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(0, 6, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // Металлический кузов тачки
+        ctx.fillStyle = '#5c6f84';
+        ctx.beginPath();
+        ctx.moveTo(-10, 2);
+        ctx.lineTo(10, 2);
+        ctx.lineTo(7, -8);
+        ctx.lineTo(-7, -8);
+        ctx.closePath();
+        ctx.fill();
+
+        // Заполнение тачки навозом
+        if (player.wheelbarrowKg > 0) {
+          const fillFrac = player.wheelbarrowKg / player.wheelbarrowMaxKg;
+          ctx.fillStyle = '#6e451b';
+          ctx.beginPath();
+          ctx.arc(0, -6 - fillFrac * 4, 7 * fillFrac, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        ctx.restore();
+      }
+
+      // Ограждения загона (деревянные брусья и ворота)
+      function renderFencesAndForewalls() {
+        // Ограждение слоновника
+        ctx.fillStyle = '#4a2f1b';
+        ctx.fillRect(20, 185, 595, 12);
+        ctx.fillRect(715, 185, 265, 12);
+
+        // Столбы ограждения
+        ctx.fillStyle = '#301c0d';
+        for (let x = 20; x <= 615; x += 45) {
+          ctx.fillRect(x, 175, 10, 26);
+        }
+        for (let x = 715; x <= 980; x += 45) {
+          ctx.fillRect(x, 175, 10, 26);
+        }
+
+        // Проход / Ворота (x: 620..710)
+        ctx.fillStyle = '#8e795c';
+        ctx.fillRect(618, 182, 98, 16);
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = '9px monospace';
+        ctx.fillText('ПРОХОД К СЛОНАМ', 624, 194);
+      }
+
+      // Частицы
+      function renderParticles() {
+        particles.forEach(p => {
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
+      }
+
+      // Атмосферное освещение (утро -> день -> уютные вечерние сумерки с лампами)
+      function renderAmbientLighting() {
+        const hour = gameTime.hour + gameTime.minute / 60;
+        let ambientColor = 'rgba(0, 0, 0, 0)';
+
+        if (hour < 10) {
+          // Теплый утренний золотистый свет
+          ambientColor = 'rgba(255, 200, 100, 0.06)';
+        } else if (hour >= 17 && hour < 19) {
+          // Закатные лучи
+          ambientColor = 'rgba(230, 126, 34, 0.12)';
+        } else if (hour >= 19) {
+          // Вечерний приглушенный уютный свет
+          ambientColor = 'rgba(20, 30, 50, 0.22)';
+        }
+
+        ctx.fillStyle = ambientColor;
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      }
+
+      // ==========================================
+      // 6. ИНТЕРФЕЙС (HUD)
+      // ==========================================
+      function drawHint(text, x, y) {
+        ctx.save();
+        ctx.font = 'bold 12px sans-serif';
+        const width = Math.min(470, ctx.measureText(text).width + 28);
+        ctx.fillStyle = 'rgba(20, 16, 14, 0.92)';
+        ctx.fillRect(x - width / 2, y - 20, width, 30);
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - width / 2, y - 20, width, 30);
+        ctx.fillStyle = '#fff4c2';
+        ctx.textAlign = 'center';
+        ctx.fillText(text, x, y); ctx.restore();
+      }
+
+      function renderHUD() {
+        // Верхняя информационная панель дежурного
+        ctx.fillStyle = '#1c1714';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, 44);
+        ctx.fillStyle = '#3c2b1e';
+        ctx.fillRect(0, 42, CANVAS_WIDTH, 2);
+
+        // Игровое время и дежурный
+        const timeStr = `${String(gameTime.hour).padStart(2, '0')}:${String(Math.floor(gameTime.minute)).padStart(2, '0')}`;
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 15px monospace';
+        ctx.fillText(`⏰ ${timeStr}`, 20, 27);
+
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Смена: 08:00–20:00 · дежурный кипер', 110, 27);
+
+        // Компактная панель состояния: руки, тачка, вода, очки.
+        const carryingLabel = player.carrying === 'hay' ? 'сено' : (player.carrying === 'mash' ? 'каша' : (player.carrying === 'bucket' ? 'чистое ведро' : 'пусто'));
+        ctx.fillStyle = '#d6c9ac';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(`Руки: ${carryingLabel}`, 350, 27);
+        const wbFrac = player.wheelbarrowKg / player.wheelbarrowMaxKg;
+        ctx.fillStyle = '#bbb';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(`Тачка ${player.wheelbarrowKg}/${player.wheelbarrowMaxKg}`, 465, 27);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(575, 17, 42, 12);
+        ctx.fillStyle = wbFrac > 0.8 ? '#e74c3c' : '#f39c12';
+        ctx.fillRect(575, 17, 42 * wbFrac, 12);
+        ctx.fillStyle = waterTrough.isClean ? '#58b8e8' : '#e6a23c';
+        ctx.font = 'bold 10px monospace';
+        ctx.fillText(`ВОДА ${Math.round(waterTrough.level)}%`, 625, 27);
+
+        ctx.fillStyle = '#2ecc71';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(`Очки ${stats.totalScore}`, 710, 27);
+
+        // Интерактивные кнопки HUD
+        ctx.fillStyle = gameState === 'SHIFT_TABLET' ? '#b8860b' : '#2d251f';
+        ctx.fillRect(790, 7, 60, 29);
+        ctx.fillStyle = '#fff4c2';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('📋 ПЛАН', 797, 26);
+        ctx.fillStyle = '#2d251f';
+        ctx.fillRect(855, 7, 60, 29);
+        ctx.fillStyle = '#f5eedb';
+        ctx.fillText('⏸ ПАУЗА', 861, 26);
+        ctx.fillStyle = '#2d251f';
+        ctx.fillRect(920, 7, 60, 29);
+        ctx.fillStyle = sfx.muted ? '#e74c3c' : '#2ecc71';
+        ctx.fillText(sfx.muted ? '🔇 ЗВУК' : '🔊 ЗВУК', 925, 26);
+
+        // Лог событий (по центру внизу между стиком и кнопками)
+        ctx.fillStyle = 'rgba(20, 16, 14, 0.85)';
+        ctx.fillRect(180, CANVAS_HEIGHT - 82, 570, 72);
+        ctx.fillStyle = '#3c2b1e';
+        ctx.fillRect(180, CANVAS_HEIGHT - 82, 570, 2);
+
+        ctx.fillStyle = '#e67e22';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('📋 ЖУРНАЛ ДЕЖУРНОГО КИПЕРА', 195, CANVAS_HEIGHT - 67);
+
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#e0d6c3';
+        logs.slice(0, 3).forEach((log, i) => {
+          ctx.fillText(`[${log.time}] ${log.text}`, 195, CANVAS_HEIGHT - 50 + i * 17);
+        });
+
+        if (gameState === 'PLAYING') {
+          const nearRack = Math.hypot(player.x - 760, player.y - 130) < 52;
+          const nearValve = Math.hypot(player.x - 560, player.y - 565) < 44;
+          const nearTrough = Math.hypot(player.x - 505, player.y - 565) < 48;
+          const nearDesk = Math.hypot(player.x - 350, player.y - 142) < 58;
+          if (nearRack) drawHint('E · Взять чистое лабораторное ведро', 500, 100);
+          else if (nearValve) drawHint('Зажмите E · Наполнить поилку', 500, 100);
+          else if (nearTrough) drawHint(waterTrough.isClean ? 'E · Проверить поилку' : `Зажмите E · Очистить поилку (${Math.floor(waterTrough.cleanProgress / 1.6 * 100)}%)`, 500, 100);
+          else if (nearDesk && minuteOfDay() >= 1050) drawHint('E · Подготовить журнал сдачи смены', 500, 100);
+        }
+
+        // Наэкранные сенсорные кнопки управления для мобильных экранов и мыши
+        if (gameState === 'PLAYING') {
+          ctx.save();
+
+          // --- А. ВИРТУАЛЬНЫЙ ДЖОЙСТИК (D-PAD) В ЛЕВОМ НИЖНЕМ УГЛУ ---
+          const dpad = touchControls.dpad;
+
+          // Фоновая круглая подложка
+          ctx.fillStyle = touchControls.dpad.active ? 'rgba(35, 27, 21, 0.78)' : 'rgba(25, 20, 16, 0.58)';
+          ctx.beginPath();
+          ctx.arc(dpad.cx, dpad.cy, dpad.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = touchControls.dpad.active ? '#f1c40f' : 'rgba(212, 175, 55, 0.5)';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+
+          // Стрелки 4 направлений
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = 'bold 15px sans-serif';
+
+          // Вверх
+          ctx.fillStyle = virtualKeys.up ? '#f1c40f' : 'rgba(245, 238, 219, 0.55)';
+          ctx.fillText('▲', dpad.cx, dpad.cy - 34);
+
+          // Вниз
+          ctx.fillStyle = virtualKeys.down ? '#f1c40f' : 'rgba(245, 238, 219, 0.55)';
+          ctx.fillText('▼', dpad.cx, dpad.cy + 34);
+
+          // Влево
+          ctx.fillStyle = virtualKeys.left ? '#f1c40f' : 'rgba(245, 238, 219, 0.55)';
+          ctx.fillText('◀', dpad.cx - 34, dpad.cy);
+
+          // Вправо
+          ctx.fillStyle = virtualKeys.right ? '#f1c40f' : 'rgba(245, 238, 219, 0.55)';
+          ctx.fillText('▶', dpad.cx + 34, dpad.cy);
+
+          // Центральная рукоятка (Knob)
+          const kx = dpad.cx + touchControls.knob.x;
+          const ky = dpad.cy + touchControls.knob.y;
+          ctx.fillStyle = touchControls.dpad.active ? '#f1c40f' : '#7f6a55';
+          ctx.beginPath();
+          ctx.arc(kx, ky, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // --- Б. КНОПКА ОСМОТРА (F / 👁️) ---
+          const insp = touchControls.inspectBtn;
+          ctx.fillStyle = touchControls.inspectBtn.active ? 'rgba(41, 128, 185, 0.95)' : 'rgba(52, 73, 94, 0.78)';
+          ctx.beginPath();
+          ctx.arc(insp.cx, insp.cy, insp.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = touchControls.inspectBtn.active ? '#ffffff' : '#3498db';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '16px sans-serif';
+          ctx.fillText('👁️', insp.cx, insp.cy - 7);
+          ctx.font = 'bold 10px monospace';
+          ctx.fillText('F/ОСМОТР', insp.cx, insp.cy + 13);
+
+          // --- В. КНОПКА ДЕЙСТВИЯ (SPACE / 🔨) ---
+          const act = touchControls.actionBtn;
+          ctx.fillStyle = touchControls.actionBtn.active ? 'rgba(39, 174, 96, 0.95)' : 'rgba(30, 130, 76, 0.78)';
+          ctx.beginPath();
+          ctx.arc(act.cx, act.cy, act.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = touchControls.actionBtn.active ? '#ffffff' : '#2ecc71';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px sans-serif';
+          ctx.fillText('🔨', act.cx, act.cy - 8);
+          ctx.font = 'bold 11px monospace';
+          ctx.fillText('SPACE', act.cx, act.cy + 14);
+
+          ctx.restore();
+        }
+      }
+
+      // ==========================================
+      // 7. МОДАЛЬНЫЕ ОКНА И МИНИ-ИГРЫ
+      // ==========================================
+
+      // Заставка (Title Screen)
+      function renderTitleScreen() {
+        ctx.fillStyle = 'rgba(15, 12, 10, 0.88)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // Главная плашка
+        ctx.fillStyle = '#2a1f18';
+        ctx.fillRect(180, 70, 640, 530);
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(180, 70, 640, 530);
+
+        // Заголовок
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 26px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('СИМУЛЯТОР ДЕЖУРНОГО КИПЕРА 2.0', CANVAS_WIDTH / 2, 125);
+        ctx.fillStyle = '#e8d8b8';
+        ctx.font = '17px "Segoe UI", sans-serif';
+        ctx.fillText('Павильон гигантов зоопарка: Одри, Марго и Претти', CANVAS_WIDTH / 2, 160);
+
+        // Иконки слонов
+        ctx.font = '36px sans-serif';
+        ctx.fillText('🐘   🐘   🐘', CANVAS_WIDTH / 2, 215);
+
+        // Описание обязанностей кипера
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = '13px "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        const duties = [
+          '🧹 Уборка навоза: собирайте кучи лопатой в тачку и вывозите в контейнер.',
+          '🌾 Кормление: разносите тюки сена и тазы с кашей по трем кормушкам.',
+          '🧪 Пробы: возьмите чистое лабораторное ведро на стойке перед отбором.',
+          '🦶 Расчистка стоп: удерживайте E / Space рядом со слонихой.',
+          '🩺 Осмотр (F): карточка показывает сытость, жажду, кормление и состояние стоп.',
+          '📋 План смены: Tab / T или кнопка ПЛАН. Окна ставят игровой мир на паузу.'
+        ];
+        duties.forEach((d, i) => {
+          ctx.fillText(d, 220, 265 + i * 31);
+        });
+
+        // Кнопка «Начать смену»
+        ctx.fillStyle = '#27ae60';
+        ctx.fillRect(380, 480, 240, 55);
+        ctx.strokeStyle = '#2ecc71';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(380, 480, 240, 55);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('НАЧАТЬ СМЕНУ [SPACE]', CANVAS_WIDTH / 2, 515);
+
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#a89f91';
+        ctx.fillText('Управление: WASD / Стрелки · Действие: Пробел или E', CANVAS_WIDTH / 2, 570);
+
+        ctx.textAlign = 'left';
+      }
+
+      // Карточка осмотра слонихи (Инспекция F)
+      function renderInspectionModal() {
+        if (!inspectingElephant) return;
+        const el = inspectingElephant;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // Карточка ветеринарного осмотра
+        ctx.fillStyle = '#fbf7ed';
+        ctx.fillRect(200, 80, 600, 520);
+        ctx.strokeStyle = '#5c3a21';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(200, 80, 600, 520);
+
+        // Заголовок карточки
+        ctx.fillStyle = '#2c3e50';
+        ctx.font = 'bold 20px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`ВЕТЕРИНАРНАЯ КАРТОЧКА: ${el.name.toUpperCase()}`, CANVAS_WIDTH / 2, 125);
+
+        ctx.font = '13px monospace';
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillText(`Возраст: ${el.age} лет · Роль в стаде: ${el.role}`, CANVAS_WIDTH / 2, 150);
+
+        // Разделитель
+        ctx.fillStyle = '#dcd3be';
+        ctx.fillRect(230, 165, 540, 2);
+
+        // Пункты осмотра
+        ctx.textAlign = 'left';
+        ctx.font = '14px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#2c3e50';
+
+        const feederForEl = feeders.find(f => f.id === el.id);
+        const status = el.thirst >= 70 || el.satiety < 20 ? 'Требует внимания' : (el.thirst >= 40 || el.satiety < 40 ? 'Наблюдение' : 'В обычном диапазоне');
+        const checklist = [
+          { label: 'Общее состояние:', val: `${status} · ${el.mood}`, ok: status === 'В обычном диапазоне' },
+          { label: 'Сытость / кормушка:', val: `${Math.round(el.satiety)}% / ${Math.round(feederForEl.food)}%`, ok: el.satiety > 40 },
+          { label: 'Жажда / поилка:', val: `${Math.round(el.thirst)}% · вода ${Math.round(waterTrough.level)}%${waterTrough.isClean ? '' : ' (загрязнена)'}`, ok: el.thirst < 40 && waterTrough.isClean },
+          { label: 'Уши и хобот:', val: `${el.earsStatus}; ${el.trunkStatus}`, ok: true },
+          { label: 'Стопы / расчистка:', val: el.feetStatus, ok: !el.isWantingPedicure },
+          { label: 'Последнее кормление:', val: el.lastFedAt, ok: true },
+          { label: 'Последний осмотр:', val: `${el.lastInspected} · всего ${el.inspectionsCount}`, ok: true }
+        ];
+
+        checklist.forEach((item, i) => {
+          ctx.font = 'bold 13px "Segoe UI", sans-serif';
+          ctx.fillText(item.label, 240, 205 + i * 44);
+          ctx.font = '13px "Segoe UI", sans-serif';
+          ctx.fillStyle = item.ok ? '#27ae60' : '#e67e22';
+          ctx.fillText(`✓ ${item.val}`, 240, 224 + i * 44);
+          ctx.fillStyle = '#2c3e50';
+        });
+
+        // Кнопка подтверждения / возврата в вольер
+        ctx.fillStyle = '#2980b9';
+        ctx.fillRect(360, 540, 280, 46);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 15px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ЗАКРЫТЬ [F / ESC / КЛИК]', CANVAS_WIDTH / 2, 568);
+
+        ctx.textAlign = 'left';
+      }
+
+      // Планшет дежурного кипера: группы смены и фактический статус задач.
+      function renderShiftTablet() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillStyle = '#1c2528';
+        ctx.fillRect(145, 45, 710, 595);
+        ctx.fillStyle = '#d2bf91';
+        ctx.fillRect(157, 57, 686, 571);
+        ctx.fillStyle = '#20282a';
+        ctx.fillRect(166, 66, 668, 553);
+        ctx.strokeStyle = '#c2a56b'; ctx.lineWidth = 3;
+        ctx.strokeRect(145, 45, 710, 595);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#f4d68a';
+        ctx.font = 'bold 24px monospace';
+        ctx.fillText('ПЛАНШЕТ ДЕЖУРНОГО КИПЕРА', 500, 98);
+        ctx.font = '13px monospace';
+        ctx.fillStyle = '#c8d1d5';
+        ctx.fillText(`Смена ${formatGameTime()} · выполнено ${Object.values(shiftTasks).filter(t => t.completed).length} из ${shiftTaskDefinitions.length} задач`, 500, 125);
+
+        const phases = [
+          { title: '08:00–10:30 · УТРЕННИЙ ОБХОД', y: 155 },
+          { title: '10:30–14:30 · КОРМЛЕНИЕ И ХОЗРАБОТЫ', y: 264 },
+          { title: '14:30–17:30 · ДНЕВНОЙ УХОД', y: 373 },
+          { title: '17:30–20:00 · ВЕЧЕРНИЙ ОБХОД И СДАЧА', y: 454 }
+        ];
+        phases.forEach((phase, index) => {
+          ctx.fillStyle = currentShiftPhase() === index ? '#d6a93c' : '#52646a';
+          ctx.fillRect(185, phase.y - 18, 630, 24);
+          ctx.fillStyle = '#172024';
+          ctx.textAlign = 'left';
+          ctx.font = 'bold 12px monospace';
+          ctx.fillText(phase.title, 197, phase.y - 2);
+          const list = shiftTaskDefinitions.filter(t => t.phase === index);
+          list.forEach((task, i) => {
+            const y = phase.y + 18 + i * 17;
+            const state = shiftTasks[task.id];
+            ctx.fillStyle = state.completed ? '#62d59a' : (minuteOfDay() > task.deadline ? '#e4a36b' : '#e7e4d9');
+            ctx.font = '12px sans-serif';
+            const symbol = state.completed ? '✓' : (minuteOfDay() > task.deadline ? '!' : '○');
+            ctx.fillText(`${symbol} ${task.label}`, 205, y);
+            if (state.completed) {
+              ctx.fillStyle = '#93a7a8'; ctx.font = '10px monospace';
+              ctx.fillText(state.completedAt ? `в ${String(Math.floor(state.completedAt / 60)).padStart(2,'0')}:${String(state.completedAt % 60).padStart(2,'0')}` : '', 710, y);
+            }
+          });
+        });
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#aebfc1'; ctx.font = '11px sans-serif';
+        ctx.fillText('Действия отмечаются автоматически после выполнения в игровом мире. Мир на паузе.', 500, 575);
+        ctx.fillStyle = '#347b54'; ctx.fillRect(380, 585, 240, 36);
+        ctx.strokeStyle = '#75c69a'; ctx.strokeRect(380, 585, 240, 36);
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('ЗАКРЫТЬ ПЛАНШЕТ  [Tab / Esc]', 500, 608);
+        ctx.textAlign = 'left';
+      }
+
+      // Мини-игра на реакцию: ловля пробы мочи (QTE)
+      function renderUrineQTE() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        const el = qteState.elephant;
+
+        // Панель мини-игры
+        ctx.fillStyle = '#241d18';
+        ctx.fillRect(250, 200, 500, 280);
+        ctx.strokeStyle = '#f39c12';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(250, 200, 500, 280);
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 20px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('🧪 ВЗЯТИЕ АНАЛИЗА МОЧИ В ВЕДРО', CANVAS_WIDTH / 2, 245);
+
+        ctx.fillStyle = '#ecf0f1';
+        ctx.font = '13px "Segoe UI", sans-serif';
+        ctx.fillText(`Пациент: слониха ${el ? el.name : ''}. Остановите бегунок в ЗЕЛЕНОЙ зоне!`, CANVAS_WIDTH / 2, 280);
+
+        // Шкала ловли
+        const barX = 300;
+        const barY = 320;
+        const barW = 400;
+        const barH = 34;
+
+        // Фоновый трек
+        ctx.fillStyle = '#34495e';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        // Желтая зона (хорошо)
+        const targetMinX = barX + (barW * qteState.targetMin) / 100;
+        const targetMaxX = barX + (barW * qteState.targetMax) / 100;
+        ctx.fillStyle = '#f39c12';
+        ctx.fillRect(targetMinX, barY, targetMaxX - targetMinX, barH);
+
+        // Зеленая зона (идеально в центре)
+        const perfMinX = barX + (barW * (qteState.targetMin + 5)) / 100;
+        const perfMaxX = barX + (barW * (qteState.targetMax - 5)) / 100;
+        ctx.fillStyle = '#2ecc71';
+        ctx.fillRect(perfMinX, barY, perfMaxX - perfMinX, barH);
+
+        // Бегунок
+        const sliderX = barX + (barW * qteState.sliderPos) / 100;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sliderX - 4, barY - 6, 8, barH + 12);
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(sliderX - 2, barY - 4, 4, barH + 8);
+
+        // Результат
+        if (qteState.result === 'perfect') {
+          ctx.fillStyle = '#2ecc71';
+          ctx.font = 'bold 18px "Segoe UI", sans-serif';
+          ctx.fillText('✨ ИДЕАЛЬНО! ЧИСТАЯ ПРОБА ПОЛУЧЕНА (+100 ОЧКОВ)', CANVAS_WIDTH / 2, 410);
+        } else if (qteState.result === 'good') {
+          ctx.fillStyle = '#f1c40f';
+          ctx.font = 'bold 18px "Segoe UI", sans-serif';
+          ctx.fillText('👍 ХОРОШО! АНАЛИЗ УСПЕШНО СОБРАН (+50 ОЧКОВ)', CANVAS_WIDTH / 2, 410);
+        } else if (qteState.result === 'miss') {
+          ctx.fillStyle = '#e74c3c';
+          ctx.font = 'bold 18px "Segoe UI", sans-serif';
+          ctx.fillText('💦 ПРОМАХ! ПРОБА УТЕРЯНА', CANVAS_WIDTH / 2, 410);
+        } else {
+          ctx.fillStyle = '#f5eedb';
+          ctx.font = 'bold 16px monospace';
+          ctx.fillText('НАЖМИТЕ [SPACE] ИЛИ КЛИКНИТЕ', CANVAS_WIDTH / 2, 415);
+        }
+
+        ctx.textAlign = 'left';
+      }
+
+      // Пауза
+      function renderPauseScreen() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        ctx.fillStyle = '#f5eedb';
+        ctx.font = 'bold 30px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ПАУЗА ДЕЖУРСТВА', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+        ctx.font = '15px monospace';
+        ctx.fillText('Нажмите P, Esc или кликните в HUD для продолжения смены', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 25);
+        ctx.textAlign = 'left';
+      }
+
+      function calculateShiftAssessment() {
+        const clamp = n => Math.max(0, Math.min(100, Math.round(n)));
+        const welfare = clamp(elephants.reduce((sum, el) => sum + el.satiety * 0.65 + (100 - el.thirst) * 0.35, 0) / elephants.length - stats.missedUrineSamples * 2 - stats.missedPedicures * 2);
+        const hygiene = clamp(18 + Math.min(30, stats.manureCleanedKg * 0.75) + waterTrough.level * 0.22 + (waterTrough.isClean ? 18 : 0) - dungPiles.length * 2);
+        const morning = ['morning-audrey','morning-margo','morning-pretty'].filter(taskComplete).length;
+        const evening = ['evening-audrey','evening-margo','evening-pretty'].filter(taskComplete).length;
+        const medical = clamp((morning + evening) / 6 * 40 + Math.min(30, stats.urineSamplesCollected * 30) + Math.min(30, stats.pedicuresDone * 30) + (stats.handoverCompleted ? 10 : 0));
+        const done = shiftTaskDefinitions.filter(t => taskComplete(t.id)).length;
+        const punctual = shiftTaskDefinitions.filter(t => taskComplete(t.id) && shiftTasks[t.id].completedAt <= t.deadline).length;
+        const schedule = clamp(done / shiftTaskDefinitions.length * 70 + punctual / shiftTaskDefinitions.length * 30);
+        return [
+          { label: 'Благополучие животных', value: welfare, detail: welfare >= 75 ? 'Сытость и жажда в приемлемом диапазоне.' : 'Проверьте потребности и индивидуальные показатели слоних.', color: '#4fba83' },
+          { label: 'Чистота и водоснабжение', value: hygiene, detail: waterTrough.isClean && waterTrough.level >= 50 ? 'Оценены уборка, чистота чаши и запас воды.' : 'Поилка загрязнена или уровень воды низкий; уборку стоит улучшить.', color: '#58b8e8' },
+          { label: 'Медицинский уход и журнал', value: medical, detail: medical >= 70 ? 'Плановые осмотры, процедуры и передача журнала учтены.' : 'Не все плановые осмотры, процедуры или передача журнала завершены.', color: '#b59ae9' },
+          { label: 'Выполнение регламента', value: schedule, detail: schedule >= 70 ? 'Большинство задач выполнено, значимые этапы не сорваны.' : 'Есть незавершенные задачи или заметные задержки по расписанию.', color: '#e6b85c' }
+        ];
+      }
+
+      // Подробный многофакторный табель суточной смены
+      function renderShiftReport() {
+        ctx.fillStyle = 'rgba(15, 12, 10, 0.94)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillStyle = '#221914'; ctx.fillRect(115, 24, 770, 632);
+        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 4; ctx.strokeRect(115, 24, 770, 632);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 22px "Segoe UI", sans-serif';
+        ctx.fillText('ИТОГОВЫЙ ТАБЕЛЬ ДЕЖУРНОЙ СМЕНЫ', 500, 58);
+        ctx.fillStyle = '#e5d7bd'; ctx.font = '12px monospace';
+        ctx.fillText('Слоновник зоопарка · 08:00–20:00', 500, 81);
+
+        ctx.textAlign = 'left'; ctx.font = '12px "Segoe UI", sans-serif'; ctx.fillStyle = '#f5eedb';
+        const summaryRows = [
+          { label: 'Убрано навоза', val: `${Math.round(stats.manureCleanedKg)} кг` },
+          { label: 'Раздано порций корма', val: `${stats.foodDelivered}` },
+          { label: 'Успешно собрано проб', val: `${stats.urineSamplesCollected} (пропущено ${stats.missedUrineSamples})` },
+          { label: 'Проведено расчисток стоп', val: `${stats.pedicuresDone} (пропущено ${stats.missedPedicures})` },
+          { label: 'Записано осмотров', val: `${stats.inspectionsDone}` },
+          { label: 'Задач смены выполнено', val: `${shiftTaskDefinitions.filter(t => taskComplete(t.id)).length}/${shiftTaskDefinitions.length}` }
+        ];
+        summaryRows.forEach((r, i) => {
+          const y = 105 + i * 20;
+          ctx.fillStyle = '#cbbda6'; ctx.fillText(r.label, 150, y);
+          ctx.textAlign = 'right'; ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 12px monospace'; ctx.fillText(r.val, 850, y);
+          ctx.textAlign = 'left'; ctx.font = '12px "Segoe UI", sans-serif';
+        });
+
+        const assessment = calculateShiftAssessment();
+        ctx.fillStyle = '#e8d8b8'; ctx.font = 'bold 13px monospace'; ctx.fillText('ОЦЕНКА ПО ЧЕТЫРЕМ НАПРАВЛЕНИЯМ', 150, 238);
+        assessment.forEach((a, i) => {
+          const y = 258 + i * 52;
+          ctx.fillStyle = '#d6cbb8'; ctx.font = 'bold 12px "Segoe UI", sans-serif'; ctx.fillText(a.label, 150, y);
+          ctx.fillStyle = '#3d3329'; ctx.fillRect(150, y + 8, 360, 10);
+          ctx.fillStyle = a.color; ctx.fillRect(150, y + 8, 360 * a.value / 100, 10);
+          ctx.fillStyle = '#f5eedb'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'right'; ctx.fillText(`${a.value}/100`, 520, y + 17);
+          ctx.textAlign = 'left'; ctx.fillStyle = '#c0b6a4'; ctx.font = '10px "Segoe UI", sans-serif';
+          ctx.fillText(a.detail, 535, y + 7, 315);
+        });
+
+        const overall = Math.round(assessment.reduce((sum, a) => sum + a.value, 0) / assessment.length);
+        const grade = overall >= 88 ? 'S' : (overall >= 75 ? 'A' : (overall >= 58 ? 'B' : (overall >= 40 ? 'C' : 'D')));
+        const medalTitle = overall >= 88 ? 'Образцовая смена' : (overall >= 75 ? 'Квалифицированный дежурный' : (overall >= 58 ? 'Добросовестная работа' : (overall >= 40 ? 'Есть важные упущения' : 'Смена требует разбора')));
+        ctx.fillStyle = '#18120e'; ctx.fillRect(150, 485, 700, 67);
+        ctx.strokeStyle = overall >= 75 ? '#d4af37' : '#8d7659'; ctx.lineWidth = 2; ctx.strokeRect(150, 485, 700, 67);
+        ctx.textAlign = 'center'; ctx.fillStyle = overall >= 75 ? '#f1c40f' : '#d6b589'; ctx.font = 'bold 40px monospace'; ctx.fillText(grade, 200, 531);
+        ctx.textAlign = 'left'; ctx.fillStyle = '#f5eedb'; ctx.font = 'bold 18px "Segoe UI", sans-serif'; ctx.fillText(medalTitle, 245, 513);
+        ctx.fillStyle = '#d6cbb8'; ctx.font = '12px monospace'; ctx.fillText(`Итог: ${overall}/100 · игровые очки: ${stats.totalScore}`, 245, 536);
+
+        const recommendations = [];
+        if (assessment[0].value < 70) recommendations.push('проверьте сытость и жажду всех слоних');
+        if (assessment[1].value < 70) recommendations.push('улучшите уборку и обслуживание поилки');
+        if (assessment[2].value < 70) recommendations.push('завершите процедуры и передачу журнала');
+        if (assessment[3].value < 70) recommendations.push('сверяйтесь с планшетом в каждой фазе смены');
+        ctx.fillStyle = '#e5d7bd'; ctx.font = '11px "Segoe UI", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(recommendations.length ? `Рекомендация: ${recommendations.join('; ')}.` : 'Все ключевые направления работы на хорошем уровне.', 500, 573, 690);
+
+        ctx.fillStyle = '#27ae60'; ctx.fillRect(360, 595, 280, 42);
+        ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 2; ctx.strokeRect(360, 595, 280, 42);
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 14px "Segoe UI", sans-serif';
+        ctx.fillText('НАЧАТЬ НОВУЮ СМЕНУ [SPACE]', 500, 621);
+        ctx.textAlign = 'left';
+      }
+
+      // ==========================================
+      // 8. ЗАПУСК ИГРОВОГО ЦИКЛА
+      // ==========================================
+      function gameLoop(timestamp) {
+        const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+        lastTime = timestamp;
+
+        update(dt);
+        render();
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      requestAnimationFrame(gameLoop);
+    </script>
+  </body>
+</html>

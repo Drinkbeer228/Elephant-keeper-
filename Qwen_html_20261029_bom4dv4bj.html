@@ -1,0 +1,2162 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Симулятор дежурного кипера слоновника</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{width:100%;height:100%;overflow:hidden;background:#0f0d0a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#f0e8d8;touch-action:none}
+#app{width:100%;height:100%;position:relative;display:flex;align-items:center;justify-content:center}
+canvas{display:block;background:#2a2a2a;image-rendering:auto}
+#rotateHint{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:#0f0d0a;z-index:1000;text-align:center;padding:20px}
+#rotateHint .icon{font-size:80px;animation:rotate 2s infinite ease-in-out}
+#rotateHint p{margin-top:20px;font-size:18px;color:#a09888}
+@keyframes rotate{0%,100%{transform:rotate(0)}50%{transform:rotate(90deg)}}
+
+#hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:8px;pointer-events:none;z-index:10;gap:8px}
+.hudPanel{background:rgba(18,15,12,0.82);border:1px solid rgba(212,175,110,0.25);border-radius:10px;padding:7px 12px;font-size:13px;pointer-events:auto;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hudPanel b{color:#f0c878;font-weight:600}
+.hudPanel .sep{color:rgba(212,175,110,0.3);margin:0 2px}
+.hudPanel .warn{color:#ff8a50}
+.hudPanel .good{color:#8bc34a}
+.hudPanel .bad{color:#f4511e}
+#hudTask{font-size:12px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hudTask .taskLabel{color:#f0c878;font-weight:600}
+#hudTask .taskTime{color:#ff8a50;margin-left:6px}
+#hudTask .taskTime.urgent{color:#f4511e;font-weight:700;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.6}}
+
+#controls{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-end;padding:12px;pointer-events:none;z-index:10}
+.dpad{position:relative;width:140px;height:140px;pointer-events:auto}
+.dpad button{position:absolute;width:46px;height:46px;background:rgba(18,15,12,0.7);border:1px solid rgba(212,175,110,0.35);border-radius:10px;color:#f0e8d8;font-size:20px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);transition:background 0.1s}
+.dpad button:active{background:rgba(240,200,120,0.4)}
+.dpad .up{top:0;left:47px}
+.dpad .down{bottom:0;left:47px}
+.dpad .left{top:47px;left:0}
+.dpad .right{top:47px;right:0}
+.actions{display:flex;gap:10px;pointer-events:auto;flex-wrap:wrap;justify-content:flex-end;max-width:220px}
+.actions button{width:56px;height:56px;background:rgba(18,15,12,0.7);border:1px solid rgba(212,175,110,0.35);border-radius:50%;color:#f0e8d8;font-size:11px;font-weight:600;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:background 0.1s}
+.actions button:active{background:rgba(240,200,120,0.4)}
+.actions button small{font-size:9px;opacity:0.85;font-weight:400;margin-top:1px}
+.actions .btnA{background:rgba(139,195,74,0.35);border-color:rgba(139,195,74,0.7)}
+.actions .btnB{background:rgba(255,138,80,0.3);border-color:rgba(255,138,80,0.65)}
+.actions .btnX{background:rgba(79,195,247,0.3);border-color:rgba(79,195,247,0.65)}
+.actions .btnY{background:rgba(233,30,99,0.3);border-color:rgba(233,30,99,0.65)}
+
+.modal{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(22,18,14,0.97);border:1px solid rgba(212,175,110,0.4);border-radius:14px;padding:18px;width:92%;max-width:520px;max-height:82vh;overflow-y:auto;z-index:50;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+.modal h2{color:#f0c878;margin-bottom:12px;font-size:18px;display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1px solid rgba(212,175,110,0.2)}
+.modal .closeBtn{background:#c62828;color:#fff;border:none;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:background 0.15s}
+.modal .closeBtn:hover{background:#e53935}
+.modal .section{background:rgba(255,255,255,0.03);border:1px solid rgba(212,175,110,0.12);border-radius:10px;padding:12px;margin-bottom:10px}
+.modal .section h3{color:#f0c878;font-size:13px;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600}
+.modal .stat{display:flex;justify-content:space-between;font-size:13px;margin:3px 0;align-items:center}
+.modal .stat span:first-child{color:#c0b8a8}
+.modal .stat span:last-child{color:#f0e8d8;font-weight:600}
+.modal .bar{height:8px;background:rgba(0,0,0,0.4);border-radius:4px;overflow:hidden;margin:2px 0 8px;border:1px solid rgba(255,255,255,0.05)}
+.modal .barFill{height:100%;transition:width 0.3s;border-radius:3px}
+
+#dialog{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(22,18,14,0.97);border:1px solid rgba(240,200,120,0.5);border-radius:14px;padding:20px;max-width:420px;width:92%;z-index:55;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+#dialog h2{color:#f0c878;margin-bottom:10px;font-size:18px}
+#dialog p{margin-bottom:15px;line-height:1.55;font-size:14px;white-space:pre-line;color:#e0d8c8}
+#dialogButtons{display:flex;flex-wrap:wrap;gap:8px}
+#dialog button{background:#d4af6e;color:#1a1410;border:none;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px;transition:background 0.15s,transform 0.1s}
+#dialog button:hover{background:#e0c080}
+#dialog button:active{transform:scale(0.97)}
+#dialog button.secondary{background:rgba(255,255,255,0.08);color:#f0e8d8;border:1px solid rgba(212,175,110,0.3)}
+#dialog button.secondary:hover{background:rgba(255,255,255,0.14)}
+
+.elephantCard{background:rgba(255,255,255,0.03);border:1px solid rgba(212,175,110,0.2);border-radius:10px;padding:12px;margin-bottom:10px;transition:border-color 0.2s}
+.elephantCard.critical{border-color:rgba(244,81,30,0.6);background:rgba(244,81,30,0.06)}
+.elephantCard.warning{border-color:rgba(255,138,80,0.5);background:rgba(255,138,80,0.05)}
+.elephantCard.good{border-color:rgba(139,195,74,0.4);background:rgba(139,195,74,0.04)}
+.elephantCard .cardHeader{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(212,175,110,0.15)}
+.elephantCard .cardHeader b{color:#f0c878;font-size:15px}
+.elephantCard .cardHeader .personality{color:#a09888;font-size:12px;font-style:italic}
+.elephantCard .cardHeader .status{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.elephantCard .cardHeader .status.ok{background:rgba(139,195,74,0.2);color:#8bc34a}
+.elephantCard .cardHeader .status.warn{background:rgba(255,138,80,0.2);color:#ff8a50}
+.elephantCard .cardHeader .status.bad{background:rgba(244,81,30,0.2);color:#f4511e}
+
+.taskItem{background:rgba(255,255,255,0.03);border-left:3px solid #d4af6e;padding:8px 10px;border-radius:4px;margin:5px 0;font-size:13px;transition:background 0.15s}
+.taskItem.urgent{border-left-color:#f4511e;background:rgba(244,81,30,0.08)}
+.taskItem.soon{border-left-color:#ff8a50;background:rgba(255,138,80,0.05)}
+.taskItem .taskTitle{font-weight:600;color:#f0e8d8;margin-bottom:3px}
+.taskItem .taskDesc{color:#a09888;font-size:12px;margin-bottom:4px}
+.taskItem .taskMeta{display:flex;justify-content:space-between;font-size:11px;color:#c0b8a8}
+.taskItem .taskMeta .time{font-weight:600}
+
+.invGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.invItem{background:rgba(255,255,255,0.04);border:1px solid rgba(212,175,110,0.15);border-radius:8px;padding:8px;text-align:center;font-size:12px}
+.invItem .invIcon{font-size:22px;display:block;margin-bottom:3px}
+.invItem .invCount{color:#f0c878;font-weight:700;font-size:14px}
+.invItem .invName{color:#a09888;font-size:11px}
+
+.journalEntry{background:rgba(255,255,255,0.03);border-left:3px solid #a1887f;padding:8px 10px;margin-bottom:6px;border-radius:4px;font-size:13px;line-height:1.45}
+.journalEntry .time{color:#a1887f;font-size:11px;font-weight:600;margin-bottom:2px;display:block}
+.journalEntry.critical{border-left-color:#f4511e}
+.journalEntry.success{border-left-color:#8bc34a}
+.journalEntry.info{border-left-color:#4fc3f7}
+
+#qte{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);background:rgba(22,18,14,0.97);border:2px solid #ff8a50;border-radius:14px;padding:22px;z-index:60;display:none;text-align:center;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.7)}
+#qte h3{color:#ff8a50;margin-bottom:8px;font-size:18px}
+#qte .keys{display:flex;gap:8px;justify-content:center;margin:16px 0}
+#qte .key{width:52px;height:52px;background:rgba(255,255,255,0.06);border:2px solid rgba(212,175,110,0.4);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold;color:#f0e8d8;transition:all 0.15s}
+#qte .key.active{background:rgba(255,138,80,0.3);border-color:#ff8a50;color:#fff;box-shadow:0 0 12px rgba(255,138,80,0.5)}
+#qte .key.done{background:rgba(139,195,74,0.3);border-color:#8bc34a;color:#fff}
+#qte .timer{height:6px;background:rgba(0,0,0,0.4);border-radius:3px;overflow:hidden;margin-top:12px;border:1px solid rgba(255,255,255,0.05)}
+#qte .timerFill{height:100%;background:linear-gradient(90deg,#ff8a50,#f4511e);transition:width 0.1s linear}
+
+#report{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(22,18,14,0.97);border:1px solid rgba(139,195,74,0.5);border-radius:14px;padding:22px;width:92%;max-width:520px;max-height:85vh;overflow-y:auto;z-index:70;display:none;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,0.7)}
+#report h2{color:#8bc34a;margin-bottom:12px;font-size:22px;text-align:center}
+#report .grade{text-align:center;font-size:64px;font-weight:800;margin:10px 0;letter-spacing:2px;text-shadow:0 2px 8px rgba(0,0,0,0.5)}
+#report .grade.S{color:#f0c878}
+#report .grade.A{color:#8bc34a}
+#report .grade.B{color:#4fc3f7}
+#report .grade.C{color:#ff8a50}
+#report .grade.D{color:#f4511e}
+#report .gradeLabel{text-align:center;color:#a09888;font-size:13px;margin-bottom:14px;text-transform:uppercase;letter-spacing:1px}
+#report .summary{background:rgba(255,255,255,0.03);border:1px solid rgba(212,175,110,0.15);border-radius:10px;padding:14px;margin:10px 0;font-size:14px;line-height:1.6}
+#report .summary .row{display:flex;justify-content:space-between;margin:5px 0;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+#report .summary .row:last-child{border-bottom:none}
+#report .summary .row span:first-child{color:#c0b8a8}
+#report .summary .row b{font-weight:600}
+#report button{background:linear-gradient(180deg,#8bc34a,#689f38);color:#fff;border:none;padding:12px 20px;border-radius:8px;font-weight:700;cursor:pointer;width:100%;font-size:15px;margin-top:12px;transition:transform 0.1s;box-shadow:0 2px 8px rgba(139,195,74,0.3)}
+#report button:hover{transform:translateY(-1px)}
+#report button:active{transform:translateY(0)}
+
+#intro{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(40,30,20,0.97) 0%,rgba(15,13,10,0.99) 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;padding:20px;text-align:center}
+#intro h1{color:#f0c878;font-size:30px;margin-bottom:8px;text-shadow:0 2px 8px rgba(0,0,0,0.5)}
+#intro .subtitle{color:#a09888;font-size:14px;margin-bottom:20px;font-style:italic}
+#intro p{color:#d0c8b8;font-size:14px;max-width:520px;margin-bottom:20px;line-height:1.65;text-align:left;background:rgba(0,0,0,0.3);padding:16px;border-radius:10px;border:1px solid rgba(212,175,110,0.15)}
+#intro p b{color:#f0c878}
+#intro button{background:linear-gradient(180deg,#d4af6e,#a0804a);color:#1a1410;border:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;transition:transform 0.1s;box-shadow:0 4px 16px rgba(212,175,110,0.3)}
+#intro button:hover{transform:translateY(-2px)}
+#intro button:active{transform:translateY(0)}
+
+#pauseOverlay{position:absolute;inset:0;background:rgba(15,13,10,0.85);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:80;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#pauseOverlay h2{color:#f0c878;font-size:36px;margin-bottom:24px;letter-spacing:2px}
+#pauseOverlay button{background:rgba(212,175,110,0.15);color:#f0e8d8;border:1px solid rgba(212,175,110,0.4);padding:12px 28px;border-radius:8px;font-weight:600;cursor:pointer;margin:6px;font-size:15px;min-width:200px;transition:all 0.15s}
+#pauseOverlay button:hover{background:rgba(212,175,110,0.25);border-color:#f0c878}
+#pauseOverlay button.primary{background:linear-gradient(180deg,#d4af6e,#a0804a);color:#1a1410;border-color:#d4af6e}
+
+#toasts{position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:40;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:90%;width:400px}
+.toast{background:rgba(22,18,14,0.95);border:1px solid rgba(212,175,110,0.4);border-radius:8px;padding:10px 14px;font-size:13px;color:#f0e8d8;box-shadow:0 4px 16px rgba(0,0,0,0.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:toastIn 0.3s ease-out,toastOut 0.3s ease-in 2.7s forwards;display:flex;align-items:center;gap:8px}
+.toast.success{border-color:rgba(139,195,74,0.6);background:rgba(22,30,18,0.95)}
+.toast.warning{border-color:rgba(255,138,80,0.6);background:rgba(40,25,15,0.95)}
+.toast.error{border-color:rgba(244,81,30,0.6);background:rgba(40,18,15,0.95)}
+.toast.info{border-color:rgba(79,195,247,0.6);background:rgba(18,25,35,0.95)}
+.toast .toastIcon{font-size:18px}
+@keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(-10px)}}
+
+.modal::-webkit-scrollbar,.report-scroll::-webkit-scrollbar{width:6px}
+.modal::-webkit-scrollbar-track,.report-scroll::-webkit-scrollbar-track{background:rgba(0,0,0,0.2)}
+.modal::-webkit-scrollbar-thumb,.report-scroll::-webkit-scrollbar-thumb{background:rgba(212,175,110,0.3);border-radius:3px}
+</style>
+</head>
+<body>
+<div id="app">
+<canvas id="game"></canvas>
+<div id="hud">
+<div class="hudPanel">
+<span>⏰ <b id="hudTime">08:00</b></span>
+<span class="sep">|</span>
+<span>💰 <b id="hudMoney">0</b>₽</span>
+<span class="sep">|</span>
+<span>⭐ <b id="hudRep">50</b></span>
+</div>
+<div class="hudPanel" id="hudTaskPanel">
+<span id="hudTask">Загрузка...</span>
+</div>
+<div class="hudPanel">
+<span>✓ <b id="hudDone" class="good">0</b></span>
+<span class="sep">/</span>
+<span>✗ <b id="hudFailed" class="bad">0</b></span>
+</div>
+</div>
+<div id="toasts"></div>
+<div id="controls">
+<div class="dpad">
+<button class="up" data-key="ArrowUp">▲</button>
+<button class="down" data-key="ArrowDown">▼</button>
+<button class="left" data-key="ArrowLeft">◀</button>
+<button class="right" data-key="ArrowRight">▶</button>
+</div>
+<div class="actions">
+<button class="btnA" data-key=" ">F<span><small>Действие</small></span></button>
+<button class="btnB" data-key="e">👁<span><small>Осмотр</small></span></button>
+<button class="btnX" data-key="t">📋<span><small>Планшет</small></span></button>
+<button class="btnY" data-key="j">📖<span><small>Журнал</small></span></button>
+</div>
+</div>
+<div id="dialog"><h2 id="dialogTitle"></h2><p id="dialogText"></p><div id="dialogButtons"></div></div>
+<div id="tablet" class="modal">
+<h2>📋 Планшет кипера <button class="closeBtn" onclick="closeTablet()">✕</button></h2>
+<div id="tabletContent"></div>
+</div>
+<div id="journal" class="modal">
+<h2>📖 Журнал смены <button class="closeBtn" onclick="closeJournal()">✕</button></h2>
+<div id="journalContent"></div>
+</div>
+<div id="qte">
+<h3 id="qteTitle">QTE</h3>
+<p id="qteDesc" style="color:#c0b8a8;font-size:13px;margin-bottom:6px">Повторите последовательность!</p>
+<div class="keys" id="qteKeys"></div>
+<div class="timer"><div class="timerFill" id="qteTimer"></div></div>
+</div>
+<div id="report">
+<h2>📊 Итоги смены</h2>
+<div class="grade" id="reportGrade"></div>
+<div class="gradeLabel" id="reportGradeLabel"></div>
+<div class="summary" id="reportSummary"></div>
+<button onclick="restartGame()">Новая смена</button>
+</div>
+<div id="intro">
+<h1>🐘 Симулятор дежурного кипера</h1>
+<div class="subtitle">Слоновник · Дневная смена 08:00–20:00</div>
+<p>
+Ваша задача — провести смену в слоновнике: кормить слонов, чистить стойла, следить за здоровьем и настроением животных, выполнять указания старшего кипера.<br><br>
+<b>Уборка:</b> подбирайте навоз лопатой → загружайте в тележку → отвозите к контейнеру → выгружайте.<br><br>
+<b>Моча:</b> когда слон готов — возьмите бачок и подойдите к нему, чтобы собрать образец.<br><br>
+<b>Управление:</b><br>
+• Стрелки / WASD — движение<br>
+• Пробел / F — действие<br>
+• E — осмотр слона<br>
+• T — планшет кипера<br>
+• J — журнал смены<br>
+• P — пауза<br><br>
+На сенсорных экранах — экранные кнопки.
+</p>
+<button onclick="startGame()">Начать смену</button>
+</div>
+<div id="pauseOverlay">
+<h2>⏸️ ПАУЗА</h2>
+<button class="primary" onclick="resumeGame()">▶ Продолжить</button>
+<button onclick="restartGame()">🔄 Новая смена</button>
+</div>
+</div>
+<div id="rotateHint">
+<div class="icon">📱</div>
+<p>Поверните устройство<br>Слоновник удобнее обходить в горизонтальном режиме</p>
+</div>
+<script>
+const CFG = {
+  WORLD_W: 1200, WORLD_H: 700, KEEPER_SPEED: 110, DAY_LENGTH: 720,
+  GAME_MINUTES_PER_SECOND: 1, SHIFT_START: 8 * 60, SHIFT_END: 20 * 60,
+  ELEPHANT_SPEED: 35, HUNGER_RATE: 0.08, THIRST_RATE: 0.12,
+  CLEANLINESS_DECAY: 0.05, MOOD_DECAY: 0.03, HEALTH_DECAY_DIRTY: 0.1,
+  FEED_AMOUNT: 35, WATER_AMOUNT: 40, CLEAN_AMOUNT: 50, INSPECT_BONUS: 3,
+  REWARD_FEED: 25, REWARD_WATER: 20, REWARD_CLEAN: 30, REWARD_INSPECT: 10,
+  REWARD_MEDIC: 50, REWARD_URINE: 15, REWARD_VET: 40,
+  PENALTY_ACCIDENT: -15, PENALTY_COMPLAINT: -20, PENALTY_PUDDLE: -2,
+  TASK_DEADLINE: 8, QTE_WINDOW: 4.0,
+  DUNG_SPAWN_MIN: 25, DUNG_SPAWN_MAX: 45, DUNG_MAX_PILES: 8,
+  DUNG_PICKUP_RADIUS: 40, CART_CAPACITY: 50, DUNG_CONTAINER_CAPACITY: 100,
+  KEEPER_RADIUS: 18, ELEPHANT_RADIUS: 48,
+  SEPARATION_STRENGTH: 0.5, SEPARATION_MAX: 4.0,
+  // Физиология
+  BLADDER_RATE: 0.14,         // базовая скорость накопления мочи / сек
+  BOWEL_RATE: 0.09,           // базовая скорость накопления кишечника / сек
+  BLADDER_FROM_WATER: 28,     // +мочи после питья
+  BOWEL_FROM_FOOD: 24,        // +кишечника после еды
+  URINATION_THRESHOLD: 92,    // порог "скоро помочится"
+  URINATION_CRITICAL: 100,    // порог автоматического мочеиспускания
+  DEFECATION_THRESHOLD: 88,   // порог дефекации
+  URINE_WARNING_TIME: 12,     // секунд между предупреждением и актом
+  PUDDLE_LIFETIME: 50,        // секунд жизни лужи
+  PUDDLE_CLEANLINESS_HIT: 8,  // снижение чистоты слона рядом с лужей
+};
+
+const state = {
+  running: false, paused: false, gameOver: false, realTime: 0,
+  gameTime: CFG.SHIFT_START, money: 0, reputation: 50,
+  keeper: { x: 200, y: 350, dir: 1, walkFrame: 0, walkTimer: 0 },
+  elephants: [], objects: [], tasks: [], journal: [],
+  inventory: { hay: 5, veggies: 3, medicine: 1, brush: 1, shovel: 1, urineJar: 1 },
+  inspected: {}, completedTasks: 0, failedTasks: 0, accidents: 0, complaints: 0,
+  lastEventTime: 0, qte: null, dialog: null, tabletOpen: false, journalOpen: false,
+  reportOpen: false, dungPiles: [], puddles: [],
+  cart: { x: 180, y: 220, load: 0, attached: false, homeX: 180, homeY: 220 },
+  heldDung: 0, dungCollected: 0, urineCollected: 0,
+  dungSpawnTimer: 0, nextDungSpawn: 30, dungPileIdCounter: 0, puddleIdCounter: 0,
+};
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let scale = 1, offsetX = 0, offsetY = 0, floorDetails = null;
+
+function buildFloorDetails() {
+  const saved = Math.random;
+  let seed = 12345;
+  Math.random = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  floorDetails = { strawPatches: [], sandPatches: [], specks: [], hayStrands: [] };
+  for (let i = 0; i < 35; i++) floorDetails.strawPatches.push({ x: Math.random() * CFG.WORLD_W, y: Math.random() * CFG.WORLD_H, r: 20 + Math.random() * 40 });
+  for (let i = 0; i < 18; i++) floorDetails.sandPatches.push({ x: Math.random() * CFG.WORLD_W, y: Math.random() * CFG.WORLD_H, r: 30 + Math.random() * 60 });
+  for (let i = 0; i < 120; i++) floorDetails.specks.push({ x: Math.random() * CFG.WORLD_W, y: Math.random() * CFG.WORLD_H, c: Math.random() < 0.5 ? '#3a2a1a' : '#6a5a3a', s: 1 + Math.random() * 2 });
+  for (let i = 0; i < 40; i++) floorDetails.hayStrands.push({ x: Math.random() * CFG.WORLD_W, y: Math.random() * CFG.WORLD_H, len: 4 + Math.random() * 8, ang: Math.random() * Math.PI });
+  Math.random = saved;
+}
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const hint = document.getElementById('rotateHint');
+  if (w < h && 'ontouchstart' in window) hint.style.display = 'flex';
+  else hint.style.display = 'none';
+  canvas.width = w; canvas.height = h;
+  scale = Math.min(w / CFG.WORLD_W, h / CFG.WORLD_H);
+  offsetX = (w - CFG.WORLD_W * scale) / 2;
+  offsetY = (h - CFG.WORLD_H * scale) / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
+function rnd(a, b) { return a + Math.random() * (b - a); }
+function formatTime(mins) {
+  const h = Math.floor(mins / 60) % 24, m = Math.floor(mins % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function addJournal(text, type = 'info') {
+  state.journal.unshift({ time: formatTime(state.gameTime), text, type });
+  if (state.journal.length > 50) state.journal.pop();
+}
+
+function getSolidObjects() {
+  return state.objects.filter(o => ['waterer','toolshed','hayStack','straw','log'].includes(o.type));
+}
+function elephantRadius(el) { return CFG.ELEPHANT_RADIUS * el.size; }
+function separateCircles(a, rA, b, rB, strength) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const d = Math.hypot(dx, dy) || 0.0001;
+  const minDist = rA + rB;
+  if (d >= minDist) return false;
+  const overlap = minDist - d;
+  const nx = dx / d, ny = dy / d;
+  const push = Math.min(overlap * strength, CFG.SEPARATION_MAX);
+  a.x -= nx * push * 0.5; a.y -= ny * push * 0.5;
+  b.x += nx * push * 0.5; b.y += ny * push * 0.5;
+  return true;
+}
+function pushOutOfRect(entity, radius, obj, padding) {
+  const pad = padding || 0;
+  const hw = obj.w / 2 + pad + radius, hh = obj.h / 2 + pad + radius;
+  const dx = entity.x - obj.x, dy = entity.y - obj.y;
+  if (Math.abs(dx) < hw && Math.abs(dy) < hh) {
+    const overlapX = hw - Math.abs(dx), overlapY = hh - Math.abs(dy);
+    if (overlapX < overlapY) entity.x = obj.x + Math.sign(dx || 1) * hw;
+    else entity.y = obj.y + Math.sign(dy || 1) * hh;
+    return true;
+  }
+  return false;
+}
+function pushOutOfCircle(entity, radius, obj, objRadius, padding) {
+  const pad = padding || 0;
+  const minDist = radius + objRadius + pad;
+  const dx = entity.x - obj.x, dy = entity.y - obj.y;
+  const d = Math.hypot(dx, dy) || 0.0001;
+  if (d < minDist) {
+    const nx = dx / d, ny = dy / d;
+    entity.x = obj.x + nx * minDist; entity.y = obj.y + ny * minDist;
+    return true;
+  }
+  return false;
+}
+function constrainCart(cart) {
+  cart.x = clamp(cart.x, 20, CFG.WORLD_W - 20);
+  cart.y = clamp(cart.y, 20, CFG.WORLD_H - 20);
+  for (const obj of getSolidObjects()) {
+    if (obj.type === 'waterer') pushOutOfCircle(cart, 15, obj, 32, 2);
+    else pushOutOfRect(cart, 15, obj, 2);
+  }
+}
+
+function showToast(text, type = 'info', icon = 'ℹ️') {
+  const container = document.getElementById('toasts');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = `<span class="toastIcon">${icon}</span><span>${text}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 3100);
+}
+
+// Создание слона с физиологическими параметрами
+function createElephant(cfg) {
+  return {
+    id: cfg.id, name: cfg.name, age: cfg.age,
+    x: cfg.x, y: cfg.y, dir: cfg.dir,
+    mood: cfg.mood, hunger: cfg.hunger, thirst: cfg.thirst,
+    cleanliness: cfg.cleanliness, health: cfg.health,
+    state: 'idle', stateTimer: 0,
+    targetX: cfg.x, targetY: cfg.y,
+    walkFrame: 0, walkTimer: 0,
+    color: cfg.color, size: cfg.size, personality: cfg.personality,
+    breathPhase: cfg.breathPhase, headBob: 0, trunkPhase: cfg.trunkPhase,
+    // Физиологические параметры
+    bladder: cfg.bladder || 0,        // 0..100 — мочевой пузырь
+    bowel: cfg.bowel || 0,            // 0..100 — кишечник
+    urinationWarning: false,          // флаг "скоро помочится"
+    urinationCountdown: 0,            // обратный отсчёт до акта
+    lastUrination: 0,                 // игровое время последнего мочеиспускания
+    lastDefecation: 0,                // игровое время последней дефекации
+    puddleCooldown: 0,                // защита от серии луж
+  };
+}
+
+function initWorld() {
+  state.elephants = [
+    createElephant({ id: 'audrey', name: 'Одри', age: 42, x: 400, y: 250, dir: 1, mood: 75, hunger: 30, thirst: 30, cleanliness: 80, health: 90, color: '#7a6a5a', size: 1.0, personality: 'спокойная', breathPhase: 0, trunkPhase: Math.random() * Math.PI * 2, bladder: 10, bowel: 15 }),
+    createElephant({ id: 'margo', name: 'Марго', age: 28, x: 700, y: 400, dir: -1, mood: 65, hunger: 45, thirst: 40, cleanliness: 70, health: 85, color: '#8a7a6a', size: 0.95, personality: 'любопытная', breathPhase: Math.PI * 0.5, trunkPhase: Math.random() * Math.PI * 2, bladder: 25, bowel: 10 }),
+    createElephant({ id: 'pretty', name: 'Прэтти', age: 15, x: 950, y: 280, dir: 1, mood: 80, hunger: 20, thirst: 25, cleanliness: 90, health: 95, color: '#6a5a4a', size: 0.85, personality: 'игривая', breathPhase: Math.PI, trunkPhase: Math.random() * Math.PI * 2, bladder: 5, bowel: 5 }),
+  ];
+  state.objects = [
+    { type: 'feeder', x: 300, y: 180, w: 80, h: 40, label: 'Кормушка Одри', elephantId: 'audrey' },
+    { type: 'feeder', x: 620, y: 480, w: 80, h: 40, label: 'Кормушка Марго', elephantId: 'margo' },
+    { type: 'feeder', x: 1020, y: 200, w: 80, h: 40, label: 'Кормушка Прэтти', elephantId: 'pretty' },
+    { type: 'waterer', x: 500, y: 350, w: 60, h: 60, label: 'Поилка' },
+    { type: 'log', x: 850, y: 500, w: 120, h: 30, label: 'Бревно-чесалка' },
+    { type: 'rest', x: 150, y: 500, w: 140, h: 100, label: 'Зона отдыха Прэтти', elephantId: 'pretty' },
+    { type: 'dung', x: 1100, y: 600, w: 70, h: 50, label: 'Контейнер для навоза', fill: 0, capacity: CFG.DUNG_CONTAINER_CAPACITY },
+    { type: 'toolshed', x: 80, y: 100, w: 100, h: 80, label: 'Склад инвентаря' },
+    { type: 'straw', x: 400, y: 550, w: 100, h: 60, label: 'Солома' },
+    { type: 'hayStack', x: 200, y: 150, w: 80, h: 60, label: 'Стог сена' },
+  ];
+  state.tasks = []; state.journal = [];
+  state.inventory = { hay: 5, veggies: 3, medicine: 1, brush: 1, shovel: 1, urineJar: 1 };
+  state.inspected = {}; state.completedTasks = 0; state.failedTasks = 0;
+  state.accidents = 0; state.complaints = 0; state.lastEventTime = 0;
+  state.gameTime = CFG.SHIFT_START; state.realTime = 0;
+  state.money = 0; state.reputation = 50;
+  state.keeper.x = 200; state.keeper.y = 350;
+  state.qte = null; state.dialog = null;
+  state.tabletOpen = false; state.journalOpen = false; state.reportOpen = false;
+  state.dungPiles = []; state.puddles = [];
+  state.cart = { x: 180, y: 220, load: 0, attached: false, homeX: 180, homeY: 220 };
+  state.heldDung = 0; state.dungCollected = 0; state.urineCollected = 0;
+  state.dungSpawnTimer = 0; state.nextDungSpawn = rnd(CFG.DUNG_SPAWN_MIN, CFG.DUNG_SPAWN_MAX);
+  state.dungPileIdCounter = 0; state.puddleIdCounter = 0;
+  floatingTexts.length = 0;
+  Object.keys(keys).forEach(k => { keys[k] = false; });
+  const toastsEl = document.getElementById('toasts');
+  if (toastsEl) toastsEl.innerHTML = '';
+  ['qte','dialog','tablet','journal'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  if (!floorDetails) buildFloorDetails();
+  addJournal('Смена началась. Добро пожаловать в слоновник!', 'success');
+  addJournal('Старший кипер: "Проверь всех слонов и покорми их до 10:00."', 'info');
+  generateInitialTasks();
+}
+
+function generateInitialTasks() {
+  state.tasks.push({ id: 't1', type: 'inspect', elephantId: 'audrey', title: 'Осмотреть Одри', desc: 'Проверить состояние Одри', deadline: state.gameTime + CFG.TASK_DEADLINE, reward: CFG.REWARD_INSPECT, done: false, failed: false });
+  state.tasks.push({ id: 't2', type: 'feed', elephantId: 'audrey', title: 'Покормить Одри', desc: 'Дать сено и овощи', deadline: state.gameTime + CFG.TASK_DEADLINE * 2, reward: CFG.REWARD_FEED, done: false, failed: false });
+  state.tasks.push({ id: 't3', type: 'inspect', elephantId: 'margo', title: 'Осмотреть Марго', desc: 'Проверить состояние Марго', deadline: state.gameTime + CFG.TASK_DEADLINE, reward: CFG.REWARD_INSPECT, done: false, failed: false });
+  state.tasks.push({ id: 't4', type: 'water', elephantId: 'margo', title: 'Напоить Марго', desc: 'Дать воды', deadline: state.gameTime + CFG.TASK_DEADLINE * 2, reward: CFG.REWARD_WATER, done: false, failed: false });
+  state.tasks.push({ id: 't5', type: 'clean', elephantId: 'audrey', title: 'Убрать у Одри', desc: 'Убрать 3 кучки навоза', deadline: state.gameTime + CFG.TASK_DEADLINE * 3, reward: CFG.REWARD_CLEAN, done: false, failed: false, progress: 0, target: 3 });
+}
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault();
+  if (e.key.toLowerCase() === 'p') togglePause();
+  if (!state.running || state.paused || state.gameOver) return;
+  if (state.qte) return;
+  if (e.key.toLowerCase() === 'f' || e.key === ' ') doAction();
+  if (e.key.toLowerCase() === 'e') doInspect();
+  if (e.key.toLowerCase() === 't') toggleTablet();
+  if (e.key.toLowerCase() === 'j') toggleJournal();
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+document.querySelectorAll('.dpad button, .actions button').forEach(btn => {
+  const key = btn.dataset.key;
+  const handler = (down) => (e) => {
+    e.preventDefault();
+    keys[key.toLowerCase()] = down;
+    if (down && state.running && !state.paused && !state.gameOver && !state.qte) {
+      if (key === ' ') doAction();
+      if (key === 'e') doInspect();
+      if (key === 't') toggleTablet();
+      if (key === 'j') toggleJournal();
+    }
+  };
+  btn.addEventListener('touchstart', handler(true), { passive: false });
+  btn.addEventListener('touchend', handler(false), { passive: false });
+  btn.addEventListener('mousedown', handler(true));
+  btn.addEventListener('mouseup', handler(false));
+  btn.addEventListener('mouseleave', handler(false));
+});
+
+// ==================== ФИЗИОЛОГИЯ ====================
+function updatePhysiology(dt) {
+  for (const el of state.elephants) {
+    // Базовое накопление мочи и кишечника
+    el.bladder = Math.min(100, el.bladder + CFG.BLADDER_RATE * dt);
+    el.bowel = Math.min(100, el.bowel + CFG.BOWEL_RATE * dt);
+    
+    // Cooldown лужи
+    if (el.puddleCooldown > 0) el.puddleCooldown -= dt;
+    
+    // Мочеиспускание
+    if (el.bladder >= CFG.URINATION_THRESHOLD && !el.urinationWarning) {
+      el.urinationWarning = true;
+      el.urinationCountdown = CFG.URINE_WARNING_TIME;
+      addJournal(`⚠️ ${el.name}: скоро помочится`, 'warning');
+      showToast(`${el.name}: нужен бачок`, 'warning', '💧');
+    }
+    if (el.urinationWarning) {
+      el.urinationCountdown -= dt;
+      if (el.bladder >= CFG.URINATION_CRITICAL || el.urinationCountdown <= 0) {
+        performUrination(el, false);
+      }
+    }
+    
+    // Дефекация — привязана к bowel, не к случайному таймеру
+    if (el.bowel >= CFG.DEFECATION_THRESHOLD && el.puddleCooldown <= 0) {
+      performDefecation(el);
+    }
+  }
+  
+  // Обновление луж
+  for (let i = state.puddles.length - 1; i >= 0; i--) {
+    const p = state.puddles[i];
+    p.age += dt;
+    // Лужа снижает чистоту слонов рядом
+    for (const el of state.elephants) {
+      if (dist(el, p) < 50) {
+        el.cleanliness = Math.max(0, el.cleanliness - CFG.PUDDLE_CLEANLINESS_HIT * dt * 0.1);
+      }
+    }
+    if (p.age >= CFG.PUDDLE_LIFETIME) {
+      state.puddles.splice(i, 1);
+    }
+  }
+}
+
+function performUrination(el, collected) {
+  el.bladder = 0;
+  el.urinationWarning = false;
+  el.urinationCountdown = 0;
+  el.lastUrination = state.gameTime;
+  el.puddleCooldown = 15; // защита от серии
+  
+  if (collected) {
+    state.urineCollected++;
+    addJournal(`✓ Собрана моча у ${el.name}`, 'success');
+    showFloatingText(el.x, el.y - 60, '✓ Моча собрана', '#4fc3f7');
+    showToast(`Образец собран`, 'success', '🧪');
+    // Бонус к репутации
+    state.reputation = Math.min(100, state.reputation + 1);
+    // Проверка ветеринарной задачи
+    completeVetTaskIfMatches(el.id, 'vet_urine');
+  } else {
+    // Непреднамеренное мочеиспускание — лужа на полу
+    const px = el.x + rnd(-20, 20);
+    const py = el.y + rnd(20, 40);
+    state.puddles.push({
+      id: ++state.puddleIdCounter,
+      x: px, y: py,
+      elephantId: el.id,
+      age: 0,
+      amount: 10,
+    });
+    addJournal(`💦 ${el.name} помочился на пол`, 'critical');
+    showFloatingText(el.x, el.y - 60, '💦 Лужа', '#4fc3f7');
+    showToast(`Лужа от ${el.name}`, 'error', '💦');
+    state.reputation = Math.max(0, state.reputation + CFG.PENALTY_PUDDLE);
+    el.cleanliness = Math.max(0, el.cleanliness - 5);
+  }
+}
+
+function performDefecation(el) {
+  el.bowel = 0;
+  el.lastDefecation = state.gameTime;
+  el.puddleCooldown = 10;
+  
+  // Создаём кучку навоза через существующий механизм
+  const angle = Math.random() * Math.PI * 2;
+  const distance = 40 + Math.random() * 50;
+  const x = clamp(el.x + Math.cos(angle) * distance, 40, CFG.WORLD_W - 40);
+  const y = clamp(el.y + Math.sin(angle) * distance, 40, CFG.WORLD_H - 40);
+  
+  state.dungPiles.push({
+    id: ++state.dungPileIdCounter,
+    x, y,
+    amount: Math.floor(rnd(10, 18)),
+    elephantId: el.id,
+    age: 0,
+    natural: true, // пометка естественной кучки
+  });
+  
+  addJournal(`💩 ${el.name}: естественная дефекация`, 'info');
+  // Проверка ветеринарной задачи
+  completeVetTaskIfMatches(el.id, 'vet_feces');
+}
+
+// Завершение ветеринарной задачи, если она совпадает
+function completeVetTaskIfMatches(elephantId, vetType) {
+  const task = state.tasks.find(t => t.type === vetType && t.elephantId === elephantId && !t.done && !t.failed);
+  if (task) {
+    completeTask(task);
+    addJournal(`🩺 Ветеринарное поручение выполнено: ${task.title}`, 'success');
+    showToast(`Ветзадача выполнена`, 'success', '🩺');
+  }
+}
+
+// Получить понятный физиологический статус слона
+function getPhysiologyStatus(el) {
+  const statuses = [];
+  if (el.urinationWarning) statuses.push({ text: 'Скоро в туалет', icon: '💧', cls: 'warn' });
+  if (el.hunger < 30) statuses.push({ text: 'Нужна еда', icon: '🍽️', cls: 'bad' });
+  if (el.thirst < 30) statuses.push({ text: 'Нужна вода', icon: '💦', cls: 'bad' });
+  if (el.cleanliness < 40) statuses.push({ text: 'Нужно убрать', icon: '🧹', cls: 'warn' });
+  if (el.mood < 40) statuses.push({ text: 'Плохое настроение', icon: '😔', cls: 'warn' });
+  if (el.health < 40) statuses.push({ text: 'Нужен ветеринар', icon: '⚕️', cls: 'bad' });
+  if (statuses.length === 0) {
+    if (el.mood > 70 && el.hunger > 60) statuses.push({ text: 'Доволен', icon: '😊', cls: 'ok' });
+    else statuses.push({ text: 'Норма', icon: '✓', cls: 'ok' });
+  }
+  return statuses;
+}
+
+// ==================== СПАВН КУЧЕК ====================
+function isPositionClear(x, y, radius) {
+  for (const obj of state.objects) {
+    if (obj.type === 'rest') continue;
+    if (Math.abs(x - obj.x) < obj.w/2 + radius && Math.abs(y - obj.y) < obj.h/2 + radius) return false;
+  }
+  for (const p of state.dungPiles) {
+    if (Math.hypot(x - p.x, y - p.y) < 30) return false;
+  }
+  for (const p of state.puddles) {
+    if (Math.hypot(x - p.x, y - p.y) < 25) return false;
+  }
+  return x >= 40 && x <= CFG.WORLD_W - 40 && y >= 40 && y <= CFG.WORLD_H - 40;
+}
+
+function spawnDungPile() {
+  // Резервный спавн — если по какой-то причине bowel не сработал
+  if (state.dungPiles.length >= CFG.DUNG_MAX_PILES) return;
+  const el = pick(state.elephants);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 50 + Math.random() * 80;
+    const x = el.x + Math.cos(angle) * distance;
+    const y = el.y + Math.sin(angle) * distance;
+    if (isPositionClear(x, y, 15)) {
+      state.dungPiles.push({ id: ++state.dungPileIdCounter, x, y, amount: Math.floor(rnd(8, 16)), elephantId: el.id, age: 0 });
+      return;
+    }
+  }
+}
+
+// ==================== ДЕЙСТВИЯ ====================
+function doAction() {
+  if (state.tabletOpen || state.journalOpen || state.reportOpen || state.dialog) return;
+  const k = state.keeper;
+  
+  // 1. Подбор навоза (приоритет высокий)
+  if (state.inventory.shovel > 0) {
+    let nearestPile = null, nearestDist = Infinity;
+    for (const pile of state.dungPiles) {
+      const d = dist(k, pile);
+      if (d < CFG.DUNG_PICKUP_RADIUS && d < nearestDist) { nearestDist = d; nearestPile = pile; }
+    }
+    if (nearestPile) {
+      const currentLoad = state.cart.load + state.heldDung;
+      if (currentLoad >= CFG.CART_CAPACITY) {
+        showFloatingText(k.x, k.y - 40, 'Тележка полна', '#ff8a50');
+        showToast('Тележка заполнена — выгрузите в контейнер', 'warning', '🛒');
+      } else {
+        const canTake = Math.min(nearestPile.amount, CFG.CART_CAPACITY - currentLoad);
+        state.heldDung += canTake;
+        state.dungCollected += canTake;
+        const idx = state.dungPiles.indexOf(nearestPile);
+        if (idx >= 0) state.dungPiles.splice(idx, 1);
+        showFloatingText(nearestPile.x, nearestPile.y - 20, `+${canTake} навоза`, '#a1887f');
+        showToast(`Подобрано: ${canTake}`, 'success', '💩');
+        addJournal(`Подобран навоз (${canTake}). В руках: ${state.heldDung}.`, 'info');
+        progressCleanTask(nearestPile.elephantId);
+      }
+      return;
+    }
+  }
+  
+  // 2. Взаимодействие со слоном
+  for (const el of state.elephants) {
+    if (dist(k, el) < 80) { handleElephantAction(el); return; }
+  }
+  
+  // 3. Объекты
+  for (const obj of state.objects) {
+    if (Math.abs(k.x - obj.x) < obj.w/2 + 20 && Math.abs(k.y - obj.y) < obj.h/2 + 20) {
+      handleObjectAction(obj); return;
+    }
+  }
+  
+  // 4. Тележка
+  if (dist(k, state.cart) < 50) { handleCartAction(); return; }
+}
+
+function progressCleanTask(elephantId) {
+  const task = state.tasks.find(t => t.type === 'clean' && t.elephantId === elephantId && !t.done && !t.failed);
+  if (task) {
+    task.progress = (task.progress || 0) + 1;
+    if (task.progress >= task.target) {
+      completeTask(task);
+      addJournal(`Задача выполнена: убрано у ${state.elephants.find(e => e.id === elephantId).name}`, 'success');
+      showToast(`Уборка завершена`, 'success', '🧹');
+    } else {
+      showFloatingText(state.keeper.x, state.keeper.y - 60, `Уборка: ${task.progress}/${task.target}`, '#a1887f');
+    }
+  }
+}
+
+function handleCartAction() {
+  if (state.heldDung > 0) {
+    const space = CFG.CART_CAPACITY - state.cart.load;
+    const toLoad = Math.min(state.heldDung, space);
+    state.cart.load += toLoad;
+    state.heldDung -= toLoad;
+    showFloatingText(state.cart.x, state.cart.y - 40, `Загружено: ${toLoad}`, '#8bc34a');
+    showToast(`В тележке: ${state.cart.load}/${CFG.CART_CAPACITY}`, 'info', '🛒');
+    addJournal(`Загружено в тележку: ${toLoad}. Итого: ${state.cart.load}/${CFG.CART_CAPACITY}.`, 'info');
+    return;
+  }
+  if (!state.cart.attached && state.cart.load > 0) {
+    state.cart.attached = true;
+    showFloatingText(state.cart.x, state.cart.y - 40, 'Тележка взята', '#4fc3f7');
+    showToast('Тележка следует за вами', 'info', '🛒');
+    addJournal('Тележка взята. Отвезите к контейнеру.', 'info');
+    return;
+  }
+  if (state.cart.attached) {
+    state.cart.attached = false;
+    showFloatingText(state.cart.x, state.cart.y - 40, 'Тележка отпущена', '#a09888');
+    return;
+  }
+  showFloatingText(state.cart.x, state.cart.y - 40, 'Тележка пуста', '#a09888');
+  showToast('Сначала подберите навоз лопатой', 'info', '💩');
+}
+
+function handleElephantAction(el) {
+  const task = state.tasks.find(t => t.elephantId === el.id && !t.done && !t.failed);
+  
+  // 1. Сбор мочи (приоритет — если слон в warning и есть бачок)
+  if (el.urinationWarning && state.inventory.urineJar > 0) {
+    startQTE('Собрать мочу у ' + el.name, ['▲','▼','▲','▼'], 1.3, () => {
+      performUrination(el, true);
+    });
+    return;
+  }
+  
+  // 2. Ветеринарные задачи (кровь)
+  if (task && task.type === 'vet_blood') {
+    if (state.inventory.medicine > 0) {
+      startQTE('Забор крови у ' + el.name, ['▲','◀','▶','▼','▲'], 2.0, () => {
+        completeTask(task);
+        addJournal(`🩺 Забор крови у ${el.name} выполнен.`, 'success');
+        showFloatingText(el.x, el.y - 60, '✓ Анализ взят', '#e91e63');
+        showToast(`Ветзадача выполнена`, 'success', '🩺');
+      });
+    } else {
+      showDialog('Нет расходников', 'Нужно взять лекарство на складе (используется как расходник).', [{ text: 'OK', primary: true }]);
+    }
+    return;
+  }
+  
+  // 3. Стандартные задачи
+  if (task && task.type === 'inspect') {
+    completeTask(task);
+    state.inspected[el.id] = state.gameTime;
+    addJournal(`Осмотрен(а) ${el.name}. Состояние: ${describeElephant(el)}`, 'success');
+    showFloatingText(el.x, el.y - 60, '✓ Осмотр', '#4caf50');
+    showToast(`${el.name}: осмотр выполнен`, 'success', '✓');
+    return;
+  }
+  
+  if (task && task.type === 'feed') {
+    if (state.inventory.hay > 0 && state.inventory.veggies > 0) {
+      startQTE('Покормить ' + el.name, ['▲','▼','◀','▶'], 1.0, () => {
+        state.inventory.hay--; state.inventory.veggies--;
+        el.hunger = Math.min(100, el.hunger + CFG.FEED_AMOUNT);
+        el.mood = Math.min(100, el.mood + 5);
+        // После еды — кишечник наполняется
+        el.bowel = Math.min(100, el.bowel + CFG.BOWEL_FROM_FOOD);
+        completeTask(task);
+        addJournal(`${el.name} накормлен(а).`, 'success');
+        showFloatingText(el.x, el.y - 60, '+35 сытости', '#8bc34a');
+        showToast(`${el.name} накормлена`, 'success', '🍽️');
+      });
+    } else {
+      showDialog('Нет корма', 'Нужно взять сено и овощи на складе.', [{ text: 'OK', primary: true }]);
+    }
+    return;
+  }
+  
+  if (task && task.type === 'water') {
+    startQTE('Напоить ' + el.name, ['▲','▲','▼','▼'], 1.2, () => {
+      el.thirst = Math.min(100, el.thirst + CFG.WATER_AMOUNT);
+      // После питья — мочевой пузырь наполняется
+      el.bladder = Math.min(100, el.bladder + CFG.BLADDER_FROM_WATER);
+      completeTask(task);
+      addJournal(`${el.name} напоен(а).`, 'success');
+      showFloatingText(el.x, el.y - 60, '+40 воды', '#4fc3f7');
+      showToast(`${el.name} напоена`, 'success', '💧');
+    });
+    return;
+  }
+  
+  if (task && task.type === 'clean') {
+    showDialog('Уборка', `Чтобы убрать у ${el.name}:\n• Подберите кучки навоза лопатой (F рядом с кучкой)\n• Загрузите тележку (F рядом с тележкой)\n• Отвезите к контейнеру и выгрузите\n\nПрогресс: ${task.progress || 0}/${task.target}`, [{ text: 'Понятно', primary: true }]);
+    return;
+  }
+  
+  if (task && task.type === 'medicine') {
+    if (state.inventory.medicine > 0) {
+      startQTE('Дать лекарство', ['▲','◀','▶','▼'], 1.8, () => {
+        state.inventory.medicine--;
+        el.health = Math.min(100, el.health + 30);
+        completeTask(task);
+        addJournal(`${el.name} получил(а) лекарство.`, 'success');
+        showFloatingText(el.x, el.y - 60, '+30 здоровья', '#f44336');
+        showToast(`${el.name} получила лекарство`, 'success', '💊');
+      });
+    } else {
+      showDialog('Нет лекарства', 'Нужно взять лекарство на складе.', [{ text: 'OK', primary: true }]);
+    }
+    return;
+  }
+  
+  // Погладить — небольшой бонус настроения
+  el.mood = Math.min(100, el.mood + 2);
+  showFloatingText(el.x, el.y - 60, '♥', '#e91e63');
+}
+
+function handleObjectAction(obj) {
+  if (obj.type === 'toolshed') {
+    showDialog('Склад инвентаря', `Сено: ${state.inventory.hay}\nОвощи: ${state.inventory.veggies}\nЛекарства: ${state.inventory.medicine}\n\nВзять припасы?`, [
+      { text: 'Взять сено (+3)', cb: () => { state.inventory.hay += 3; addJournal('Взято сено со склада.', 'info'); showToast('Взято сено (+3)', 'info', '🌾'); } },
+      { text: 'Взять овощи (+2)', cb: () => { state.inventory.veggies += 2; addJournal('Взяты овощи со склада.', 'info'); showToast('Взяты овощи (+2)', 'info', '🥕'); } },
+      { text: 'Взять лекарство (+1)', cb: () => { state.inventory.medicine += 1; addJournal('Взято лекарство со склада.', 'info'); showToast('Взято лекарство (+1)', 'info', '💊'); } },
+      { text: 'Закрыть', primary: true },
+    ]);
+  } else if (obj.type === 'waterer') {
+    showFloatingText(obj.x, obj.y - 40, '💧 Поилка', '#4fc3f7');
+  } else if (obj.type === 'log') {
+    showFloatingText(obj.x, obj.y - 30, '🪵 Чесалка', '#a1887f');
+  } else if (obj.type === 'dung') {
+    if (state.heldDung > 0) {
+      const space = obj.capacity - obj.fill;
+      if (space <= 0) {
+        showFloatingText(obj.x, obj.y - 40, 'Контейнер полон', '#f4511e');
+        showToast('Контейнер заполнен — навоз останется в руках', 'warning', '🗑️');
+      } else {
+        const toDump = Math.min(state.heldDung, space);
+        state.heldDung -= toDump;
+        obj.fill += toDump;
+        showFloatingText(obj.x, obj.y - 40, `Выгружено: ${toDump}`, '#8bc34a');
+        showToast(`Из рук в контейнер: ${toDump}. Остаток: ${obj.fill}/${obj.capacity}`, 'success', '🗑️');
+        addJournal(`Выгружено из рук в контейнер: ${toDump}. Контейнер: ${obj.fill}/${obj.capacity}.`, 'info');
+      }
+      return;
+    }
+    if (state.cart.load > 0) {
+      const space = obj.capacity - obj.fill;
+      if (space <= 0) {
+        showFloatingText(obj.x, obj.y - 40, 'Контейнер полон', '#f4511e');
+        showToast('Контейнер заполнен', 'error', '🗑️');
+      } else {
+        const toDump = Math.min(state.cart.load, space);
+        state.cart.load -= toDump;
+        obj.fill += toDump;
+        showFloatingText(obj.x, obj.y - 40, `Выгружено: ${toDump}`, '#8bc34a');
+        showToast(`Выгружено: ${toDump}. Контейнер: ${obj.fill}/${obj.capacity}`, 'success', '🗑️');
+        addJournal(`Выгружено в контейнер: ${toDump}. Контейнер: ${obj.fill}/${obj.capacity}.`, 'info');
+        if (state.cart.attached && state.cart.load === 0) state.cart.attached = false;
+      }
+    } else {
+      showFloatingText(obj.x, obj.y - 40, `Контейнер: ${obj.fill}/${obj.capacity}`, '#a09888');
+    }
+  }
+}
+
+function doInspect() {
+  for (const el of state.elephants) {
+    if (dist(state.keeper, el) < 100) {
+      const statuses = getPhysiologyStatus(el);
+      const statusText = statuses.map(s => `${s.icon} ${s.text}`).join('\n');
+      showDialog(`${el.name}`, `Возраст: ${el.age} лет\nХарактер: ${el.personality}\n\n${statusText}\n\nНастроение: ${Math.round(el.mood)}\nСытость: ${Math.round(el.hunger)}\nЖажда: ${Math.round(el.thirst)}\nЧистота: ${Math.round(el.cleanliness)}\nЗдоровье: ${Math.round(el.health)}\n\n${describeElephant(el)}`, [{ text: 'Понятно', primary: true }]);
+      return;
+    }
+  }
+  showFloatingText(state.keeper.x, state.keeper.y - 40, 'Никого рядом', '#ff9800');
+  showToast('Подойдите ближе к слону', 'info', '👁️');
+}
+
+function describeElephant(el) {
+  if (el.health < 40) return '⚠️ Нуждается в ветеринаре!';
+  if (el.urinationWarning) return '💧 Скоро помочится — нужен бачок!';
+  if (el.hunger < 30) return '🍽️ Очень голоден(а).';
+  if (el.thirst < 30) return '💦 Очень хочет пить.';
+  if (el.cleanliness < 40) return '🧹 Пора почистить стойло.';
+  if (el.mood < 40) return '😔 Плохое настроение.';
+  if (el.mood > 80 && el.hunger > 70) return '😊 Доволен(на) и сыт(а).';
+  return 'В целом нормально.';
+}
+
+function completeTask(task) {
+  task.done = true;
+  state.completedTasks++;
+  state.money += task.reward;
+  state.reputation = Math.min(100, state.reputation + 2);
+  showFloatingText(state.keeper.x, state.keeper.y - 50, `+${task.reward}₽`, '#ffd54f');
+}
+
+function failTask(task) {
+  task.failed = true;
+  state.failedTasks++;
+  state.reputation = Math.max(0, state.reputation - 5);
+  addJournal(`❌ Провалена задача: ${task.title}`, 'critical');
+  showToast(`Провалена задача: ${task.title}`, 'error', '✗');
+}
+
+function generateRandomTask() {
+  const el = pick(state.elephants);
+  const types = ['clean', 'feed', 'water', 'medicine', 'vet_urine', 'vet_feces', 'vet_blood'];
+  const type = pick(types);
+  const titles = {
+    clean: 'Почистить стойло', feed: 'Покормить', water: 'Напоить', medicine: 'Лечение',
+    vet_urine: 'Анализ мочи', vet_feces: 'Анализ кала', vet_blood: 'Забор крови'
+  };
+  const descs = {
+    clean: 'Убрать 3 кучки навоза', feed: 'Нужно подкрепиться', water: 'Пора попить', medicine: 'Нужен осмотр ветеринара',
+    vet_urine: 'Собрать образец мочи', vet_feces: 'Собрать образец кала', vet_blood: 'Помочь при заборе крови'
+  };
+  const rewards = {
+    clean: CFG.REWARD_CLEAN, feed: CFG.REWARD_FEED, water: CFG.REWARD_WATER, medicine: CFG.REWARD_MEDIC,
+    vet_urine: CFG.REWARD_URINE, vet_feces: CFG.REWARD_URINE, vet_blood: CFG.REWARD_VET
+  };
+  const task = {
+    id: 't' + Date.now(), type, elephantId: el.id,
+    title: titles[type] + ' — ' + el.name, desc: descs[type],
+    deadline: state.gameTime + CFG.TASK_DEADLINE * 2, reward: rewards[type],
+    done: false, failed: false,
+  };
+  if (type === 'clean') { task.progress = 0; task.target = 3; }
+  state.tasks.push(task);
+  addJournal(`📋 Новая задача: ${titles[type]} — ${el.name}`, 'info');
+  showToast(`Новая задача: ${titles[type]} — ${el.name}`, 'warning', '📋');
+}
+
+function startQTE(title, sequence, speed, onSuccess) {
+  state.qte = { title, sequence, index: 0, speed, onSuccess, timer: CFG.QTE_WINDOW, maxTimer: CFG.QTE_WINDOW, failed: false, done: false };
+  renderQTE();
+  document.getElementById('qte').style.display = 'block';
+}
+
+function renderQTE() {
+  const q = state.qte;
+  document.getElementById('qteTitle').textContent = q.title;
+  const keysDiv = document.getElementById('qteKeys');
+  keysDiv.innerHTML = '';
+  q.sequence.forEach((k, i) => {
+    const div = document.createElement('div');
+    div.className = 'key' + (i < q.index ? ' done' : i === q.index ? ' active' : '');
+    div.textContent = k;
+    keysDiv.appendChild(div);
+  });
+  document.getElementById('qteTimer').style.width = (q.timer / q.maxTimer * 100) + '%';
+}
+
+function handleQTEInput(key) {
+  const q = state.qte;
+  if (!q || q.done) return;
+  const expected = q.sequence[q.index];
+  const map = { 'arrowup': '▲', 'arrowdown': '▼', 'arrowleft': '◀', 'arrowright': '▶' };
+  const pressed = map[key.toLowerCase()] || key.toUpperCase();
+  if (pressed === expected) {
+    q.index++;
+    if (q.index >= q.sequence.length) {
+      q.done = true;
+      document.getElementById('qte').style.display = 'none';
+      q.onSuccess();
+      state.qte = null;
+    } else renderQTE();
+  } else {
+    q.failed = true; q.done = true;
+    document.getElementById('qte').style.display = 'none';
+    showFloatingText(state.keeper.x, state.keeper.y - 50, '✗ Не удалось', '#f44336');
+    showToast('Не удалось выполнить', 'error', '✗');
+    state.qte = null;
+  }
+}
+
+function showDialog(title, text, buttons) {
+  state.dialog = { title, text, buttons };
+  document.getElementById('dialogTitle').textContent = title;
+  document.getElementById('dialogText').textContent = text;
+  const bd = document.getElementById('dialogButtons');
+  bd.innerHTML = '';
+  buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.textContent = b.text;
+    if (!b.primary) btn.className = 'secondary';
+    btn.onclick = () => {
+      document.getElementById('dialog').style.display = 'none';
+      state.dialog = null;
+      if (b.cb) b.cb();
+    };
+    bd.appendChild(btn);
+  });
+  document.getElementById('dialog').style.display = 'block';
+}
+
+function toggleTablet() {
+  state.tabletOpen = !state.tabletOpen;
+  if (state.journalOpen) { state.journalOpen = false; document.getElementById('journal').style.display = 'none'; }
+  if (state.tabletOpen) { renderTablet(); document.getElementById('tablet').style.display = 'block'; }
+  else document.getElementById('tablet').style.display = 'none';
+}
+function closeTablet() { state.tabletOpen = false; document.getElementById('tablet').style.display = 'none'; }
+
+function getElephantStatus(el) {
+  if (el.health < 40) return { cls: 'bad', text: 'КРИТИЧНО' };
+  if (el.hunger < 30 || el.thirst < 30) return { cls: 'bad', text: 'ТРЕБУЕТ ВНИМАНИЯ' };
+  if (el.urinationWarning) return { cls: 'warn', text: 'СКРОРО В ТУАЛЕТ' };
+  if (el.cleanliness < 40 || el.mood < 40) return { cls: 'warn', text: 'ТРЕБУЕТ ВНИМАНИЯ' };
+  if (el.mood > 70 && el.hunger > 60) return { cls: 'ok', text: 'ХОРОШО' };
+  return { cls: 'ok', text: 'НОРМА' };
+}
+
+function getCardClass(el) {
+  if (el.health < 40 || el.hunger < 25 || el.thirst < 25) return 'critical';
+  if (el.urinationWarning || el.cleanliness < 40 || el.mood < 40 || el.hunger < 45 || el.thirst < 45) return 'warning';
+  return 'good';
+}
+
+function renderTablet() {
+  let html = '';
+  html += '<div class="section"><h3>📋 Активные задачи</h3>';
+  const active = state.tasks.filter(t => !t.done && !t.failed);
+  if (active.length === 0) html += '<p style="font-size:13px;color:#a09888">Нет активных задач</p>';
+  else {
+    active.forEach(t => {
+      const left = Math.max(0, t.deadline - state.gameTime);
+      const urgency = left < 3 ? 'urgent' : left < 6 ? 'soon' : '';
+      const timeColor = left < 3 ? '#f4511e' : left < 6 ? '#ff8a50' : '#8bc34a';
+      let progressInfo = '';
+      if (t.type === 'clean') progressInfo = `<div style="color:#a1887f;font-size:11px;margin-top:2px">Прогресс: ${t.progress || 0}/${t.target}</div>`;
+      if (t.type === 'vet_urine') progressInfo = `<div style="color:#4fc3f7;font-size:11px;margin-top:2px">🧪 Соберите мочу у слона</div>`;
+      if (t.type === 'vet_feces') progressInfo = `<div style="color:#a1887f;font-size:11px;margin-top:2px">💩 Подберите кучку этого слона</div>`;
+      if (t.type === 'vet_blood') progressInfo = `<div style="color:#e91e63;font-size:11px;margin-top:2px">🩺 Помогите при заборе крови</div>`;
+      html += `<div class="taskItem ${urgency}"><div class="taskTitle">${t.title}</div><div class="taskDesc">${t.desc}</div>${progressInfo}<div class="taskMeta"><span class="time" style="color:${timeColor}">⏰ ${Math.round(left)} мин</span><span>💰 ${t.reward}₽</span></div></div>`;
+    });
+  }
+  html += '</div>';
+  
+  const dungObj = state.objects.find(o => o.type === 'dung');
+  const dungPct = dungObj ? Math.round(dungObj.fill / dungObj.capacity * 100) : 0;
+  const cartPct = Math.round(state.cart.load / CFG.CART_CAPACITY * 100);
+  const dungColor = dungPct > 75 ? '#f4511e' : dungPct > 40 ? '#ff8a50' : '#8bc34a';
+  const cartColor = cartPct > 75 ? '#f4511e' : cartPct > 40 ? '#ff8a50' : '#8bc34a';
+  
+  html += `<div class="section"><h3>🧹 Санитария</h3>
+    <div class="stat"><span>💩 Кучек на полу</span><b>${state.dungPiles.length}</b></div>
+    <div class="stat"><span>💦 Луж на полу</span><b>${state.puddles.length}</b></div>
+    <div class="stat"><span>✋ В руках</span><b>${state.heldDung}</b></div>
+    <div class="stat"><span>🛒 В тележке</span><b>${state.cart.load}/${CFG.CART_CAPACITY}</b></div>
+    <div class="bar"><div class="barFill" style="width:${cartPct}%;background:${cartColor}"></div></div>
+    <div class="stat"><span>🗑️ В контейнере</span><b>${dungObj ? dungObj.fill : 0}/${dungObj ? dungObj.capacity : 0}</b></div>
+    <div class="bar"><div class="barFill" style="width:${dungPct}%;background:${dungColor}"></div></div>
+    <div class="stat"><span>📊 Собрано навоза</span><b>${state.dungCollected}</b></div>
+    <div class="stat"><span>🧪 Собрано мочи</span><b>${state.urineCollected}</b></div>
+    <div style="color:#a09888;font-size:11px;margin-top:6px;line-height:1.4">Тележка ${state.cart.attached ? '🔗 следует за вами' : '📍 на месте'}</div>
+  </div>`;
+  
+  html += '<div class="section"><h3>🐘 Состояние слонов</h3>';
+  state.elephants.forEach(el => {
+    const st = getElephantStatus(el);
+    const cardCls = getCardClass(el);
+    const phys = getPhysiologyStatus(el);
+    html += `<div class="elephantCard ${cardCls}"><div class="cardHeader"><div><b>${el.name}</b> <span class="personality">· ${el.personality} · ${el.age} лет</span></div><span class="status ${st.cls}">${st.text}</span></div>`;
+    // Физиологические статусы
+    if (phys.length > 0) {
+      html += `<div style="margin-bottom:8px;font-size:12px">`;
+      phys.forEach(s => {
+        const color = s.cls === 'bad' ? '#f4511e' : s.cls === 'warn' ? '#ff8a50' : '#8bc34a';
+        html += `<span style="color:${color};margin-right:8px">${s.icon} ${s.text}</span>`;
+      });
+      html += `</div>`;
+    }
+    [{ name: 'Настроение', val: el.mood, color: '#e91e63' }, { name: 'Сытость', val: el.hunger, color: '#8bc34a' }, { name: 'Жажда', val: el.thirst, color: '#4fc3f7' }, { name: 'Чистота', val: el.cleanliness, color: '#a1887f' }, { name: 'Здоровье', val: el.health, color: '#f4511e' }].forEach(s => {
+      html += `<div class="stat"><span>${s.name}</span><span>${Math.round(s.val)}</span></div><div class="bar"><div class="barFill" style="width:${s.val}%;background:${s.color}"></div></div>`;
+    });
+    html += '</div>';
+  });
+  html += '</div>';
+  
+  html += '<div class="section"><h3>🎒 Инвентарь</h3><div class="invGrid">';
+  [{ icon: '🌾', name: 'Сено', count: state.inventory.hay }, { icon: '🥕', name: 'Овощи', count: state.inventory.veggies }, { icon: '💊', name: 'Лекарства', count: state.inventory.medicine }, { icon: '🪥', name: 'Щётка', count: state.inventory.brush }, { icon: '🪝', name: 'Лопата', count: state.inventory.shovel }, { icon: '🧪', name: 'Бачок', count: state.inventory.urineJar }].forEach(i => {
+    html += `<div class="invItem"><span class="invIcon">${i.icon}</span><span class="invCount">${i.count}</span><span class="invName">${i.name}</span></div>`;
+  });
+  html += '</div></div>';
+  
+  html += '<div class="section"><h3>📰 Последние события</h3>';
+  state.journal.slice(0, 5).forEach(e => {
+    html += `<div class="journalEntry ${e.type || 'info'}"><span class="time">${e.time}</span>${e.text}</div>`;
+  });
+  html += '</div>';
+  document.getElementById('tabletContent').innerHTML = html;
+}
+
+function toggleJournal() {
+  state.journalOpen = !state.journalOpen;
+  if (state.tabletOpen) { state.tabletOpen = false; document.getElementById('tablet').style.display = 'none'; }
+  if (state.journalOpen) { renderJournal(); document.getElementById('journal').style.display = 'block'; }
+  else document.getElementById('journal').style.display = 'none';
+}
+function closeJournal() { state.journalOpen = false; document.getElementById('journal').style.display = 'none'; }
+
+function renderJournal() {
+  let html = '';
+  if (state.journal.length === 0) html = '<p style="color:#a09888">Журнал пуст</p>';
+  else state.journal.forEach(e => {
+    html += `<div class="journalEntry ${e.type || 'info'}"><span class="time">${e.time}</span>${e.text}</div>`;
+  });
+  document.getElementById('journalContent').innerHTML = html;
+}
+
+function togglePause() {
+  if (!state.running || state.gameOver) return;
+  state.paused = !state.paused;
+  document.getElementById('pauseOverlay').style.display = state.paused ? 'flex' : 'none';
+}
+function resumeGame() { state.paused = false; document.getElementById('pauseOverlay').style.display = 'none'; }
+
+const floatingTexts = [];
+function showFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 1.5, maxLife: 1.5 });
+}
+
+let lastTime = 0, lastHudUpdate = 0;
+
+function forceCloseAllModals() {
+  state.tabletOpen = false; state.journalOpen = false; state.dialog = null; state.qte = null;
+  ['tablet','journal','dialog','qte'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+}
+
+function update(dt) {
+  if (!state.running || state.paused || state.gameOver) return;
+  
+  const modalOpen = state.dialog || state.tabletOpen || state.journalOpen || state.qte;
+  if (!modalOpen) {
+    state.realTime += dt;
+    state.gameTime += dt * CFG.GAME_MINUTES_PER_SECOND;
+  }
+  
+  if (state.gameTime >= CFG.SHIFT_END) {
+    forceCloseAllModals();
+    endShift();
+    return;
+  }
+  
+  if (state.qte) {
+    state.qte.timer -= dt;
+    if (state.qte.timer <= 0) {
+      state.qte.failed = true; state.qte.done = true;
+      document.getElementById('qte').style.display = 'none';
+      showFloatingText(state.keeper.x, state.keeper.y - 50, '✗ Время вышло', '#f44336');
+      showToast('Время вышло', 'error', '⏰');
+      state.qte = null;
+    } else renderQTE();
+    return;
+  }
+  if (modalOpen) return;
+  
+  // ФИЗИОЛОГИЯ — обновляется даже при открытых модалках? НЕТ — только когда симуляция активна
+  updatePhysiology(dt);
+  
+  const k = state.keeper;
+  let dx = 0, dy = 0;
+  if (keys['arrowup'] || keys['w']) dy -= 1;
+  if (keys['arrowdown'] || keys['s']) dy += 1;
+  if (keys['arrowleft'] || keys['a']) { dx -= 1; k.dir = -1; }
+  if (keys['arrowright'] || keys['d']) { dx += 1; k.dir = 1; }
+  if (dx || dy) {
+    const len = Math.hypot(dx, dy);
+    k.x += (dx / len) * CFG.KEEPER_SPEED * dt;
+    k.y += (dy / len) * CFG.KEEPER_SPEED * dt;
+    k.walkTimer += dt;
+    if (k.walkTimer > 0.15) { k.walkTimer = 0; k.walkFrame = (k.walkFrame + 1) % 4; }
+  } else k.walkFrame = 0;
+  k.x = clamp(k.x, 30, CFG.WORLD_W - 30);
+  k.y = clamp(k.y, 30, CFG.WORLD_H - 30);
+  
+  for (const el of state.elephants) {
+    separateCircles(k, CFG.KEEPER_RADIUS, el, elephantRadius(el), CFG.SEPARATION_STRENGTH);
+  }
+  const solids = getSolidObjects();
+  for (const obj of solids) {
+    if (obj.type === 'waterer') pushOutOfCircle(k, CFG.KEEPER_RADIUS, obj, 32, 2);
+    else pushOutOfRect(k, CFG.KEEPER_RADIUS, obj, 2);
+  }
+  k.x = clamp(k.x, 30, CFG.WORLD_W - 30);
+  k.y = clamp(k.y, 30, CFG.WORLD_H - 30);
+  
+  if (state.cart.attached) {
+    const targetX = k.x - 35 * k.dir, targetY = k.y + 15;
+    const maxCartSpeed = 180;
+    const cartDx = targetX - state.cart.x, cartDy = targetY - state.cart.y;
+    const cartDist = Math.hypot(cartDx, cartDy);
+    if (cartDist > 1) {
+      const step = Math.min(cartDist * 0.18, maxCartSpeed * dt);
+      state.cart.x += (cartDx / cartDist) * step;
+      state.cart.y += (cartDy / cartDist) * step;
+    }
+    constrainCart(state.cart);
+    if (dist(state.cart, k) > 200) {
+      state.cart.x = k.x - 35 * k.dir;
+      state.cart.y = k.y + 15;
+    }
+  }
+  
+  // Резервный спавн кучек — только если bowel не сработал долго
+  state.dungSpawnTimer += dt;
+  if (state.dungSpawnTimer >= state.nextDungSpawn) {
+    state.dungSpawnTimer = 0;
+    state.nextDungSpawn = rnd(CFG.DUNG_SPAWN_MIN, CFG.DUNG_SPAWN_MAX);
+    // Находим слона с высоким bowel, но не достигшим порога
+    const candidate = state.elephants.find(e => e.bowel > 50 && e.bowel < CFG.DEFECATION_THRESHOLD);
+    if (candidate && state.dungPiles.length < CFG.DUNG_MAX_PILES) {
+      // Принудительно запускаем дефекацию
+      candidate.bowel = CFG.DEFECATION_THRESHOLD;
+    } else {
+      spawnDungPile();
+    }
+  }
+  state.dungPiles.forEach(p => { p.age += dt; });
+  
+  state.elephants.forEach(el => {
+    el.hunger = Math.max(0, el.hunger - CFG.HUNGER_RATE * dt);
+    el.thirst = Math.max(0, el.thirst - CFG.THIRST_RATE * dt);
+    el.cleanliness = Math.max(0, el.cleanliness - CFG.CLEANLINESS_DECAY * dt);
+    if (el.cleanliness < 30) el.health = Math.max(0, el.health - CFG.HEALTH_DECAY_DIRTY * dt);
+    el.mood = Math.max(0, el.mood - CFG.MOOD_DECAY * dt);
+    if (el.hunger < 20) el.mood = Math.max(0, el.mood - 0.05 * dt);
+    if (el.thirst < 20) el.mood = Math.max(0, el.mood - 0.05 * dt);
+    if (el.health < 30) el.mood = Math.max(0, el.mood - 0.1 * dt);
+    
+    el.breathPhase += dt * 1.5;
+    el.trunkPhase += dt * (el.state.startsWith('walk') || el.state === 'walking' ? 3 : 1.2);
+    
+    el.stateTimer -= dt;
+    if (el.stateTimer <= 0) {
+      const r = Math.random();
+      if (el.hunger < 30) {
+        const feeder = state.objects.find(o => o.type === 'feeder' && o.elephantId === el.id);
+        if (feeder) { el.targetX = feeder.x; el.targetY = feeder.y + 40; el.state = 'walkToFeed'; el.stateTimer = 10; }
+      } else if (el.thirst < 30) {
+        const waterer = state.objects.find(o => o.type === 'waterer');
+        el.targetX = waterer.x; el.targetY = waterer.y + 40; el.state = 'walkToWater'; el.stateTimer = 10;
+      } else if (r < 0.3) { el.state = 'idle'; el.stateTimer = rnd(3, 8); }
+      else if (r < 0.7) {
+        el.targetX = rnd(200, CFG.WORLD_W - 200);
+        el.targetY = rnd(150, CFG.WORLD_H - 100);
+        el.state = 'walking'; el.stateTimer = rnd(5, 12);
+      } else if (r < 0.9) {
+        const log = state.objects.find(o => o.type === 'log');
+        el.targetX = log.x; el.targetY = log.y - 20; el.state = 'walkToLog'; el.stateTimer = 10;
+      } else {
+        const rest = state.objects.find(o => o.type === 'rest');
+        if (rest && el.id === 'pretty') { el.targetX = rest.x; el.targetY = rest.y; el.state = 'rest'; el.stateTimer = rnd(10, 20); }
+        else { el.state = 'idle'; el.stateTimer = rnd(5, 10); }
+      }
+    }
+    
+    if (el.state.startsWith('walk') || el.state === 'walking') {
+      const d = dist(el, { x: el.targetX, y: el.targetY });
+      if (d > 5) {
+        const vx = (el.targetX - el.x) / d, vy = (el.targetY - el.y) / d;
+        el.x += vx * CFG.ELEPHANT_SPEED * dt;
+        el.y += vy * CFG.ELEPHANT_SPEED * dt;
+        el.dir = vx > 0 ? 1 : -1;
+        el.walkTimer += dt;
+        if (el.walkTimer > 0.2) { el.walkTimer = 0; el.walkFrame = (el.walkFrame + 1) % 4; }
+        el.headBob = Math.sin(el.walkTimer * 10) * 2;
+      } else {
+        if (el.state === 'walkToFeed') el.state = 'eating';
+        else if (el.state === 'walkToWater') el.state = 'drinking';
+        else if (el.state === 'walkToLog') el.state = 'scratching';
+        else el.state = 'idle';
+        el.stateTimer = rnd(3, 8);
+        el.headBob *= 0.9;
+      }
+    } else el.headBob *= 0.9;
+    
+    el.x = clamp(el.x, 40, CFG.WORLD_W - 40);
+    el.y = clamp(el.y, 40, CFG.WORLD_H - 40);
+  });
+  
+  for (let i = 0; i < state.elephants.length; i++) {
+    for (let j = i + 1; j < state.elephants.length; j++) {
+      separateCircles(state.elephants[i], elephantRadius(state.elephants[i]), state.elephants[j], elephantRadius(state.elephants[j]), CFG.SEPARATION_STRENGTH);
+    }
+  }
+  
+  for (const el of state.elephants) {
+    for (const obj of solids) {
+      if (obj.type === 'waterer') pushOutOfCircle(el, elephantRadius(el), obj, 32, 4);
+      else pushOutOfRect(el, elephantRadius(el), obj, 4);
+    }
+    el.x = clamp(el.x, 40, CFG.WORLD_W - 40);
+    el.y = clamp(el.y, 40, CFG.WORLD_H - 40);
+  }
+  
+  state.tasks.forEach(t => {
+    if (!t.done && !t.failed && state.gameTime > t.deadline) failTask(t);
+  });
+  
+  state.lastEventTime += dt;
+  if (state.lastEventTime > 30 && Math.random() < 0.01) {
+    state.lastEventTime = 0;
+    generateRandomTask();
+  }
+  
+  // Инциденты — редкие, не дублируют естественные отправления
+  state.elephants.forEach(el => {
+    if (el.cleanliness < 20 && Math.random() < 0.0005) {
+      state.accidents++;
+      state.reputation = Math.max(0, state.reputation - 3);
+      addJournal(`⚠️ ${el.name}: неприятный инцидент в стойле.`, 'critical');
+      showToast(`Инцидент: ${el.name}`, 'error', '⚠️');
+    }
+  });
+  
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    floatingTexts[i].life -= dt;
+    floatingTexts[i].y -= 20 * dt;
+    if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+  }
+  
+  lastHudUpdate += dt;
+  if (lastHudUpdate > 0.25) {
+    lastHudUpdate = 0;
+    updateHUD();
+  }
+}
+
+function updateHUD() {
+  document.getElementById('hudTime').textContent = formatTime(state.gameTime);
+  document.getElementById('hudMoney').textContent = state.money;
+  document.getElementById('hudRep').textContent = state.reputation;
+  document.getElementById('hudDone').textContent = state.completedTasks;
+  document.getElementById('hudFailed').textContent = state.failedTasks;
+  const active = state.tasks.filter(t => !t.done && !t.failed);
+  const taskEl = document.getElementById('hudTask');
+  if (active.length === 0) {
+    taskEl.innerHTML = '<span style="color:#a09888">Нет активных задач</span>';
+  } else {
+    active.sort((a, b) => a.deadline - b.deadline);
+    const t = active[0];
+    const left = Math.max(0, t.deadline - state.gameTime);
+    const urgentCls = left < 3 ? 'urgent' : '';
+    let extra = '';
+    if (t.type === 'clean') extra = ` (${t.progress || 0}/${t.target})`;
+    taskEl.innerHTML = `<span class="taskLabel">${t.title}${extra}</span><span class="taskTime ${urgentCls}">⏰ ${Math.round(left)} мин</span>`;
+  }
+}
+
+function render() {
+  ctx.fillStyle = '#1a1410';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+  drawWorld(); drawObjectShadows(); drawPuddles(); drawDungPiles(); drawObjects(); drawCart();
+  drawElephantShadows();
+  const drawables = [...state.elephants.map(e => ({ type: 'elephant', y: e.y, data: e })), { type: 'keeper', y: state.keeper.y, data: state.keeper }];
+  drawables.sort((a, b) => a.y - b.y);
+  drawables.forEach(d => { if (d.type === 'elephant') drawElephant(d.data); else drawKeeper(); });
+  drawHeldDung(); drawTaskMarkers(); drawFloatingTexts(); drawAmbientLight();
+  ctx.restore();
+}
+
+function drawWorld() {
+  const grad = ctx.createLinearGradient(0, 0, 0, CFG.WORLD_H);
+  grad.addColorStop(0, '#6b5640'); grad.addColorStop(0.5, '#5a4632'); grad.addColorStop(1, '#4a3826');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, CFG.WORLD_W, CFG.WORLD_H);
+  if (floorDetails) {
+    floorDetails.sandPatches.forEach(p => {
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      g.addColorStop(0, 'rgba(180, 150, 100, 0.25)'); g.addColorStop(1, 'rgba(180, 150, 100, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+    floorDetails.strawPatches.forEach(p => {
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+      g.addColorStop(0, 'rgba(210, 180, 110, 0.3)'); g.addColorStop(1, 'rgba(210, 180, 110, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+    floorDetails.specks.forEach(s => {
+      ctx.fillStyle = s.c;
+      ctx.fillRect(s.x, s.y, s.s, s.s);
+    });
+    ctx.strokeStyle = 'rgba(190, 160, 90, 0.5)'; ctx.lineWidth = 1;
+    floorDetails.hayStrands.forEach(h => {
+      ctx.beginPath();
+      ctx.moveTo(h.x, h.y);
+      ctx.lineTo(h.x + Math.cos(h.ang) * h.len, h.y + Math.sin(h.ang) * h.len);
+      ctx.stroke();
+    });
+  }
+  const rest = state.objects.find(o => o.type === 'rest');
+  if (rest) {
+    const rx = rest.x - rest.w/2, ry = rest.y - rest.h/2;
+    ctx.fillStyle = 'rgba(220, 190, 130, 0.35)';
+    ctx.fillRect(rx, ry, rest.w, rest.h);
+    ctx.strokeStyle = 'rgba(180, 140, 80, 0.5)'; ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(rx + 2, ry + 2, rest.w - 4, rest.h - 4);
+    ctx.setLineDash([]);
+  }
+  state.objects.filter(o => o.type === 'feeder').forEach(f => {
+    const g = ctx.createRadialGradient(f.x, f.y + 20, 0, f.x, f.y + 20, 60);
+    g.addColorStop(0, 'rgba(160, 120, 70, 0.3)'); g.addColorStop(1, 'rgba(160, 120, 70, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(f.x, f.y + 20, 60, 0, Math.PI * 2); ctx.fill();
+  });
+  const waterer = state.objects.find(o => o.type === 'waterer');
+  if (waterer) {
+    const g = ctx.createRadialGradient(waterer.x, waterer.y, 0, waterer.x, waterer.y, 55);
+    g.addColorStop(0, 'rgba(70, 100, 130, 0.35)'); g.addColorStop(1, 'rgba(70, 100, 130, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(waterer.x, waterer.y, 55, 0, Math.PI * 2); ctx.fill();
+  }
+  const vg = ctx.createRadialGradient(CFG.WORLD_W/2, CFG.WORLD_H/2, 200, CFG.WORLD_W/2, CFG.WORLD_H/2, 700);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, CFG.WORLD_W, CFG.WORLD_H);
+  drawFence();
+}
+
+function drawFence() {
+  const W = CFG.WORLD_W, H = CFG.WORLD_H;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(8, 14, W - 16, 6); ctx.fillRect(8, H - 10, W - 16, 6);
+  ctx.fillRect(14, 8, 6, H - 16); ctx.fillRect(W - 10, 8, 6, H - 16);
+  ctx.fillStyle = '#3a2817';
+  ctx.fillRect(6, 6, W - 12, 10); ctx.fillRect(6, H - 16, W - 12, 10);
+  ctx.fillRect(6, 6, 10, H - 12); ctx.fillRect(W - 16, 6, 10, H - 12);
+  ctx.fillStyle = '#6b4a2a';
+  ctx.fillRect(6, 6, W - 12, 3); ctx.fillRect(6, H - 16, W - 12, 3);
+  ctx.fillRect(6, 6, 3, H - 12); ctx.fillRect(W - 16, 6, 3, H - 12);
+  ctx.fillStyle = '#4a3220';
+  for (let x = 40; x < W; x += 80) {
+    ctx.fillRect(x - 4, 2, 8, 16); ctx.fillRect(x - 4, H - 18, 8, 16);
+  }
+  for (let y = 40; y < H; y += 80) {
+    ctx.fillRect(2, y - 4, 16, 8); ctx.fillRect(W - 18, y - 4, 16, 8);
+  }
+  ctx.fillStyle = '#7a5a38';
+  for (let x = 40; x < W; x += 80) {
+    ctx.fillRect(x - 3, 3, 2, 14); ctx.fillRect(x - 3, H - 17, 2, 14);
+  }
+}
+
+function drawObjectShadows() {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  state.objects.forEach(obj => {
+    const sx = obj.x + 4, sy = obj.y + obj.h/2 + 4;
+    ctx.beginPath(); ctx.ellipse(sx, sy, obj.w * 0.45, 5, 0, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+// Отрисовка луж мочи
+function drawPuddles() {
+  state.puddles.forEach(p => {
+    const alpha = Math.max(0.3, 1 - p.age / CFG.PUDDLE_LIFETIME);
+    // Тёмное влажное пятно
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+    g.addColorStop(0, `rgba(120, 170, 200, ${0.5 * alpha})`);
+    g.addColorStop(0.6, `rgba(90, 140, 170, ${0.35 * alpha})`);
+    g.addColorStop(1, `rgba(70, 110, 140, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, 22, 14, 0, 0, Math.PI * 2); ctx.fill();
+    // Блик
+    ctx.fillStyle = `rgba(200, 230, 250, ${0.25 * alpha})`;
+    ctx.beginPath(); ctx.ellipse(p.x - 4, p.y - 3, 5, 2, -0.3, 0, Math.PI * 2); ctx.fill();
+    // Индикатор при близости кипера
+    const d = dist(state.keeper, p);
+    if (d < 60) {
+      ctx.strokeStyle = `rgba(79, 195, 247, ${0.5 * alpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 18, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+function drawDungPiles() {
+  state.dungPiles.forEach(p => {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(p.x + 1, p.y + 4, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#4a3018';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y + 2, 11, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5a3a20';
+    ctx.beginPath(); ctx.ellipse(p.x - 2, p.y - 1, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(p.x + 3, p.y, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6a4828';
+    ctx.beginPath(); ctx.ellipse(p.x, p.y - 2, 5, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,220,160,0.15)';
+    ctx.beginPath(); ctx.ellipse(p.x - 1, p.y - 3, 2, 1, 0, 0, Math.PI * 2); ctx.fill();
+    const d = dist(state.keeper, p);
+    if (d < CFG.DUNG_PICKUP_RADIUS + 15) {
+      ctx.strokeStyle = d < CFG.DUNG_PICKUP_RADIUS ? 'rgba(139,195,74,0.8)' : 'rgba(212,175,110,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+function drawCart() {
+  const c = state.cart;
+  const x = c.x - 20, y = c.y - 15;
+  const w = 40, h = 30;
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(c.x + 2, c.y + 18, 22, 5, 0, 0, Math.PI * 2); ctx.fill();
+  if (c.attached) {
+    ctx.strokeStyle = 'rgba(79,195,247,0.4)'; ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(state.keeper.x, state.keeper.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const cg = ctx.createLinearGradient(x, y, x, y + h);
+  cg.addColorStop(0, '#7a5a3a'); cg.addColorStop(1, '#4a3220');
+  ctx.fillStyle = cg;
+  ctx.fillRect(x, y, w, h);
+  if (c.load > 0) {
+    const fillRatio = c.load / CFG.CART_CAPACITY;
+    const fillH = (h - 6) * fillRatio;
+    const fg = ctx.createLinearGradient(x, y + h - fillH, x, y + h);
+    fg.addColorStop(0, '#5a3a20'); fg.addColorStop(1, '#3a2410');
+    ctx.fillStyle = fg;
+    ctx.fillRect(x + 3, y + h - 3 - fillH, w - 6, fillH);
+    ctx.fillStyle = 'rgba(90,60,30,0.5)';
+    for (let i = 0; i < 4; i++) {
+      const px = x + 5 + (i * 11) % (w - 10);
+      const py = y + h - 3 - fillH + 2 + (i * 7) % Math.max(1, fillH - 2);
+      ctx.beginPath(); ctx.arc(px, py, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.strokeStyle = '#1a0a00'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(255,220,160,0.2)'; ctx.fillRect(x + 1, y + 1, w - 2, 2);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(x + 6, y + h + 2, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w - 6, y + h + 2, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#4a4a4a';
+  ctx.beginPath(); ctx.arc(x + 6, y + h + 2, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w - 6, y + h + 2, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#3a2817'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x + w - 2, y + 4); ctx.lineTo(x + w + 8, y - 2);
+  ctx.stroke();
+  const pct = Math.round(c.load / CFG.CART_CAPACITY * 100);
+  const color = pct > 75 ? '#f4511e' : pct > 40 ? '#ff8a50' : '#8bc34a';
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - 2, y - 14, w + 4, 12);
+  ctx.fillStyle = color; ctx.fillRect(x - 1, y - 13, (w + 2) * (c.load / CFG.CART_CAPACITY), 10);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(`🛒 ${c.load}/${CFG.CART_CAPACITY}`, c.x, y - 5);
+  if (c.attached) {
+    ctx.fillStyle = 'rgba(79,195,247,0.9)'; ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('🔗', c.x, y - 18);
+  }
+}
+
+function drawHeldDung() {
+  if (state.heldDung <= 0) return;
+  const k = state.keeper;
+  const x = k.x + 12 * k.dir, y = k.y - 5;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.ellipse(x, y + 2, 6, 2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#4a3018';
+  ctx.beginPath(); ctx.ellipse(x, y, 6, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#5a3a20';
+  ctx.beginPath(); ctx.ellipse(x - 1, y - 1, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - 8, y - 14, 16, 10);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(state.heldDung, x, y - 6);
+}
+
+function drawObjects() {
+  state.objects.forEach(obj => {
+    const x = obj.x - obj.w/2, y = obj.y - obj.h/2;
+    if (obj.type === 'feeder') {
+      ctx.fillStyle = '#4a2f18'; ctx.fillRect(x, y + obj.h - 6, obj.w, 6);
+      const g = ctx.createLinearGradient(x, y, x, y + obj.h);
+      g.addColorStop(0, '#8b5a2b'); g.addColorStop(0.5, '#6b4420'); g.addColorStop(1, '#4a2f18');
+      ctx.fillStyle = g; ctx.fillRect(x, y, obj.w, obj.h);
+      ctx.fillStyle = '#3a2410'; ctx.fillRect(x + 6, y + 6, obj.w - 12, obj.h - 14);
+      const task = state.tasks.find(t => t.elephantId === obj.elephantId && t.type === 'feed' && !t.done && !t.failed);
+      if (task) {
+        ctx.fillStyle = '#c9a66b';
+        for (let i = 0; i < 5; i++) ctx.fillRect(x + 10 + i * 12, y + 10, 8, 4);
+      }
+      ctx.fillStyle = 'rgba(255,220,160,0.3)'; ctx.fillRect(x, y, obj.w, 2);
+      ctx.strokeStyle = '#2a1808'; ctx.lineWidth = 2; ctx.strokeRect(x, y, obj.w, obj.h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        ctx.beginPath(); ctx.moveTo(x + i * obj.w / 4, y + 4); ctx.lineTo(x + i * obj.w / 4, y + obj.h - 4); ctx.stroke();
+      }
+      ctx.fillStyle = '#f5e9d0'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(obj.label, obj.x, y - 4);
+    } else if (obj.type === 'waterer') {
+      const og = ctx.createRadialGradient(obj.x - 5, obj.y - 5, 10, obj.x, obj.y, 32);
+      og.addColorStop(0, '#8a8a80'); og.addColorStop(1, '#4a4a42');
+      ctx.fillStyle = og; ctx.beginPath(); ctx.arc(obj.x, obj.y, 32, 0, Math.PI * 2); ctx.fill();
+      const wg = ctx.createRadialGradient(obj.x - 6, obj.y - 8, 2, obj.x, obj.y, 24);
+      wg.addColorStop(0, '#a8d8f0'); wg.addColorStop(0.6, '#5a9ac0'); wg.addColorStop(1, '#2a5a7a');
+      ctx.fillStyle = wg; ctx.beginPath(); ctx.arc(obj.x, obj.y, 24, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.beginPath(); ctx.ellipse(obj.x - 8, obj.y - 10, 6, 2, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath(); ctx.ellipse(obj.x + 5, obj.y + 4, 3, 1, 0.3, 0, Math.PI * 2); ctx.fill();
+      const ripple = (Math.sin(state.realTime * 2) + 1) * 0.5;
+      ctx.strokeStyle = `rgba(255,255,255,${0.15 + ripple * 0.15})`; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, 10 + ripple * 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = '#2a2a22'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(obj.x, obj.y, 32, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#d0e8f5'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Поилка', obj.x, obj.y - 40);
+    } else if (obj.type === 'log') {
+      const lg = ctx.createLinearGradient(x, y, x, y + obj.h);
+      lg.addColorStop(0, '#7a5230'); lg.addColorStop(0.5, '#5a3a20'); lg.addColorStop(1, '#3a2410');
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y); ctx.lineTo(x + obj.w - 8, y);
+      ctx.quadraticCurveTo(x + obj.w, y, x + obj.w, y + 8);
+      ctx.lineTo(x + obj.w, y + obj.h - 8);
+      ctx.quadraticCurveTo(x + obj.w, y + obj.h, x + obj.w - 8, y + obj.h);
+      ctx.lineTo(x + 8, y + obj.h);
+      ctx.quadraticCurveTo(x, y + obj.h, x, y + obj.h - 8);
+      ctx.lineTo(x, y + 8);
+      ctx.quadraticCurveTo(x, y, x + 8, y);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        const lx = x + 10 + i * (obj.w - 20) / 7;
+        ctx.beginPath(); ctx.moveTo(lx, y + 2); ctx.lineTo(lx + (i % 2 ? 2 : -2), y + obj.h - 2); ctx.stroke();
+      }
+      ctx.fillStyle = '#a07040';
+      ctx.beginPath(); ctx.ellipse(x + 4, y + obj.h/2, 4, obj.h/2 - 2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x + obj.w - 4, y + obj.h/2, 4, obj.h/2 - 2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(60,30,10,0.6)';
+      ctx.beginPath(); ctx.ellipse(x + 4, y + obj.h/2, 2, obj.h/2 - 4, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x + obj.w - 4, y + obj.h/2, 2, obj.h/2 - 4, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,200,140,0.25)'; ctx.fillRect(x + 4, y + 2, obj.w - 8, 3);
+      ctx.strokeStyle = '#1a0a00'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + 8, y); ctx.lineTo(x + obj.w - 8, y);
+      ctx.quadraticCurveTo(x + obj.w, y, x + obj.w, y + 8);
+      ctx.lineTo(x + obj.w, y + obj.h - 8);
+      ctx.quadraticCurveTo(x + obj.w, y + obj.h, x + obj.w - 8, y + obj.h);
+      ctx.lineTo(x + 8, y + obj.h);
+      ctx.quadraticCurveTo(x, y + obj.h, x, y + obj.h - 8);
+      ctx.lineTo(x, y + 8);
+      ctx.quadraticCurveTo(x, y, x + 8, y);
+      ctx.stroke();
+    } else if (obj.type === 'rest') {
+      ctx.fillStyle = '#d4b878'; ctx.fillRect(x, y, obj.w, obj.h);
+      ctx.strokeStyle = '#a08040'; ctx.lineWidth = 1;
+      for (let i = 0; i < 25; i++) {
+        const sx = x + (i * 37) % obj.w, sy = y + (i * 53) % obj.h;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 6, sy - 3); ctx.stroke();
+      }
+      const rg = ctx.createRadialGradient(obj.x, obj.y, 10, obj.x, obj.y, 80);
+      rg.addColorStop(0, 'rgba(255,220,150,0.2)'); rg.addColorStop(1, 'rgba(255,220,150,0)');
+      ctx.fillStyle = rg; ctx.fillRect(x, y, obj.w, obj.h);
+      ctx.fillStyle = '#5a3a1a'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('🛏️ Зона отдыха Прэтти', obj.x, obj.y + 4);
+      ctx.strokeStyle = '#8b6a3a'; ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]); ctx.strokeRect(x + 1, y + 1, obj.w - 2, obj.h - 2); ctx.setLineDash([]);
+    } else if (obj.type === 'dung') {
+      const dg = ctx.createLinearGradient(x, y, x, y + obj.h);
+      dg.addColorStop(0, '#5a5a4a'); dg.addColorStop(1, '#2a2a1a');
+      ctx.fillStyle = dg; ctx.fillRect(x, y, obj.w, obj.h);
+      if (obj.fill > 0) {
+        const fillH = (obj.fill / obj.capacity) * (obj.h - 10);
+        const fg = ctx.createLinearGradient(x, y + obj.h - fillH, x, y + obj.h);
+        fg.addColorStop(0, '#5a4020'); fg.addColorStop(1, '#2a1808');
+        ctx.fillStyle = fg;
+        ctx.fillRect(x + 4, y + obj.h - 4 - fillH, obj.w - 8, fillH);
+      }
+      ctx.strokeStyle = '#1a1a0a'; ctx.lineWidth = 2; ctx.strokeRect(x, y, obj.w, obj.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(x + 2, y + 2, obj.w - 4, 3);
+      if (obj.fill > 0) {
+        const pct = Math.round(obj.fill / obj.capacity * 100);
+        const color = pct > 75 ? '#f4511e' : pct > 40 ? '#ff8a50' : '#8bc34a';
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y - 14, obj.w, 12);
+        ctx.fillStyle = color; ctx.fillRect(x + 1, y - 13, (obj.w - 2) * (obj.fill / obj.capacity), 10);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(`${obj.fill}/${obj.capacity}`, obj.x, y - 5);
+      }
+      ctx.font = '18px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('🗑️', obj.x, y - 18);
+    } else if (obj.type === 'toolshed') {
+      const sg = ctx.createLinearGradient(x, y, x, y + obj.h);
+      sg.addColorStop(0, '#7a5a3a'); sg.addColorStop(1, '#4a3220');
+      ctx.fillStyle = sg; ctx.fillRect(x, y + 10, obj.w, obj.h - 10);
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        ctx.beginPath(); ctx.moveTo(x, y + 10 + i * (obj.h - 10) / 5); ctx.lineTo(x + obj.w, y + 10 + i * (obj.h - 10) / 5); ctx.stroke();
+      }
+      ctx.fillStyle = '#2a1808'; ctx.fillRect(x + obj.w/2 - 12, y + obj.h - 35, 24, 35);
+      ctx.fillStyle = '#ffd54f';
+      ctx.beginPath(); ctx.arc(x + obj.w/2 + 8, y + obj.h - 18, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#8b4513';
+      ctx.beginPath();
+      ctx.moveTo(x - 6, y + 12); ctx.lineTo(x + obj.w / 2, y - 14); ctx.lineTo(x + obj.w + 6, y + 12);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#3a1a08'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,200,140,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y + 10); ctx.lineTo(x + obj.w / 2, y - 12);
+      ctx.lineTo(x + obj.w / 2, y - 8); ctx.lineTo(x - 2, y + 10);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#1a0a00'; ctx.lineWidth = 2; ctx.strokeRect(x, y + 10, obj.w, obj.h - 10);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('🏚️ Склад', obj.x, y - 18);
+    } else if (obj.type === 'straw') {
+      const stg = ctx.createRadialGradient(obj.x - 10, obj.y - 10, 5, obj.x, obj.y, 60);
+      stg.addColorStop(0, '#e8cc88'); stg.addColorStop(1, '#a08040');
+      ctx.fillStyle = stg;
+      ctx.beginPath(); ctx.ellipse(obj.x, obj.y, obj.w/2, obj.h/2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#8a6a30'; ctx.lineWidth = 1;
+      for (let i = 0; i < 30; i++) {
+        const ang = (i / 30) * Math.PI * 2, r = 10 + (i * 7) % 30;
+        ctx.beginPath(); ctx.moveTo(obj.x, obj.y);
+        ctx.lineTo(obj.x + Math.cos(ang) * r, obj.y + Math.sin(ang) * r * 0.6); ctx.stroke();
+      }
+      ctx.strokeStyle = '#5a4020'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(obj.x, obj.y, obj.w/2, obj.h/2, 0, 0, Math.PI * 2); ctx.stroke();
+    } else if (obj.type === 'hayStack') {
+      const hg = ctx.createRadialGradient(obj.x - 10, obj.y - 15, 5, obj.x, obj.y, 50);
+      hg.addColorStop(0, '#e0c080'); hg.addColorStop(0.7, '#b09050'); hg.addColorStop(1, '#7a6030');
+      ctx.fillStyle = hg;
+      ctx.beginPath(); ctx.ellipse(obj.x, obj.y, obj.w/2, obj.h/2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,60,20,0.5)'; ctx.lineWidth = 1;
+      for (let i = 0; i < 15; i++) {
+        const sx = obj.x - obj.w/2 + 8 + (i * 23) % (obj.w - 16);
+        const sy = obj.y - obj.h/2 + 6 + (i * 17) % (obj.h - 12);
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 5, sy + 3); ctx.stroke();
+      }
+      ctx.strokeStyle = '#5a3a18'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(obj.x, obj.y, obj.w/2 - 4, obj.h/2 - 4, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,230,170,0.3)';
+      ctx.beginPath(); ctx.ellipse(obj.x - 12, obj.y - 15, 12, 6, -0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3a2410'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(obj.x, obj.y, obj.w/2, obj.h/2, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Сено', obj.x, obj.y + obj.h/2 + 14);
+    }
+  });
+}
+
+function drawElephantShadows() {
+  state.elephants.forEach(el => {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(el.x + 3, el.y + 38 * el.size, 55 * el.size, 14 * el.size, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.ellipse(el.x + 3, el.y + 40 * el.size, 65 * el.size, 18 * el.size, 0, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+function drawElephant(el) {
+  ctx.save();
+  ctx.translate(el.x, el.y);
+  ctx.scale(el.dir * el.size, el.size);
+  const isWalking = el.state.startsWith('walk') || el.state === 'walking';
+  const bodyBob = isWalking ? Math.sin(el.walkTimer * 12) * 1.5 : 0;
+  const bodySway = isWalking ? Math.sin(el.walkTimer * 6) * 1 : 0;
+  const breathScale = 1 + Math.sin(el.breathPhase) * 0.015;
+  ctx.translate(bodySway, bodyBob);
+  ctx.scale(breathScale, breathScale);
+  const baseColor = el.color;
+  const darkColor = shadeColor(baseColor, -30);
+  const lightColor = shadeColor(baseColor, 25);
+  const legPhase = el.walkFrame * Math.PI / 2;
+  const farLegSwing = isWalking ? Math.sin(legPhase) * 6 : 0;
+  drawElephantLeg(-30, 22, 10, 26 + farLegSwing, darkColor, true);
+  drawElephantLeg(25, 22, 10, 26 - farLegSwing, darkColor, true);
+  ctx.save();
+  const tailSwing = isWalking ? Math.sin(el.walkTimer * 8) * 8 : Math.sin(state.realTime * 1.5) * 3;
+  ctx.strokeStyle = darkColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-50, -5); ctx.quadraticCurveTo(-62, 5 + tailSwing, -58, 18 + tailSwing); ctx.stroke();
+  ctx.fillStyle = '#2a2018';
+  ctx.beginPath(); ctx.arc(-58, 20 + tailSwing, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  const bodyGrad = ctx.createRadialGradient(-10, -15, 10, 0, 0, 60);
+  bodyGrad.addColorStop(0, lightColor); bodyGrad.addColorStop(0.5, baseColor); bodyGrad.addColorStop(1, darkColor);
+  ctx.fillStyle = bodyGrad;
+  ctx.beginPath(); ctx.ellipse(0, 0, 58, 38, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath(); ctx.moveTo(-30 + i * 12, -20);
+    ctx.quadraticCurveTo(-25 + i * 12, 0, -30 + i * 12, 20); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255,240,210,0.18)';
+  ctx.beginPath(); ctx.ellipse(-5, -25, 35, 8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, 58, 38, 0, 0, Math.PI * 2); ctx.stroke();
+  const nearLegSwing = isWalking ? Math.sin(legPhase + Math.PI) * 6 : 0;
+  drawElephantLeg(-18, 24, 11, 28 - nearLegSwing, baseColor, false);
+  drawElephantLeg(35, 24, 11, 28 + nearLegSwing, baseColor, false);
+  const headBob = el.headBob || 0;
+  const headTilt = isWalking ? Math.sin(el.walkTimer * 6) * 0.05 : 0;
+  ctx.save();
+  ctx.translate(45, -12 + headBob);
+  ctx.rotate(headTilt);
+  const headGrad = ctx.createRadialGradient(5, -8, 5, 0, 0, 28);
+  headGrad.addColorStop(0, lightColor); headGrad.addColorStop(0.7, baseColor); headGrad.addColorStop(1, darkColor);
+  ctx.fillStyle = headGrad;
+  ctx.beginPath(); ctx.ellipse(0, 0, 26, 24, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = lightColor;
+  ctx.beginPath(); ctx.ellipse(-2, -14, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+  const earFlap = isWalking ? Math.sin(el.walkTimer * 8) * 0.15 : Math.sin(state.realTime * 1.2 + el.trunkPhase) * 0.08;
+  ctx.save();
+  ctx.translate(-8, -5); ctx.rotate(-0.3 + earFlap);
+  const earGrad = ctx.createRadialGradient(0, 0, 3, 0, 0, 22);
+  earGrad.addColorStop(0, baseColor); earGrad.addColorStop(1, darkColor);
+  ctx.fillStyle = earGrad;
+  ctx.beginPath(); ctx.ellipse(0, 0, 18, 24, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(180, 120, 110, 0.5)';
+  ctx.beginPath(); ctx.ellipse(2, 2, 11, 16, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, 18, 24, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+  const trunkBaseX = 22, trunkBaseY = 5;
+  let trunkEndX, trunkEndY, trunkCpX, trunkCpY;
+  if (el.state === 'eating') {
+    const t = (Math.sin(state.realTime * 3) + 1) * 0.5;
+    trunkEndX = 30 + t * 5; trunkEndY = 35; trunkCpX = 35; trunkCpY = 20;
+  } else if (el.state === 'drinking') {
+    trunkEndX = 28; trunkEndY = 32; trunkCpX = 32; trunkCpY = 18;
+  } else if (el.state === 'idle') {
+    const sway = Math.sin(el.trunkPhase) * 8;
+    trunkEndX = 28 + sway; trunkEndY = 22 + Math.abs(sway) * 0.3; trunkCpX = 32 + sway * 0.5; trunkCpY = 12;
+  } else {
+    const sway = Math.sin(el.trunkPhase) * 5;
+    trunkEndX = 26 + sway; trunkEndY = 18; trunkCpX = 30 + sway * 0.3; trunkCpY = 10;
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 11; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(trunkBaseX + 1, trunkBaseY + 2);
+  ctx.quadraticCurveTo(trunkCpX + 1, trunkCpY + 2, trunkEndX + 1, trunkEndY + 2); ctx.stroke();
+  const trunkGrad = ctx.createLinearGradient(trunkBaseX, trunkBaseY, trunkEndX, trunkEndY);
+  trunkGrad.addColorStop(0, baseColor); trunkGrad.addColorStop(1, darkColor);
+  ctx.strokeStyle = trunkGrad; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(trunkBaseX, trunkBaseY);
+  ctx.quadraticCurveTo(trunkCpX, trunkCpY, trunkEndX, trunkEndY); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,240,210,0.25)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(trunkBaseX - 2, trunkBaseY - 2);
+  ctx.quadraticCurveTo(trunkCpX - 2, trunkCpY - 2, trunkEndX - 2, trunkEndY - 2); ctx.stroke();
+  ctx.fillStyle = darkColor;
+  ctx.beginPath(); ctx.arc(trunkEndX, trunkEndY, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const t = i / 4;
+    const mx = trunkBaseX + (trunkCpX - trunkBaseX) * t * 2;
+    const my = trunkBaseY + (trunkCpY - trunkBaseY) * t * 2;
+    ctx.beginPath(); ctx.moveTo(mx - 3, my); ctx.lineTo(mx + 3, my); ctx.stroke();
+  }
+  ctx.fillStyle = '#f5f0e0';
+  ctx.beginPath(); ctx.ellipse(10, -8, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1a0a00';
+  ctx.beginPath(); ctx.arc(11, -8, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(11.5, -9, 0.8, 0, Math.PI * 2); ctx.fill();
+  const tuskGrad = ctx.createLinearGradient(15, 5, 22, 18);
+  tuskGrad.addColorStop(0, '#fff8e0'); tuskGrad.addColorStop(1, '#c9b890');
+  ctx.fillStyle = tuskGrad;
+  ctx.beginPath();
+  ctx.moveTo(15, 5); ctx.quadraticCurveTo(18, 12, 20, 18);
+  ctx.quadraticCurveTo(22, 18, 21, 15); ctx.quadraticCurveTo(19, 8, 17, 5);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(100,80,40,0.5)'; ctx.lineWidth = 0.8; ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+  
+  // Имя и индикаторы
+  ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+  const nameY = el.y - 60 * el.size;
+  const nameW = ctx.measureText(el.name).width + 10;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(el.x - nameW/2, nameY - 11, nameW, 16, 4);
+  else ctx.rect(el.x - nameW/2, nameY - 11, nameW, 16);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(el.name, el.x, nameY);
+  
+  const indicators = [];
+  if (el.urinationWarning) indicators.push('💧');
+  if (el.hunger < 40) indicators.push('🍽️');
+  if (el.thirst < 40) indicators.push('💦');
+  if (el.cleanliness < 40) indicators.push('🧹');
+  if (el.health < 50) indicators.push('⚕️');
+  if (el.mood < 40) indicators.push('😔');
+  if (indicators.length > 0) {
+    const indY = nameY - 20;
+    const totalW = indicators.length * 18;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(el.x - totalW/2 - 3, indY - 13, totalW + 6, 18, 4);
+    else ctx.rect(el.x - totalW/2 - 3, indY - 13, totalW + 6, 18);
+    ctx.fill();
+    ctx.font = '14px sans-serif';
+    indicators.forEach((ic, i) => {
+      ctx.fillText(ic, el.x - totalW/2 + 9 + i * 18, indY);
+    });
+  }
+  
+  // Визуальный сигнал "скоро помочится" — покачивание и подсветка
+  if (el.urinationWarning) {
+    const pulse = (Math.sin(state.realTime * 6) + 1) * 0.5;
+    ctx.strokeStyle = `rgba(79, 195, 247, ${0.4 + pulse * 0.4})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 65, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawElephantLeg(x, y, w, h, color, isFar) {
+  const darkColor = shadeColor(color, -25);
+  const grad = ctx.createLinearGradient(x, y, x + w, y);
+  grad.addColorStop(0, isFar ? darkColor : color);
+  grad.addColorStop(1, darkColor);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w - 1, y + h * 0.6); ctx.lineTo(x + 1, y + h * 0.6);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x + 1, y + h * 0.6); ctx.lineTo(x + w - 1, y + h * 0.6);
+  ctx.lineTo(x + w - 2, y + h); ctx.lineTo(x + 2, y + h);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shadeColor(color, -40);
+  ctx.beginPath(); ctx.ellipse(x + w/2, y + h, w/2 + 1, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + 1, y + h * 0.6); ctx.lineTo(x + 2, y + h);
+  ctx.moveTo(x + w, y); ctx.lineTo(x + w - 1, y + h * 0.6); ctx.lineTo(x + w - 2, y + h);
+  ctx.stroke();
+  if (!isFar) {
+    ctx.fillStyle = 'rgba(255,240,210,0.15)';
+    ctx.fillRect(x + 1, y + 2, 2, h * 0.5);
+  }
+}
+
+function shadeColor(hex, percent) {
+  const num = parseInt(hex.slice(1), 16);
+  let r = (num >> 16) + percent;
+  let g = ((num >> 8) & 0xff) + percent;
+  let b = (num & 0xff) + percent;
+  r = clamp(r, 0, 255); g = clamp(g, 0, 255); b = clamp(b, 0, 255);
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+function drawKeeper() {
+  const k = state.keeper;
+  ctx.save();
+  ctx.translate(k.x, k.y);
+  ctx.scale(k.dir, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath(); ctx.ellipse(0, 22, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
+  const isWalking = (k.walkFrame !== 0);
+  const legAnim = isWalking ? Math.sin(k.walkFrame * Math.PI / 2) * 4 : 0;
+  const bodyBob = isWalking ? Math.abs(Math.sin(k.walkFrame * Math.PI / 2)) * 1 : 0;
+  ctx.translate(0, -bodyBob);
+  ctx.fillStyle = '#1a3a5a'; ctx.fillRect(-8, 5, 6, 15 + legAnim);
+  ctx.fillStyle = '#2a4a6a'; ctx.fillRect(2, 5, 6, 15 - legAnim);
+  ctx.fillStyle = '#2a1a0a';
+  ctx.fillRect(-9, 19 + legAnim, 8, 3); ctx.fillRect(1, 19 - legAnim, 8, 3);
+  const shirtGrad = ctx.createLinearGradient(-10, -10, 10, 10);
+  shirtGrad.addColorStop(0, '#5a9a5a'); shirtGrad.addColorStop(1, '#3a6a3a');
+  ctx.fillStyle = shirtGrad; ctx.fillRect(-10, -10, 20, 20);
+  ctx.fillStyle = '#2a4a2a'; ctx.fillRect(3, -4, 5, 5);
+  ctx.fillStyle = '#ffd54f';
+  ctx.beginPath();
+  ctx.arc(0, -5, 0.8, 0, Math.PI * 2); ctx.arc(0, 0, 0.8, 0, Math.PI * 2); ctx.arc(0, 5, 0.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#1a3a1a'; ctx.lineWidth = 1; ctx.strokeRect(-10, -10, 20, 20);
+  const armSwing = isWalking ? Math.sin(k.walkFrame * Math.PI / 2) * 3 : 0;
+  ctx.fillStyle = '#3a6a3a'; ctx.fillRect(-15, -8 + armSwing, 5, 12);
+  ctx.fillStyle = '#d4a574'; ctx.fillRect(-15, 3 + armSwing, 5, 3);
+  ctx.fillStyle = '#4a7a4a'; ctx.fillRect(10, -8 - armSwing, 5, 12);
+  ctx.fillStyle = '#d4a574'; ctx.fillRect(10, 3 - armSwing, 5, 3);
+  const headGrad = ctx.createRadialGradient(-2, -20, 2, 0, -18, 12);
+  headGrad.addColorStop(0, '#e8c090'); headGrad.addColorStop(1, '#b08060');
+  ctx.fillStyle = headGrad;
+  ctx.beginPath(); ctx.arc(0, -18, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#c09070'; ctx.fillRect(-3, -10, 6, 3);
+  const capGrad = ctx.createLinearGradient(0, -28, 0, -20);
+  capGrad.addColorStop(0, '#3a5a7a'); capGrad.addColorStop(1, '#1a3a5a');
+  ctx.fillStyle = capGrad;
+  ctx.beginPath(); ctx.ellipse(0, -24, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillRect(-10, -26, 20, 4);
+  ctx.fillStyle = '#1a2a3a';
+  ctx.beginPath(); ctx.ellipse(6, -22, 8, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffd54f';
+  ctx.beginPath(); ctx.arc(0, -24, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(4, -19, 1.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(4.5, -19, 0.8, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(3, -14); ctx.lineTo(6, -14); ctx.stroke();
+  ctx.restore();
+}
+
+function drawFloatingTexts() {
+  floatingTexts.forEach(ft => {
+    const alpha = ft.life / ft.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillText(ft.text, ft.x + 1, ft.y + 1);
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function drawTaskMarkers() {
+  state.tasks.filter(t => !t.done && !t.failed).forEach(t => {
+    const el = state.elephants.find(e => e.id === t.elephantId);
+    if (el) {
+      const pulse = (Math.sin(state.realTime * 3) + 1) * 0.5;
+      const radius = 55 + pulse * 8;
+      ctx.strokeStyle = `rgba(255, 213, 79, ${0.5 + pulse * 0.3})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.arc(el.x, el.y, radius, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      const icons = { inspect: '👁', feed: '🍽', water: '💧', clean: '🧹', medicine: '💊', vet_urine: '🧪', vet_feces: '💩', vet_blood: '🩺' };
+      ctx.font = '18px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(icons[t.type] || '!', el.x, el.y - 75 * el.size);
+    }
+  });
+}
+
+function drawAmbientLight() {
+  const lg = ctx.createRadialGradient(CFG.WORLD_W * 0.5, CFG.WORLD_H * 0.3, 50, CFG.WORLD_W * 0.5, CFG.WORLD_H * 0.3, 500);
+  lg.addColorStop(0, 'rgba(255, 230, 170, 0.08)');
+  lg.addColorStop(1, 'rgba(255, 230, 170, 0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(0, 0, CFG.WORLD_W, CFG.WORLD_H);
+}
+
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    if (w < 2 * r) r = w / 2;
+    if (h < 2 * r) r = h / 2;
+    this.beginPath();
+    this.moveTo(x + r, y);
+    this.arcTo(x + w, y, x + w, y + h, r);
+    this.arcTo(x + w, y + h, x, y + h, r);
+    this.arcTo(x, y + h, x, y, r);
+    this.arcTo(x, y, x + w, y, r);
+    this.closePath();
+    return this;
+  };
+}
+
+function gameLoop(ts) {
+  const dt = Math.min(0.1, (ts - lastTime) / 1000);
+  lastTime = ts;
+  if (state.qte && (keys['arrowup'] || keys['arrowdown'] || keys['arrowleft'] || keys['arrowright'])) {
+    const key = Object.keys(keys).find(k => keys[k] && k.startsWith('arrow'));
+    if (key) { keys[key] = false; handleQTEInput(key); }
+  }
+  update(dt);
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+function endShift() {
+  state.gameOver = true;
+  state.running = false;
+  let grade = 'D';
+  let score = state.reputation + state.completedTasks * 5 - state.failedTasks * 10 - state.accidents * 5;
+  if (score >= 100) grade = 'S';
+  else if (score >= 70) grade = 'A';
+  else if (score >= 50) grade = 'B';
+  else if (score >= 30) grade = 'C';
+  const gradeLabels = { S: 'Превосходно! Идеальная смена', A: 'Отличная работа', B: 'Хорошо, но есть над чем работать', C: 'Удовлетворительно', D: 'Смена провалена' };
+  document.getElementById('reportGrade').textContent = grade;
+  document.getElementById('reportGrade').className = 'grade ' + grade;
+  document.getElementById('reportGradeLabel').textContent = gradeLabels[grade];
+  const completedOnTime = state.tasks.filter(t => t.done).length;
+  const failed = state.tasks.filter(t => t.failed).length;
+  const totalTasks = state.tasks.length;
+  let elephantStatus = '';
+  state.elephants.forEach(el => {
+    const st = getElephantStatus(el);
+    const icon = st.cls === 'bad' ? '🔴' : st.cls === 'warn' ? '🟡' : '🟢';
+    elephantStatus += `<div class="row"><span>${icon} ${el.name}</span><b>${st.text}</b></div>`;
+  });
+  const dungObj = state.objects.find(o => o.type === 'dung');
+  const dungInfo = dungObj ? `<div class="row"><span>🗑️ Навоз в контейнере</span><b>${dungObj.fill}/${dungObj.capacity}</b></div>` : '';
+  let summary = `<div class="row"><span>Всего задач</span><b>${totalTasks}</b></div><div class="row"><span>Выполнено</span><b style="color:#8bc34a">${completedOnTime}</b></div><div class="row"><span>Пропущено</span><b style="color:#f4511e">${failed}</b></div><div class="row"><span>Инциденты</span><b style="color:#ff8a50">${state.accidents}</b></div><div class="row"><span>🧹 Собрано навоза</span><b style="color:#a1887f">${state.dungCollected}</b></div><div class="row"><span>🧪 Собрано мочи</span><b style="color:#4fc3f7">${state.urineCollected}</b></div>${dungInfo}<div class="row"><span>Заработано</span><b style="color:#f0c878">${state.money}₽</b></div><div class="row"><span>Репутация</span><b>${state.reputation}</b></div>`;
+  summary += `<div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(212,175,110,0.2)"><div style="color:#a09888;font-size:12px;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Состояние слонов</div>${elephantStatus}</div>`;
+  document.getElementById('reportSummary').innerHTML = summary;
+  document.getElementById('report').style.display = 'block';
+}
+
+function restartGame() {
+  document.getElementById('report').style.display = 'none';
+  document.getElementById('pauseOverlay').style.display = 'none';
+  initWorld();
+  state.running = true;
+  state.paused = false;
+  state.gameOver = false;
+  lastTime = performance.now();
+  lastHudUpdate = 0;
+  updateHUD();
+}
+
+function startGame() {
+  document.getElementById('intro').style.display = 'none';
+  initWorld();
+  state.running = true;
+  lastTime = performance.now();
+  lastHudUpdate = 0;
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('load', () => {
+  resize();
+  buildFloorDetails();
+});
+</script>
+</body>
+</html>
