@@ -1542,7 +1542,8 @@
 
         // 8. Фиксация анализа мочи во время QTE
         if ((e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyE') && gameState === 'QTE_URINE') {
-          finishUrineQTE();
+          // Повторное нажатие во время показа результата игнорируется (как в canvas-обработчике)
+          if (qteState.result === null) finishUrineQTE();
           return;
         }
       });
@@ -1889,7 +1890,7 @@
             actBtn.classList.add('holding');
 
             if (gameState === 'QTE_URINE') {
-              finishUrineQTE();
+              finishUrineQTE(); // защита от повторного начисления внутри самой функции (result !== null)
               return;
             }
             if (gameState === 'TITLE') {
