@@ -1397,8 +1397,23 @@
         speed: 95, // Скорость бегунка
         targetMin: 38,
         targetMax: 62,
-        result: null // 'perfect', 'good', 'miss'
+        result: null, // 'perfect', 'good', 'miss'
+        endTimer: 0, // реальные мс окончания показа результата (performance.now()+1100; 0 = экран не активен)
+        returnState: 'PLAYING' // состояние, в которое возвращаемся после QTE (пауза/планшет/модалка/титры/табель)
       };
+
+      // Отложенное закрытие экрана результата QTE.
+      // Таймер отвязан от игрового времени и не перебивает UI-состояния:
+      // если к моменту истечения игра не в PLAYING/QTE_URINE (пауза, планшет,
+      // модалка, титры, табель), экран закрывается при возврате в PLAYING
+      // (проверка в update()) или через closeUrineQTE() при рестарте смены.
+      let urineQtEResultTimeoutId = null;
+      function clearUrineQtEResultTimeout() {
+        if (urineQtEResultTimeoutId !== null) {
+          clearTimeout(urineQtEResultTimeoutId);
+          urineQtEResultTimeoutId = null;
+        }
+      }
 
       // Клавиатурный ввод
       const keys = {};
@@ -1476,6 +1491,10 @@
             gameState = 'PAUSED';
           } else if (gameState === 'PAUSED') {
             gameState = 'PLAYING';
+          } else if (gameState === 'QTE_URINE') {
+            // Пауза во время показа результата QTE: запоминаем, куда вернуться
+            qteState.returnState = 'PAUSED';
+            gameState = 'PAUSED';
           }
           return;
         }
@@ -1485,12 +1504,16 @@
             gameState = 'PAUSED';
           } else if (gameState === 'PAUSED') {
             gameState = 'PLAYING';
+          } else if (gameState === 'QTE_URINE') {
+            qteState.returnState = 'PAUSED';
+            gameState = 'PAUSED';
           }
           return;
         }
 
         // 4. Открытие планшета смены во время игры
-        if (gameState === 'PLAYING' && (e.code === 'Tab' || e.code === 'KeyT')) {
+        if ((gameState === 'PLAYING' || (gameState === 'QTE_URINE' && qteState.result !== null)) && (e.code === 'Tab' || e.code === 'KeyT')) {
+          if (gameState === 'QTE_URINE') qteState.returnState = 'SHIFT_TABLET';
           gameState = 'SHIFT_TABLET';
           sfx.playStep();
           return;
@@ -1997,7 +2020,13 @@
 
             // Кнопка паузы в HUD (x: 880..930, y: 8..40)
             if (pt.x >= 880 && pt.x <= 930 && pt.y >= 8 && pt.y <= 40) {
-              gameState = gameState === 'PLAYING' ? 'PAUSED' : 'PLAYING';
+              if (gameState === 'QTE_URINE') {
+                // Пауза доступна и на экране результата QTE — возврат после паузы в PLAYING
+                qteState.returnState = 'PLAYING';
+                gameState = 'PAUSED';
+              } else {
+                gameState = gameState === 'PLAYING' ? 'PAUSED' : 'PLAYING';
+              }
               continue;
             }
 
@@ -2009,6 +2038,11 @@
                 sfx.playStep();
               } else if (gameState === 'SHIFT_TABLET') {
                 gameState = 'PLAYING';
+                sfx.playStep();
+              } else if (gameState === 'QTE_URINE' && qteState.result !== null) {
+                // Планшет поверх экрана результата QTE: возврат в PLAYING после закрытия
+                qteState.returnState = 'PLAYING';
+                gameState = 'SHIFT_TABLET';
                 sfx.playStep();
               }
               continue;
@@ -2082,7 +2116,8 @@
             }
 
             if (gameState === 'QTE_URINE') {
-              finishUrineQTE();
+              // Любой тап по экрану QTE: повторный клик во время показа результата игнорируется
+              if (qteState.result === null) finishUrineQTE();
               continue;
             }
 
@@ -2201,8 +2236,12 @@
           el.mood = el.id === 'audrey' ? 'Спокойная' : (el.id === 'margo' ? 'Игривая' : 'Спокойная');
           el.isWantingPee = false;
           el.peeTimer = 35 + i * 20;
+          el.peeUrgencyTimer = 0;
           el.isWantingPedicure = false;
           el.pedicureTimer = 45 + i * 25;
+          el.pedicureUrgencyTimer = 0;
+          // Переинициализация таймера навоза для новой смены (как в исходном состоянии слоних)
+          el.pooTimer = [35, 25, 45][i % 3];
           el.lastInspected = 'Не проводился';
           el.observations = [];
           el.lastInspectionSnapshot = null;
@@ -2223,10 +2262,16 @@
 
         // Сброс частиц и активных QTE
         particles.length = 0;
+        clearUrineQtEResultTimeout(); // отложенное закрытие экрана результата не должно переживать рестарт
         qteState.active = false;
         qteState.result = null;
         qteState.elephant = null;
+        qteState.endTimer = 0;
+        qteState.returnState = 'PLAYING';
         inspectingElephant = null;
+
+        // Сброс счётчика куч навоза: id стартовых куч — 1 и 2, следующая новая куча получает id 3
+        nextPileId = 3;
 
         dungPiles = [
           { id: 1, x: 260, y: 360, kg: 15, rot: 0.3 },
@@ -3127,7 +3172,24 @@
         qteState.sliderPos = 10;
         qteState.sliderDir = 1;
         qteState.result = null;
+        clearUrineQtEResultTimeout(); // на случай повторного запуска — старый отложенный таймер не нужен
+        qteState.endTimer = 0; // экран результата ещё не показывается
+        qteState.returnState = 'PLAYING'; // QTE запускается только из режима игры
         sfx.playAlert();
+      }
+
+      // Завершение мини-игры: возврат в то состояние, куда игрок перешёл после показа результата
+      function closeUrineQTE() {
+        clearUrineQtEResultTimeout(); // экран результата закрывается — отложенный таймер больше не нужен
+        const targetState = ['PAUSED', 'SHIFT_TABLET', 'INSPECTION_MODAL', 'TITLE', 'SHIFT_REPORT'].includes(qteState.returnState)
+          ? qteState.returnState
+          : 'PLAYING';
+        qteState.active = false;
+        qteState.result = null;
+        qteState.elephant = null;
+        qteState.endTimer = 0;
+        qteState.returnState = 'PLAYING';
+        if (gameState === 'QTE_URINE') gameState = targetState;
       }
 
       function finishUrineQTE() {
@@ -3193,11 +3255,18 @@
         }
 
         qteState.elephant.isWantingPee = false;
+        qteState.elephant.peeUrgencyTimer = 0; // согласованный сброс таймера предупреждения (успех и промах)
         qteState.elephant.peeTimer = 70 + Math.random() * 40;
 
-        setTimeout(() => {
-          gameState = 'PLAYING';
-          qteState.active = false;
+        // Экран результата живёт на реальном времени (wall-clock), чтобы не зависать
+        // при паузе/планшете/модалке. По истечении 1.1 сек он закрывается только если
+        // игра вернулась в PLAYING; иначе — при следующем возврате в PLAYING (см. update())
+        // или через closeUrineQTE() при рестарте смены. gameState здесь не меняется.
+        qteState.endTimer = performance.now() + 1100;
+        clearUrineQtEResultTimeout();
+        urineQtEResultTimeoutId = setTimeout(() => {
+          urineQtEResultTimeoutId = null;
+          if (gameState === 'PLAYING') closeUrineQTE();
         }, 1100);
       }
 
@@ -3224,8 +3293,18 @@
               qteState.sliderPos = 4;
               qteState.sliderDir = 1;
             }
+          } else if (qteState.endTimer > 0 && performance.now() >= qteState.endTimer) {
+            // Отсчёт показа результата идёт по реальному времени и не зависит от
+            // игрового dt; при рестарте смены сбрасывается через closeUrineQTE()
+            closeUrineQTE();
           }
           return;
+        }
+
+        // Экран результата мог быть прерван переходом в паузу/планшет/модалку/табель.
+        // Если к моменту возврата в PLAYING отведённое время истекло — закрываем его сразу.
+        if (qteState.active && qteState.result !== null && gameState === 'PLAYING') {
+          closeUrineQTE();
         }
 
         // Если активна заставка поворота устройства на смартфоне, мир честно заморожен
@@ -3760,6 +3839,7 @@
             el.peeUrgencyTimer -= dt;
             if (el.peeUrgencyTimer <= 0) {
               el.isWantingPee = false;
+              el.peeUrgencyTimer = 0; // согласованный сброс при пропущенном позыве (как при успехе в finishUrineQTE)
               el.peeTimer = 50 + Math.random() * 30;
               addLog(`Слониха ${el.name} уже справила нужду. Проба упущена.`);
             }
