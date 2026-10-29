@@ -988,8 +988,36 @@
       ];
       function addLog(text) {
         const timeStr = `${String(gameTime.hour).padStart(2, '0')}:${String(Math.floor(gameTime.minute)).padStart(2, '0')}`;
-        logs.unshift({ time: timeStr, text });
+        // UX-рефакторинг: объединяем одинаковые предупреждения в одну запись
+        // со счётчиком повторов (история и время возникновения сохраняются).
+        if (logs.length > 0 && logs[0].text === text) {
+          logs[0].count = (logs[0].count || 1) + 1;
+          return;
+        }
+        logs.unshift({ time: timeStr, text, count: 1 });
         if (logs.length > 6) logs.pop();
+      }
+
+      // UX-рефакторинг: журнал теперь открывается по кнопке/клавише J
+      // (Tab остаётся назначенным планшету смены — переназначений нет).
+      let journalOpen = false;
+
+      // UX-рефакторинг: единый компактный индикатор активных проблем в верхней
+      // панели. Критические условия берутся из существующих игровых данных —
+      // вторая система событий не создаётся.
+      function getActiveAlerts() {
+        const alerts = [];
+        if (waterTrough.water <= 15) alerts.push({ icon: '💧', text: 'Критический дефицит воды в поилке (<15%). Откройте кран и держите действие.', color: '#e74c3c', critical: true });
+        else if (waterTrough.water < 30) alerts.push({ icon: '💧', text: 'Уровень воды в поилке ниже 30%. Требуется долив.', color: '#f39c12', critical: false });
+        if (player.wheelbarrowKg >= player.wheelbarrowMaxKg) alerts.push({ icon: '🛒', text: 'Тачка полна (60 кг). Выгрузите содержимое в контейнер утилизации.', color: '#e67e22', critical: false });
+        if (dungPiles.length >= 4) alerts.push({ icon: '🟤', text: `В вольере ${dungPiles.length} куч навоза — слоны замедлены, требуется уборка.`, color: '#f39c12', critical: false });
+        for (const el of elephants) {
+          if (el.isWantingPee) alerts.push({ icon: '🧪', text: `${el.name}: позыв к мочеиспусканию (${Math.ceil(el.peeUrgencyTimer)} c). Ведро на лабораторной стойке.`, color: '#f1c40f', critical: false });
+          if (el.isWantingPedicure && !el.pedicureDone) alerts.push({ icon: '🦶', text: `${el.name}: требуется расчистка ногтей (удержание действия).`, color: '#e056fd', critical: false });
+        }
+        if (wetSpots.length > 0) alerts.push({ icon: '🌧️', text: `Мокрое сено на настиле: ${wetSpots.length} участок(ов). Уборка вилами со стойки.`, color: '#3498db', critical: false });
+        if (activeSituationalEvent && activeSituationalEvent.status === 'active') alerts.push({ icon: '⚡', text: `Ситуация «${activeSituationalEvent.title}». Цепочка: замечено → действие → контроль [F].`, color: '#f39c12', critical: true });
+        return alerts;
       }
 
       // Игровое время и статистика
@@ -4933,9 +4961,9 @@
         ctx.fillRect(94, 60, 3, 28);
         ctx.fillRect(72, 92, 3, 28);
 
-        ctx.fillStyle = '#f5eedb';
-        ctx.font = '10px monospace';
-        ctx.fillText('СЕНО [SPACE]', 40, 50);
+        // UX-рефакторинг: постоянная подпись убрана; подсказка появляется
+        // только когда кипер в радиусе взаимодействия (см. getKeeperContextAction).
+        if (Math.hypot(player.x - 80, player.y - 90) < 65) drawInteractIcon(80, 44);
 
         // --- 2. Склад каши и сочных овощей ---
         ctx.fillStyle = '#3e2717';
@@ -4957,8 +4985,8 @@
         ctx.fillRect(166, 75, 8, 3);
         ctx.fillRect(206, 96, 7, 3);
 
-        ctx.fillStyle = '#f5eedb';
-        ctx.fillText('КАША [SPACE]', 150, 50);
+        // UX-рефакторинг: постоянная подпись убрана, только иконка в радиусе действия.
+        if (Math.hypot(player.x - 190, player.y - 90) < 65) drawInteractIcon(190, 48);
 
         // --- 3. Стол зоны отдыха кипера ---
         ctx.fillStyle = '#5c3a21';
