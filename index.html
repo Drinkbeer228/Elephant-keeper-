@@ -2312,6 +2312,49 @@
         return false;
       }
 
+      // Этап 26: выталкивание кипера из перекрытий (защита от застревания внутри слона).
+      // Позиция считается недопустимой не только через checkCollision до шага, но и
+      // когда слон сам подошёл к стоящему персонажу или когда персонаж уже оказался
+      // между препятствиями. Коррекция минимальным сдвигом вдоль вектора «слон -> кипер»,
+      // поэтому телепортаций и прохода сквозь стены не происходит.
+      function resolveKeeperCollisions() {
+        for (const el of elephants) {
+          const minDist = player.radius + el.radius * 0.7;
+          let dx = player.x - el.x;
+          let dy = player.y - el.y;
+          let dist = Math.hypot(dx, dy);
+          if (dist >= minDist) continue;
+
+          if (dist < 0.01) {
+            // Полный совпад центров — выталкиваем вверх (в сторону зоны кипера)
+            dx = 0; dy = -1; dist = 0.01;
+          }
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const overlap = minDist - dist;
+          const maxStep = Math.max(overlap, player.speed * 0.05); // плавная коррекция <= ~8 px/кадр
+
+          // Проверяем позиции по мере удаления от слона и занимаем первую свободную:
+          // если кипер прижат к стене/объекту, он выходит вдоль преграды, а не сквозь неё.
+          let resolved = false;
+          for (let s = maxStep; s >= 1; s -= 1) {
+            const tx = player.x + nx * s;
+            const ty = player.y + ny * s;
+            if (!checkCollision(tx, ty, player.radius)) {
+              player.x = tx;
+              player.y = ty;
+              resolved = true;
+              break;
+            }
+          }
+          if (!resolved && !checkCollision(player.x, player.y, player.radius)) {
+            // Текущая позиция формально допустима (слон вошёл в персонаж) — выходим на дистанцию контакта
+            player.x = el.x + nx * minDist;
+            player.y = el.y + ny * minDist;
+          }
+        }
+      }
+
       // Проверка доступности точки для перемещения слонихи (не заходить в стены, поилку и туловища подруг)
       function canElephantMoveTo(x, y, radius, ignoreElId) {
         // Границы вольера
@@ -3392,8 +3435,27 @@
           if (!checkCollision(player.x, newY, player.radius)) {
             player.y = newY;
           }
+
+          // Этап 26: если шаг всё же привёл к перекрытию со слоном (например, слон
+          // одновременно подошёл навстречу), немедленно корректируем позицию.
+          resolveKeeperCollisions();
         } else {
           player.walkAnim = 0;
+          // Этап 26: выталкивание при стоянии на месте — защита от застревания,
+          // когда слон сам наступил на персонажа (управление не блокируется).
+          resolveKeeperCollisions();
+        }
+
+        // Этап 26: если во время копания лопатой или педикюра слон вошёл в персонажа,
+        // разблокируем действие после выталкивания — иначе игрок «застревает» в анимации.
+        if ((player.isShoveling || player.isDoingPedicure) && checkCollision(player.x, player.y, player.radius)) {
+          resolveKeeperCollisions();
+          if (!checkCollision(player.x, player.y, player.radius)) {
+            player.isShoveling = false;
+            player.shovelProgress = 0;
+            player.isDoingPedicure = false;
+            player.pedicureProgress = 0;
+          }
         }
 
         // 3. Взаимодействия игрока по клавишам Space / E / Сенсорной кнопке действия
@@ -3804,6 +3866,10 @@
           }
         }
 
+        // Этап 26: после перемещения слоних корректируем положение кипера, если слон
+        // вошёл в персонажа (застревание внутри модели). Управление не блокируется.
+        resolveKeeperCollisions();
+
         // 4. Индивидуальное поведение трех слоних (FSM конечный автомат)
         elephants.forEach(el => {
           // Покачивание ушей, хобота и хвоста (привязано к worldAnimTime для паузы во время модалок)
@@ -4147,6 +4213,10 @@
             }
           }
         });
+
+        // Этап 26: финальная коррекция после движения слоних (FSM-шаги и расталкивание),
+        // чтобы кипер никогда не оставался внутри коллайдера слона в конце кадра.
+        resolveKeeperCollisions();
 
         // 5. Обновление частиц
         for (let i = particles.length - 1; i >= 0; i--) {
