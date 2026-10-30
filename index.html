@@ -43,96 +43,14 @@
       }
 
       /* =========================================================
-         1. ЭКРАН-ЗАСТАВКА «ПОВЕРНИТЕ УСТРОЙСТВО» (ДЛЯ ВЕРТИКАЛЬНОЙ ОРИЕНТАЦИИ)
+         1. АДАПТИВНАЯ ВЁРСТКА (PORTRAIT + LANDSCAPE)
+         Игра доступна в обеих ориентациях: мир фиксирован
+         (CANVAS_WIDTH/CANVAS_HEIGHT), wrapper масштабируется под
+         доступную площадь с сохранением пропорций.
          ========================================================= */
-      #rotate-device-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        background: #15100d;
-        color: #f5eedb;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        padding: 24px;
-        touch-action: none;
-      }
-
-      .rotate-phone-anim {
-        width: 96px;
-        height: 96px;
-        margin-bottom: 26px;
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .phone-outline {
-        width: 44px;
-        height: 76px;
-        border: 3px solid #f1c40f;
-        border-radius: 9px;
-        position: relative;
-        animation: rotatePhone 2.5s ease-in-out infinite;
-        box-shadow: 0 0 20px rgba(241, 196, 15, 0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #241c16;
-      }
-
-      .phone-screen {
-        width: 34px;
-        height: 58px;
-        background: rgba(241, 196, 15, 0.12);
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 16px;
-      }
-
-      .phone-notch {
-        position: absolute;
-        top: 2px;
-        width: 12px;
-        height: 2px;
-        background: #f1c40f;
-        border-radius: 1px;
-      }
-
-      @keyframes rotatePhone {
-        0%, 15% {
-          transform: rotate(0deg);
-        }
-        50%, 75% {
-          transform: rotate(90deg);
-        }
-        90%, 100% {
-          transform: rotate(0deg);
-        }
-      }
-
-      #rotate-device-overlay h2 {
-        font-size: 22px;
-        color: #f1c40f;
-        margin-bottom: 10px;
-        font-weight: bold;
-        letter-spacing: 0.5px;
-      }
-
-      #rotate-device-overlay p {
-        font-size: 14px;
-        color: #c5baaa;
-        max-width: 290px;
-        line-height: 1.45;
-      }
 
       /* =========================================================
-         2. ГОРИЗОНТАЛЬНОЕ ИГРОВОЕ ПОЛЕ (LANDSCAPE-FIRST)
+         2. ИГРОВОЕ ПОЛЕ (адаптивное масштабирование)
          ========================================================= */
       #game-wrapper {
         position: relative;
@@ -349,24 +267,60 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      /* =========================================================
+         4. ПОРТРЕТНАЯ КОМПОНОВКА (PHONE PORTRAIT)
+         Игровое поле и весь HUD рисуются внутри canvas фиксированного
+         размера (1000×680), wrapper масштабируется целиком с сохранением
+         пропорций. Координаты касаний преобразуются через
+         getBoundingClientRect(), поэтому остаются корректными при любом
+         масштабе. В портрете HTML-слой touch-controls перестраивается в
+         компактную двухстрочную компоновку: строка быстрого доступа
+         (планшет/звук/пауза) сверху, джойстик и кнопки действий — внизу.
+         Все интерактивные элементы сохраняют область касания >= 44 CSS px
+         на типичном телефоне (~390px ширины) и не перекрывают друг друга.
+         ========================================================= */
+      @media (orientation: portrait) {
+        body.portrait-layout #touch-hud-btns {
+          top: 4px;
+          right: 6px;
+          gap: 5px;
+        }
+        body.portrait-layout .touch-hud-btn {
+          width: 44px;
+          height: 44px;
+        }
+        body.portrait-layout #touch-joystick-wrap {
+          bottom: 6px;
+          left: 6px;
+          width: 100px;
+          height: 100px;
+        }
+        body.portrait-layout #touch-joystick-base {
+          width: 92px;
+          height: 92px;
+        }
+        body.portrait-layout #touch-actions-wrap {
+          bottom: 6px;
+          right: 6px;
+          gap: 8px;
+        }
+        body.portrait-layout #touch-btn-inspect {
+          width: 44px;
+          height: 60px;
+        }
+        body.portrait-layout #touch-btn-action {
+          width: 60px;
+          height: 60px;
+        }
+        body.portrait-layout #touch-action-label {
+          max-width: 52px;
+        }
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
-
-    <!-- Заставка «Поверните устройство» для вертикальных экранов смартфонов -->
-    <div id="rotate-device-overlay">
-      <div class="rotate-phone-anim">
-        <div class="phone-outline">
-          <div class="phone-notch"></div>
-          <div class="phone-screen">
-            <span>🐘</span>
-          </div>
-        </div>
-      </div>
-      <h2>ПЕРЕВЕРНИТЕ ТЕЛЕФОН</h2>
-      <p>Слоновник удобнее обходить в горизонтальном режиме</p>
-    </div>
 
     <!-- Основное игровое поле -->
     <div id="game-wrapper">
@@ -1597,10 +1551,6 @@
         stopWashing(true);
       }
 
-      // ЭТАП ориентации: заглушка «переверните телефон» активна ли (объявляется
-      // ниже в блоке адаптации). Пока true — игровой ввод полностью отключён.
-      let isRotateOverlayActive = false;
-
       // Клавиатурный ввод
       const keys = {};
       window.addEventListener('keydown', (e) => {
@@ -1608,10 +1558,6 @@
         if (e.code === 'Tab') {
           e.preventDefault();
         }
-
-        // ЭТАП ориентации: пока активна заглушка «переверните телефон»,
-        // игровой мир скрыт и клавиатурные действия не обрабатываются
-        if (isRotateOverlayActive) return;
 
         keys[e.code] = true;
         if (e.repeat) return;
@@ -1779,68 +1725,38 @@
       };
 
       // ==========================================
-      // АДАПТАЦИЯ К ОРИЕНТАЦИИ (LANDSCAPE-FIRST)
+      // АДАПТАЦИЯ К ОРИЕНТАЦИИ (PORTRAIT + LANDSCAPE)
       // ==========================================
-      // Переменная isRotateOverlayActive объявлена выше (перед клавиатурным вводом)
-
-      // Мобильное устройство: определяем по реальному сенсорному вводу и узкому
-      // экрану. На компьютерах и планшетах портретный режим не блокируется.
-      function isMobilePhoneDevice() {
-        const coarsePointer = window.matchMedia &&
-          window.matchMedia('(pointer: coarse)').matches;
-        const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-        const smallScreen = Math.min(window.innerWidth, window.innerHeight) < 760;
-        return (coarsePointer || hasTouch) && smallScreen;
-      }
-
-      function checkDeviceOrientation() {
+      // Игра доступна в обеих ориентациях. В портретном режиме на телефоне
+      // добавляется класс .portrait-layout: CSS перестраивает HUD и сенсорное
+      // управление в компактную двухстрочную компоновку. Игровая логика,
+      // масштабирование canvas и преобразование координат не меняются.
+      function applyOrientationLayout() {
         const isPortrait = window.innerHeight > window.innerWidth;
-        // Заставка показывается только на телефоне в портретной ориентации
-        const shouldShowRotatePrompt = isPortrait && isMobilePhoneDevice();
-
-        const overlay = document.getElementById('rotate-device-overlay');
-        const gameWrapper = document.getElementById('game-wrapper');
-
-        if (shouldShowRotatePrompt) {
-          if (!isRotateOverlayActive) {
-            isRotateOverlayActive = true;
-            // Сброс движения кипера, чтобы персонаж не продолжал идти
-            virtualKeys.up = false;
-            virtualKeys.down = false;
-            virtualKeys.left = false;
-            virtualKeys.right = false;
-            virtualKeys.action = false;
-          }
-          if (overlay) overlay.style.display = 'flex';
-          // Полностью скрываем игру: canvas, HUD и сенсорные кнопки внутри wrapper.
-          // display:none гарантирует, что элементы недоступны для взаимодействия
-          // (в т.ч. tab-фокусом), а указатель проходит только через заглушку.
-          if (gameWrapper) gameWrapper.style.display = 'none';
-        } else {
-          if (isRotateOverlayActive) {
-            isRotateOverlayActive = false;
-            // Сброс клавиш, чтобы после возврата из заглушки персонаж не «ехал»
-            // (keydown/keyup во время скрытой игры не обрабатывались)
-            keys['ArrowUp'] = false;
-            keys['ArrowDown'] = false;
-            keys['ArrowLeft'] = false;
-            keys['ArrowRight'] = false;
-            keys['KeyW'] = false;
-            keys['KeyS'] = false;
-            keys['KeyA'] = false;
-            keys['KeyD'] = false;
-            keys['Space'] = false;
-            keys['KeyE'] = false;
-            player.actionQueued = false;
-          }
-          if (overlay) overlay.style.display = 'none';
-          if (gameWrapper) gameWrapper.style.display = 'block';
-        }
+        document.body.classList.toggle('portrait-layout', isPortrait);
+        // Сброс клавиш/джойстика при смене ориентации, чтобы персонаж
+        // не «ехал» и удержание действия не залипало между раскладками
+        keys['ArrowUp'] = false;
+        keys['ArrowDown'] = false;
+        keys['ArrowLeft'] = false;
+        keys['ArrowRight'] = false;
+        keys['KeyW'] = false;
+        keys['KeyS'] = false;
+        keys['KeyA'] = false;
+        keys['KeyD'] = false;
+        keys['Space'] = false;
+        keys['KeyE'] = false;
+        player.actionQueued = false;
+        virtualKeys.up = false;
+        virtualKeys.down = false;
+        virtualKeys.left = false;
+        virtualKeys.right = false;
+        virtualKeys.action = false;
       }
 
-      window.addEventListener('resize', checkDeviceOrientation);
+      window.addEventListener('resize', applyOrientationLayout);
       window.addEventListener('orientationchange', () => {
-        setTimeout(checkDeviceOrientation, 100);
+        setTimeout(applyOrientationLayout, 100);
       });
 
       // Контекстное действие для правой наэкранной кнопки действия
@@ -3670,9 +3586,6 @@
       let worldAnimTime = 0;
 
       function update(dt) {
-        // При показе заставки «Поверните устройство» симуляция мира остановлена на паузу
-        if (isRotateOverlayActive) return;
-
         // 0. Мини-игра на реакцию (ловля анализа мочи в ведро):
         // Работает только бегунок, мир, время смены и слонихи полностью заморожены
         if (gameState === 'QTE_URINE') {
@@ -3698,9 +3611,6 @@
         if (qteState.active && qteState.result !== null && gameState === 'PLAYING') {
           closeUrineQTE();
         }
-
-        // Если активна заставка поворота устройства на смартфоне, мир честно заморожен
-        if (isRotateOverlayActive) return;
 
         // Централизованная пауза: при открытых модальных окнах, планшете, паузе,
         // титульном экране или итоговом табеле симуляция мира остановлена
@@ -7692,7 +7602,7 @@
       });
 
       // Инициализация адаптации под экран и мобильного управления
-      checkDeviceOrientation();
+      applyOrientationLayout();
       initTouchControls();
 
       requestAnimationFrame(gameLoop);
