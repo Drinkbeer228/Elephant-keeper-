@@ -1,17 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { advance } from '../src/sim';
+import { advance, availableAction } from '../src/sim';
 import { mealStatus } from '../src/sim/feeding';
 import { profileOf } from '../src/sim/elephants';
-import { act, at, cleanShift, hold, stand } from './helpers';
+import { basinsOnRack } from '../src/sim/items';
+import { finishShift } from '../src/sim/handover';
+import { act, at, cleanShift, hold, kashaReady, serve, stand } from './helpers';
 
 function serveKasha(s: ReturnType<typeof cleanShift>): void {
   stand(s, 'kitchen');
-  expect(act(s)).toBe('Взять тазы с кашей (3)');
+  expect(act(s)).toBe('Разложить кашу по тазам (3)');
   for (const e of s.elephants) {
+    const b = basinsOnRack(s).find((x) => x.food === 'kasha')!;
+    at(s, b.x + 0.5, b.y);
+    expect(act(s)).toBe('Взять: таз с кашей');
     const slot = profileOf(e).slot;
     at(s, slot.x, slot.y + 0.9);
     expect(act(s)).toMatch(/^Поставить таз с кашей для/);
   }
+}
+
+// Убрать тазы со стеллажа к местам слоних грязными, как после еды
+function dirtyAtSlots(s: ReturnType<typeof cleanShift>, n: number): void {
+  basinsOnRack(s)
+    .slice(0, n)
+    .forEach((b, i) => {
+      const slot = profileOf(s.elephants[i]).slot;
+      Object.assign(b, { x: slot.x, y: slot.y, dirty: true, food: null, eatenAt: 0 });
+    });
 }
 
 describe('корм', () => {
@@ -46,7 +61,7 @@ describe('корм', () => {
   it('пустой таз не забрали — его раздавят', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
-    s.items.push({ id: 500, kind: 'basin', x: 3.5, y: 8.3, droppedAt: 0, food: null, eatenAt: 0, owner: 'audrey' });
+    dirtyAtSlots(s, 1);
     advance(s, 900);
     expect(s.stats.basinsLost).toBe(1);
     expect(s.log.some((l) => l.why === 'basinCrushed')).toBe(true);
@@ -68,11 +83,10 @@ describe('корм', () => {
     expect(labels[0]).toBe('Ужин: Замочить овощи');
     expect(labels[4]).toBe('Ужин: Собрать ужин по тазам');
     expect(s.kitchen.veg.portions).toBe(3);
-    // Каша к 17:00 тоже готова — её берут первой, овощи следом
-    expect(act(s)).toBe('Взять тазы с кашей (3)');
-    s.player.held = null;
+    // Каша к 17:00 тоже готова — её раскладывают первой, овощи следом
+    expect(availableAction(s)?.label).toBe('Разложить кашу по тазам (3)');
     s.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
-    expect(act(s)).toBe('Взять тазы с овощами (3)');
+    expect(availableAction(s)?.label).toBe('Разложить ужин по тазам (3)');
   });
 
   it('слониха сама идёт к тазу и съедает', () => {
@@ -85,8 +99,7 @@ describe('корм', () => {
     audrey.hunger = 80;
     stand(s, 'kitchen');
     act(s);
-    at(s, 3.5, 9.2);
-    act(s);
+    serve(s, 'audrey');
     advance(s, 60);
     const basin = s.items.find((i) => i.kind === 'basin' && i.owner === 'audrey')!;
     expect(basin.food).toBeNull();
@@ -94,19 +107,108 @@ describe('корм', () => {
   });
 });
 
-describe('тазы стопкой', () => {
-  it('пустые тазы собираются в стопку и моются разом', () => {
+describe('тазы — настоящие предметы', () => {
+  it('на старте четыре чистых таза на стеллаже', () => {
+    const s = cleanShift();
+    expect(basinsOnRack(s)).toHaveLength(4);
+    expect(basinsOnRack(s).every((b) => !b.dirty && !b.food)).toBe(true);
+  });
+
+  it('каша раскладывается по тазам на стеллаже, носят по одному', () => {
+    const s = kashaReady();
+    stand(s, 'kitchen');
+    expect(act(s)).toBe('Разложить кашу по тазам (3)');
+    expect(basinsOnRack(s).filter((b) => b.food === 'kasha')).toHaveLength(3);
+    expect(s.kitchen.kasha.status).toBe('idle');
+    const b = basinsOnRack(s).find((x) => x.food)!;
+    at(s, b.x + 0.5, b.y);
+    expect(act(s)).toBe('Взять: таз с кашей');
+    expect(s.player.held?.food).toBe('kasha');
+    expect(s.player.held?.nested ?? []).toHaveLength(0);
+  });
+
+  it('чистых тазов два — раскладываются две порции, третья после мойки', () => {
+    const s = kashaReady();
+    dirtyAtSlots(s, 2);
+    stand(s, 'kitchen');
+    expect(act(s)).toBe('Разложить кашу по тазам (2)');
+    expect(s.kitchen.kasha.portions).toBe(1);
+    const slot = profileOf(s.elephants[0]).slot;
+    at(s, slot.x, slot.y + 0.9);
+    expect(act(s)).toBe('Взять: грязный таз');
+    stand(s, 'wash');
+    expect(act(s)).toBe('Вымыть таз');
+    expect(s.player.held?.dirty).toBe(false);
+    stand(s, 'basinRack');
+    expect(act(s)).toBe('Поставить таз на стеллаж');
+    expect(s.player.held).toBeNull();
+    stand(s, 'kitchen');
+    expect(act(s)).toBe('Разложить кашу по тазам (1)');
+    expect(s.kitchen.kasha.status).toBe('idle');
+  });
+
+  it('пустые собирают стопкой из настоящих тазов, моют — они остаются в руках, ставят на стеллаж', () => {
+    const s = cleanShift();
+    s.elephants.forEach((e) => hold(e, 16, 3));
+    dirtyAtSlots(s, 3);
+    const slots = s.elephants.map((e) => profileOf(e).slot);
+    at(s, slots[0].x, slots[0].y + 0.9);
+    expect(act(s)).toBe('Взять: грязный таз');
+    at(s, slots[1].x, slots[1].y + 0.9);
+    expect(act(s)).toBe('Взять ещё пустой таз (будет 2)');
+    at(s, slots[2].x, slots[2].y + 0.9);
+    expect(act(s)).toBe('Взять ещё пустой таз (будет 3)');
+    expect(s.player.held?.nested).toHaveLength(2);
+    stand(s, 'wash');
+    expect(act(s)).toBe('Вымыть тазы (3)');
+    const all = [s.player.held!, ...s.player.held!.nested!];
+    expect(all.every((b) => !b.dirty)).toBe(true);
+    stand(s, 'basinRack');
+    expect(act(s)).toBe('Поставить тазы на стеллаж (3)');
+    expect(basinsOnRack(s)).toHaveLength(4);
+    expect(s.player.held).toBeNull();
+  });
+
+  it('с полным тазом в руках ещё таз не берут; грязный в полный не вкладывают', () => {
+    const s = kashaReady();
+    dirtyAtSlots(s, 1);
+    stand(s, 'kitchen');
+    act(s);
+    const full = basinsOnRack(s).find((x) => x.food)!;
+    at(s, full.x + 0.5, full.y);
+    act(s);
+    const slot = profileOf(s.elephants[0]).slot;
+    at(s, slot.x + 0.6, slot.y + 0.9);
+    expect(availableAction(s)?.label ?? '').not.toMatch(/^Взять ещё/);
+    s.player.held!.x = slot.x - 0.6;
+    s.player.held!.y = slot.y;
+    s.items.push(s.player.held!);
+    s.player.held = null;
+    const dirty = s.items.find((i) => i.kind === 'basin' && i.dirty)!;
+    s.items = s.items.filter((i) => i !== dirty);
+    s.player.held = dirty;
+    expect(availableAction(s)?.label ?? '').not.toMatch(/^Взять ещё/);
+  });
+
+  it('раздавленный таз пропадает, остальных хватает на кормление', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
-    s.items.push({ id: 601, kind: 'basin', x: 3.5, y: 8.3, droppedAt: 0, food: null, eatenAt: 0 });
-    s.items.push({ id: 602, kind: 'basin', x: 4.3, y: 8.3, droppedAt: 0, food: null, eatenAt: 0 });
-    const clean = s.kitchen.cleanBasins;
-    at(s, 3.5, 8.5);
-    expect(act(s)).toBe('Взять: пустой таз');
-    at(s, 4.3, 8.5);
-    expect(act(s)).toBe('Взять ещё пустой таз (будет 2)');
-    stand(s, 'wash');
-    expect(act(s)).toBe('Вымыть тазы (2)');
-    expect(s.kitchen.cleanBasins).toBe(clean + 2);
+    dirtyAtSlots(s, 1);
+    advance(s, 900);
+    expect(s.stats.basinsLost).toBe(1);
+    expect(s.items.filter((i) => i.kind === 'basin')).toHaveLength(3);
+    s.kitchen.kasha = { status: 'ready', readyAt: s.t, portions: 3, meal: 'kasha2' };
+    stand(s, 'kitchen');
+    expect(act(s)).toBe('Разложить кашу по тазам (3)');
+  });
+
+  it('сдача: грязный таз на стеллаже или забытый у ограды — ✗ «Тазы вымыты и на стеллаже»', () => {
+    const a = cleanShift();
+    basinsOnRack(a)[0].dirty = true;
+    expect(finishShift(a).checklist.find((c) => c.id === 'basins')!.ok).toBe(false);
+    const b = cleanShift();
+    dirtyAtSlots(b, 1);
+    expect(finishShift(b).checklist.find((c) => c.id === 'basins')!.ok).toBe(false);
+    expect(finishShift(cleanShift()).checklist.find((c) => c.id === 'basins')!.ok).toBe(true);
   });
 });

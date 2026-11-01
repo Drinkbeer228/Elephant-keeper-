@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { inBedding, inReachZone, nearStation } from '../data/map';
+import { inPaddock, inReachZone, nearStation } from '../data/map';
 import { emit } from './events';
 import { chance, randomRange } from './rng';
 import { addItem } from './state';
@@ -19,7 +19,7 @@ export function barrowNear(state: State, reach: number = B.reach): boolean {
   const b = state.barrow;
   const p = state.player;
   // Через ограждение тачкой не пользуются: кипер и тачка по одну сторону
-  return !b.pushed && d(b, p) <= reach && inBedding(b.x, b.y) === inBedding(p.x, p.y);
+  return !b.pushed && d(b, p) <= reach && inPaddock(b.x, b.y) === inPaddock(p.x, p.y);
 }
 
 export function barrowRoom(state: State): number {
@@ -62,12 +62,12 @@ export function updateBalance(state: State, dtReal: number, moving: boolean, inp
 // Скучающая слониха может опрокинуть тачку, оставленную рядом
 export function updateBarrowRisk(state: State, dt: number): void {
   const b = state.barrow;
-  if (b.pushed || (!inBedding(b.x, b.y) && !inReachZone(b.x, b.y))) return;
+  if (b.pushed || (!inPaddock(b.x, b.y) && !inReachZone(b.x, b.y))) return;
   if (state.t - b.parkedAt < BALANCE.items.breakGrace) return;
   if (!b.tools.length && !b.waste && !b.bales && !b.sawdust && !b.straw) return;
   const near = state.elephants.filter((e) => e.state !== 'sleep' && d(e, b) <= BALANCE.items.reachDistance).sort((x, y) => d(x, b) - d(y, b))[0];
   if (!near) return;
-  const p = B.tipChance * (1 - near.trust / 100) * (0.5 + near.boredom / 200) * (state.fenceOn ? 1 : 2);
+  const p = B.tipChance * (1 - near.trust / 100) * (0.5 + near.boredom / 200);
   if (!chance(state, p * dt)) return;
   // Опрокинула: мусор вывалился кучами, инструмент разлетелся
   const piles = Math.min(4, Math.ceil(b.waste / 3));

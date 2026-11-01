@@ -1,21 +1,10 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { MAP } from '../data/map';
-import { pick, randomInt } from './rng';
-import type { ChecklistEntry, ChecklistId, Elephant, Item, State } from './types';
-
-export const CHECKLIST: { id: ChecklistId; label: string }[] = [
-  { id: 'fence', label: 'Электропастух работает' },
-  { id: 'gate', label: 'Задвижки и замки закрыты' },
-  { id: 'fenceItems', label: 'У ограждения нет посторонних вещей' },
-  { id: 'standing', label: 'Все трое на ногах, без травм и хромоты' },
-  { id: 'water', label: 'Вода в доступе' },
-  { id: 'hay', label: 'Сено в доступе' },
-  { id: 'inventory', label: 'Скребок, совок и бак на месте' },
-];
+import { randomInt } from './rng';
+import type { Elephant, Item, State } from './types';
 
 export interface ShiftOptions {
-  defects?: ChecklistId[]; // какие косяки оставил сменщик; по умолчанию случайные
   mess?: boolean; // ночная грязь на подстилке, по умолчанию есть
 }
 
@@ -23,7 +12,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
   const state: State = {
     seed,
     rng: seed,
-    phase: 'acceptance',
+    phase: 'shift',
     t: 0,
     nextItemId: 1,
     player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 } },
@@ -36,13 +25,11 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     kitchen: {
       kasha: { status: 'idle', readyAt: 0, portions: 0, meal: null },
       veg: { stage: 0, nextAt: 0, portions: 0 },
-      cleanBasins: BALANCE.food.basins,
     },
     feederHay: BALANCE.food.hayStart,
     trough: 80,
     valveOpen: false,
     lastOverflow: 0,
-    fenceOn: true,
     gateOpen: false,
     barrow: {
       x: MAP.barrowStart.x,
@@ -63,7 +50,6 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       kasha2: Object.fromEntries(ELEPHANTS.map((p) => [p.id, null])),
       dinner: Object.fromEntries(ELEPHANTS.map((p) => [p.id, null])),
     },
-    checklist: CHECKLIST.map((c) => ({ ...c, defect: false, mark: null }) satisfies ChecklistEntry),
     stats: {
       drySamples: 0,
       drySum: 0,
@@ -84,11 +70,10 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
   addItem(state, 'scoop', spots.scoop.x, spots.scoop.y, { dirty: false });
   addItem(state, 'fork', spots.fork.x, spots.fork.y);
   addItem(state, 'broom', spots.broom.x, spots.broom.y);
+  // Тазы — чистые, на стеллаже в кормовой
+  MAP.basinSpots.slice(0, BALANCE.food.basins).forEach((p) => addItem(state, 'basin', p.x, p.y, { food: null, dirty: false }));
 
   if (opts.mess !== false) addNightMess(state);
-
-  const defects = opts.defects ?? randomDefects(state);
-  defects.forEach((id) => applyDefect(state, id));
   return state;
 }
 
@@ -146,54 +131,5 @@ function addNightMess(state: State): void {
       y: b.y + randomInt(state, 0, b.rows - 1) + 0.5,
       at: 0,
     });
-  }
-}
-
-function randomDefects(state: State): ChecklistId[] {
-  const count = randomInt(state, 0, BALANCE.handover.maxDefects);
-  const pool = CHECKLIST.map((c) => c.id);
-  const result: ChecklistId[] = [];
-  while (result.length < count) {
-    const id = pick(state, pool);
-    if (!result.includes(id)) result.push(id);
-  }
-  return result;
-}
-
-function applyDefect(state: State, id: ChecklistId): void {
-  const entry = state.checklist.find((c) => c.id === id)!;
-  entry.defect = true;
-  switch (id) {
-    case 'fence':
-      state.fenceOn = false;
-      break;
-    case 'gate':
-      state.gateOpen = true;
-      break;
-    case 'fenceItems':
-      addItem(state, 'basin', 10.5, 9.4, { food: null, eatenAt: -60 });
-      state.kitchen.cleanBasins--;
-      break;
-    case 'standing': {
-      const e = pick(state, state.elephants);
-      e.limp = true;
-      e.footDebt = BALANCE.footDebt.limpThreshold + 10;
-      e.footDebtStart = e.footDebt;
-      break;
-    }
-    case 'water':
-      state.trough = 0;
-      break;
-    case 'hay':
-      state.feederHay = 0;
-      break;
-    case 'inventory': {
-      // Совок не на месте: валяется у мойки
-      const scoop = state.items.find((i) => i.kind === 'scoop')!;
-      scoop.x = 12.2;
-      scoop.y = 14.2;
-      scoop.dirty = true;
-      break;
-    }
   }
 }

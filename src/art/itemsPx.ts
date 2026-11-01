@@ -17,11 +17,29 @@ function bucket(content: 'empty' | 'full' | 'dirty'): Sprite {
   return s;
 }
 
-function basin(food: 'empty' | 'kasha' | 'veg'): Sprite {
+// Стопка пустых тазов, вложенных друг в друга: видно каждый обод
+function basinStack(n: number): Sprite {
+  const s = new Sprite(16, 16 + (n - 1) * 2);
+  for (let i = n - 1; i >= 0; i--) s.draw(basin('empty'), 0, i * 2);
+  return s;
+}
+
+function basin(food: 'empty' | 'kasha' | 'veg' | 'dirty'): Sprite {
   const s = new Sprite(16, 16);
   s.shape(ellipse(8, 11.5, 7.5, 3.6), T.black);
   s.shape(ellipse(8, 9, 7.5, 2.6), { L: '#7c7c84', M: '#4c4c54', D: '#2c2c30' });
-  if (food === 'kasha') {
+  if (food === 'dirty') {
+    // Остатки каши и грязь по стенкам
+    for (const [x, y, c] of [
+      [5, 9, '#8c5418'],
+      [6, 9, '#c49a5c'],
+      [9, 8, '#8c5418'],
+      [10, 9, '#c49a5c'],
+      [3, 11, '#5c3000'],
+      [12, 12, '#5c3000'],
+    ] as [number, number, string][])
+      s.set(x, y, c);
+  } else if (food === 'kasha') {
     s.fill(ellipse(8, 9, 5.6, 1.5), C.goldLight);
     for (const [x, y] of [[5, 9], [8, 8], [10, 9], [7, 10]]) s.set(x, y, '#c49a5c');
   } else if (food === 'veg') {
@@ -40,9 +58,10 @@ function basin(food: 'empty' | 'kasha' | 'veg'): Sprite {
     ] as [number, number, string][])
       s.set(x, y, c);
   } else {
-    s.fill(ellipse(8, 9, 5.6, 1.5), '#1c1c20');
-    s.set(6, 9, '#8c5418');
-    s.set(9, 9, '#8c5418');
+    // Чистый: тёмное дно и блик
+    s.fill(ellipse(8, 9, 5.6, 1.5), '#2c2c30');
+    s.set(5, 9, C.white);
+    s.set(6, 9, C.grey);
   }
   return s;
 }
@@ -95,27 +114,31 @@ function sawdust(): Sprite {
 
 const TOOL_PAL = { k: C.k, w: C.orangeLight, W: C.orange, m: C.white, M: C.grey, D: C.greyMid, y: C.gold, Y: C.goldDark };
 
-function scoop(): Sprite {
+// Совок со скребком по образцу: оцинкованный ковш — высокая задняя стенка, скос к открытому переднему краю,
+// сверху тёмная железная скоба-ручка на заклёпках. Полный — навоз горкой виден над бортом
+const SCOOP_PAL = { k: C.k, m: C.white, M: C.grey, D: C.greyMid, h: '#3c3c40', b: '#8c5418', B: '#5c3000' };
+
+function scoop(full = false): Sprite {
   return grid(
     [
-      '..........kkkk..',
-      '.........kmMMDk.',
-      '........kmMMMDk.',
-      '........kMMMDDk.',
-      '.......kwkkkkk..',
-      '......kwk.......',
-      '.....kwk........',
-      '....kwk.........',
-      '...kwk......k...',
-      '..kwk......kMk..',
-      '..kk......kmMDk.',
-      '.........kmMMDk.',
-      '........kWkkkk..',
-      '.......kWk......',
-      '......kWk.......',
-      '......kk........',
+      '......kkkkkkkk..',
+      '......khhhhhhk..',
+      '......khkkkkhk..',
+      full ? '......khkbbkhk..' : '......khk..khk..',
+      full ? '......khkbBkhk..' : '......khk..khk..',
+      '.....kkhkkkkhkk.',
+      full ? '...bkmmhmmmmhmk.' : '....kmmhmmmmhmk.',
+      full ? '.bbkmMMhMMMMhMk.' : '...kmMMhMMMMhMk.',
+      full ? '.BkmMMMkMMMMkMk.' : '..kmMMMkMMMMkMk.',
+      '.kmMMMMMMMMMMMk.',
+      'kmMMMMMMMMMMMDk.',
+      'kMMMMMMMMMMMMDk.',
+      'kMMMMMMMMMMMDDk.',
+      'kDDDDDDDDDDDDDk.',
+      'kkkkkkkkkkkkkkk.',
+      '................',
     ],
-    TOOL_PAL,
+    SCOOP_PAL,
   );
 }
 
@@ -216,12 +239,17 @@ export function itemSprites(): Record<string, Sprite> {
     'item-basin': basin('empty'),
     'item-basin-kasha': basin('kasha'),
     'item-basin-veg': basin('veg'),
+    'item-basin-dirty': basin('dirty'),
+    'item-basin-stack-2': basinStack(2),
+    'item-basin-stack-3': basinStack(3),
+    'item-basin-stack-4': basinStack(4),
     'item-bag': bag(false),
     'item-bag-full': bag(true),
     'item-hay': hay(),
     'item-straw': straw(),
     'item-sawdust': sawdust(),
     'item-scoop': scoop(),
+    'item-scoop-full': scoop(true),
     'item-fork': fork(),
     'item-broom': broom(),
     dung: dung(),

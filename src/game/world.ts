@@ -4,7 +4,7 @@ import { LAMPS } from '../art/worldPx';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { MAP } from '../data/map';
-import { dayPart, sawdustAbsorbed, type State } from '../sim';
+import { dayPart, sawdustAbsorbed, stinkSources, type State } from '../sim';
 import { ElephantView } from './elephantView';
 import { KeeperView } from './keeperView';
 import { BarrowView } from './barrowView';
@@ -40,12 +40,14 @@ export class WorldScene extends Phaser.Scene {
   private kitchen!: Phaser.GameObjects.Image;
   private kitchenText!: Phaser.GameObjects.Text;
   private valve!: Phaser.GameObjects.Image;
-  private panel!: Phaser.GameObjects.Image;
   private barrow!: BarrowView;
   private box!: Phaser.GameObjects.Image;
   private ramp!: Phaser.GameObjects.Image;
   private boxText!: Phaser.GameObjects.Text;
   private truck!: Phaser.GameObjects.Image;
+  private stink!: Phaser.GameObjects.Graphics;
+  private stinkAt: { x: number; y: number }[] = [];
+  private stinkCheck = 0;
   private fx: Record<string, Phaser.GameObjects.Particles.ParticleEmitter> = {};
   private prev = { tallies: '', trust: [] as number[], dung: new Set<number>() };
 
@@ -132,8 +134,8 @@ export class WorldScene extends Phaser.Scene {
     for (let i = 0, x = 12; x < MAP.w * TILE; x += 30, i++) {
       this.bulbs.push(this.img(x, 0.36 * TILE + (i % 2) * PX, `deco-bulb-${colors[i % 4]}`, -800, 0));
     }
-    // Фонари вдоль прохода
-    for (const l of LAMPS.filter((p) => p.y > 2)) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
+    // Фонари на столбах — только снаружи решётки; в постройках свет потолочный, без столбов
+    for (const l of LAMPS.filter((p) => p.post)) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
 
     // Слоты для тазов
     for (const p of ELEPHANTS) this.img(p.slot.x * TILE, p.slot.y * TILE + 8, 'st-mat', -850, 0.5);
@@ -142,46 +144,68 @@ export class WorldScene extends Phaser.Scene {
     const st = MAP.stations;
     const at = (k: keyof typeof st) => ({ x: st[k].x * TILE, y: (st[k].y + st[k].h / 2) * TILE });
     const label: Partial<Record<keyof typeof st, string>> = {
-      rack: 'ИНВЕНТАРЬ',
       sawdust: 'ОПИЛКИ',
       bags: 'МЕШКИ',
-      wash: 'МОЙКА',
       hay: 'СЕНО',
       straw: 'СОЛОМА',
     };
-    for (const k of ['rack', 'sawdust', 'bags', 'wash', 'hay', 'straw'] as const) {
+    for (const k of ['sawdust', 'bags', 'wash', 'hay', 'straw'] as const) {
       const p = at(k);
       const im = this.img(p.x, p.y, `st-${k}`, p.y - 30);
-      this.tag(label[k]!, p.x, p.y - im.displayHeight - 2);
+      if (label[k]) this.tag(label[k], p.x, p.y - im.displayHeight - 2);
     }
+    // Стойка вдоль левой стены, инвентарь висит на ней по своим местам
+    const rk = at('rack');
+    const rack = this.img(rk.x - 2 * PX, rk.y, 'st-rack', -860);
+    this.tag('ИНВЕНТАРЬ', rk.x + 40, rk.y - rack.displayHeight - 2);
+    const hs = at('hose');
+    this.img(hs.x, hs.y, 'st-hose', hs.y);
+    // Стеллаж тазов в кормовой; сами тазы — предметы на своих местах
+    const br = at('basinRack');
+    this.img(br.x - 2 * PX, br.y, 'st-basin-rack', -860);
+    // Вывески построек — на фасаде над дверью
+    const rooms = MAP.rooms;
+    for (const [r, x] of [
+      [rooms.duty, 3.3],
+      [rooms.wash, 7.1],
+      [rooms.kitchen, 11.8],
+      [rooms.shed, 16.8],
+    ] as const)
+      this.tag(r.label, x * TILE, r.y0 * TILE - 6).setDepth(-700);
     const k = at('kitchen');
     this.kitchen = this.img(k.x, k.y, 'st-kitchen', k.y);
-    this.tag('КОРМОВАЯ', k.x, k.y - this.kitchen.displayHeight - 2);
-    this.kitchenText = this.tag('', k.x, k.y - this.kitchen.displayHeight - 18).setColor('#f8b800');
-    // Большой мусорный бак у нижней стены, рядом трап и место для мусоровоза
+    this.kitchenText = this.tag('', k.x, k.y - this.kitchen.displayHeight - 2).setColor('#f8b800');
+    this.img(14.2 * TILE, 15.3 * TILE, 'st-grain', 15.3 * TILE);
+    this.tag('ЗЕРНО', 14.2 * TILE, 14.4 * TILE);
+    // Навес: столбы по углам и край крыши над входом
+    const sh = rooms.shed;
+    for (const [x, y] of [
+      [sh.x0 + 0.15, sh.y0 + 0.2],
+      [sh.x1 - 0.15, sh.y0 + 0.2],
+      [sh.x0 + 0.15, sh.y1 - 0.1],
+      [sh.x1 - 0.15, sh.y1 - 0.1],
+    ])
+      this.img(x * TILE, y * TILE, 'st-shed-post', y * TILE);
+    const roof = this.add.graphics().setDepth(sh.y0 * TILE + 2);
+    const rx = sh.x0 * TILE;
+    const rw = (sh.x1 - sh.x0) * TILE;
+    const ry = sh.y0 * TILE - 13 * PX;
+    roof.fillStyle(0x000000).fillRect(rx - PX, ry - PX, rw + 2 * PX, 6 * PX);
+    roof.fillStyle(0xd82800).fillRect(rx, ry, rw, 4 * PX);
+    roof.fillStyle(0xf87858).fillRect(rx, ry, rw, PX);
+    for (let x = rx; x < rx + rw; x += 4 * PX) roof.fillStyle(0x881400).fillRect(x, ry + PX, PX, 3 * PX);
+    // Морской контейнер на асфальте, рядом трап; мусоровоз подъезжает по проезду
     const d = at('dump');
     this.box = this.img(d.x, d.y + 4, 'st-container-open', d.y);
-    this.ramp = this.img(d.x - 24 * PX, d.y + 4, 'st-ramp', d.y + 1).setVisible(false);
+    this.ramp = this.img(d.x - 26 * PX, d.y + 4, 'st-ramp', d.y + 1).setVisible(false);
     this.boxText = this.tag('', d.x, d.y + 4 - this.box.displayHeight - 2);
-    this.truck = this.img(MAP.w * TILE + 200, MAP.h * TILE - 4, 'truck', MAP.h * TILE + 50);
-    // Решётки слива на настиле
+    const truckY = (MAP.h - 0.4) * TILE;
+    this.truck = this.img(MAP.w * TILE + 200, truckY, 'truck', truckY);
+    // Решётки слива в мойке
     for (const k of ['drain', 'drain2'] as const) this.img(st[k].x * TILE, st[k].y * TILE, 'st-drain', -870, 0.5);
     const v = at('valve');
     this.valve = this.img(v.x, v.y + 6, 'st-valve', v.y);
     this.tag('ВЕНТИЛЬ', v.x + 30, v.y - 40);
-    const pn = at('fencePanel');
-    this.panel = this.img(pn.x, pn.y + 4, 'st-panel-on', pn.y);
-    this.tag('ПАСТУХ', pn.x + 4, pn.y - 58);
-
-    // Обстановка двора
-    for (const [key, x, y] of [
-      ['deco-sacks', 16.3, 2.7],
-      ['deco-ladder', 21.3, 2.6],
-      ['deco-bale', 18.3, 8.7],
-      ['deco-bale', 21, 8.3],
-      ['deco-sacks', 21, 12.8],
-    ] as const)
-      this.img(x * TILE, y * TILE, key, y * TILE);
 
     // Поилка и кормушка внутри
     const tr = MAP.trough;
@@ -198,6 +222,8 @@ export class WorldScene extends Phaser.Scene {
     this.elephants = ELEPHANTS.map((p) => new ElephantView(this, p, (x, y) => this.fx.dust.explode(6, x, y)));
     this.keeper = new KeeperView(this);
     this.barrow = new BarrowView(this);
+
+    this.stink = this.add.graphics().setDepth(24000);
 
     // Свет
     this.glow = this.add.image(0, 0, 'glow').setOrigin(0).setScale(PX).setDepth(30000).setBlendMode(Phaser.BlendModes.ADD);
@@ -236,6 +262,7 @@ export class WorldScene extends Phaser.Scene {
     this.barrow.update(s);
     this.drawContainer(s, dt);
     this.effects(s);
+    this.drawStink(s, t, dt);
     this.drawLight(s, t);
     if (this.follow) {
       const cam = this.cameras.main;
@@ -305,65 +332,72 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  // Ограждение: трубы с чёрным контуром, провод пастуха — жёлтый, когда включён
+  // Капитальная решётка: тёмные железные прутья между перекладинами, проход с перекладиной сверху, ворота — две створки
   private drawFence(s: State): void {
-    const key = `${s.fenceOn}-${s.gateOpen}`;
+    const key = `${s.gateOpen}`;
     if (key === this.fenceKey) return;
     this.fenceKey = key;
-    const wire = s.fenceOn ? 0xf8b800 : 0x7c7c7c;
     const P = PX;
-    const post = (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
-      g.fillStyle(0x000000).fillRect(x - 2 * P, y - 15 * P, 4 * P, 16 * P);
-      g.fillStyle(0x7c7c7c).fillRect(x - P, y - 14 * P, 2 * P, 14 * P);
-      g.fillStyle(0xbcbcbc).fillRect(x - P, y - 14 * P, P, 14 * P);
-      g.fillStyle(0xfcfcfc).fillRect(x - P, y - 9 * P, 2 * P, P);
+    const IRON = 0x2c2c30;
+    const SHINE = 0x7c7c7c;
+    const bars = (g: Phaser.GameObjects.Graphics, x0: number, x1: number, y: number, h: number) => {
+      g.fillStyle(0x000000).fillRect(x0, y - h - P, x1 - x0, 3 * P);
+      g.fillStyle(SHINE).fillRect(x0, y - h, x1 - x0, P);
+      g.fillStyle(0x000000).fillRect(x0, y - 3 * P, x1 - x0, 3 * P);
+      g.fillStyle(SHINE).fillRect(x0, y - 2 * P, x1 - x0, P);
+      for (let x = x0 + P; x < x1 - P; x += 3 * P) {
+        g.fillStyle(IRON).fillRect(x, y - h, P, h);
+        g.fillStyle(SHINE).fillRect(x, y - h + 2 * P, P, P);
+      }
     };
-    const rail = (g: Phaser.GameObjects.Graphics, x0: number, x1: number, y: number) => {
-      g.fillStyle(0x000000).fillRect(x0, y - P, x1 - x0, 3 * P);
-      g.fillStyle(0xbcbcbc).fillRect(x0, y, x1 - x0, P);
+    const post = (g: Phaser.GameObjects.Graphics, x: number, y: number, h: number) => {
+      g.fillStyle(0x000000).fillRect(x - 2 * P, y - h - 2 * P, 4 * P, h + 2 * P);
+      g.fillStyle(0x545454).fillRect(x - P, y - h - P, 2 * P, h + P);
+      g.fillStyle(0xbcbcbc).fillRect(x - P, y - h - P, P, h + P);
     };
     const y = MAP.fenceY * TILE;
+    const H = 16 * P;
     const g = this.fence;
     g.clear();
+    const door = MAP.door;
+    const gate = MAP.elephantGate;
     for (const [x0, x1] of [
-      [MAP.bedding.x * TILE, MAP.gate.x0 * TILE],
-      [MAP.gate.x1 * TILE, MAP.fenceX * TILE],
+      [MAP.paddock.x0, door.x0],
+      [door.x1, gate.x0],
+      [gate.x1, MAP.fenceX],
     ]) {
-      rail(g, x0, x1, y - 4 * P);
-      rail(g, x0, x1, y - 12 * P);
-      g.fillStyle(wire).fillRect(x0, y - 8 * P, x1 - x0, P);
+      bars(g, x0 * TILE, x1 * TILE, y, H);
+      for (let x = x0 + 1.75; x < x1 - 0.5; x += 1.75) post(g, Math.round(x * TILE), y, H);
     }
-    for (let x = MAP.bedding.x; x <= MAP.fenceX; x += 1.5) {
-      if (x > MAP.gate.x0 && x < MAP.gate.x1) continue;
-      post(g, Math.round(x * TILE), y);
-    }
-    post(g, MAP.gate.x0 * TILE, y);
-    post(g, MAP.gate.x1 * TILE, y);
-    // Задвижка: решётка-створка; открытая — распахнута, на ней красный флажок
-    const gx = MAP.gate.x0 * TILE + 2 * P;
+    for (const x of [MAP.paddock.x0, door.x0, door.x1, gate.x0, gate.x1, MAP.fenceX]) post(g, Math.round(x * TILE), y, H + 2 * P);
+    // Проход для человека: перекладина над головой — слон не пролезет
+    g.fillStyle(0x000000).fillRect(door.x0 * TILE, y - H - 9 * P, (door.x1 - door.x0) * TILE, 3 * P);
+    g.fillStyle(SHINE).fillRect(door.x0 * TILE, y - H - 8 * P, (door.x1 - door.x0) * TILE, P);
+    // Ворота для слона: закрыты — две створки в линию с красной задвижкой; открыты — распахнуты внутрь, с флажком
+    const gx0 = gate.x0 * TILE + 2 * P;
+    const gx1 = gate.x1 * TILE - 2 * P;
     if (s.gateOpen) {
-      g.fillStyle(0x000000).fillRect(gx, y - 12 * P, 3 * P, 22 * P);
-      g.fillStyle(0xfc9838).fillRect(gx + P, y - 11 * P, P, 20 * P);
-      g.fillStyle(0xd82800).fillRect(gx + 3 * P, y - 12 * P, 5 * P, 4 * P);
-    } else {
-      const w = (MAP.gate.x1 - MAP.gate.x0) * TILE - 4 * P;
-      for (const yy of [y - 4 * P, y - 12 * P]) {
-        g.fillStyle(0x000000).fillRect(gx, yy - P, w, 3 * P);
-        g.fillStyle(0xfc9838).fillRect(gx, yy, w, P);
+      for (const gx of [gx0, gx1 - 3 * P]) {
+        g.fillStyle(0x000000).fillRect(gx, y - 30 * P, 3 * P, 30 * P);
+        g.fillStyle(SHINE).fillRect(gx + P, y - 29 * P, P, 28 * P);
       }
-      for (let x = gx + 4 * P; x < gx + w; x += 6 * P) g.fillStyle(0x000000).fillRect(x, y - 12 * P, P, 9 * P);
-      g.fillStyle(0xd82800).fillRect(gx + w - 4 * P, y - 9 * P, 3 * P, 3 * P);
+      g.fillStyle(0xd82800).fillRect(gx0 + 3 * P, y - 30 * P, 5 * P, 4 * P);
+    } else {
+      const half = (gx1 - gx0) / 2;
+      bars(g, gx0, gx0 + half - P, y, H);
+      bars(g, gx0 + half + P, gx1, y, H);
+      g.fillStyle(0xd82800).fillRect(gx0 + half - 2 * P, y - 10 * P, 4 * P, 3 * P);
     }
-    // Правая линия по сегменту на ряд — слонихи правильно заходят за неё
+    // Правая линия у края карты — по сегменту на ряд, чтобы слонихи правильно заходили за неё
     const x = MAP.fenceX * TILE;
     this.fenceRight.forEach((rg, row) => {
       rg.clear();
       if (row === 0) return;
       const y1 = (row + 1) * TILE;
-      rg.fillStyle(0x000000).fillRect(x - P, y1 - TILE, 3 * P, TILE);
-      rg.fillStyle(0xbcbcbc).fillRect(x, y1 - TILE, P, TILE);
-      rg.fillStyle(wire).fillRect(x - 3 * P, y1 - TILE, P, TILE);
-      if (row % 2 === 0) post(rg, x, y1);
+      rg.fillStyle(0x000000).fillRect(x - 2 * P, y1 - TILE, 4 * P, TILE);
+      rg.fillStyle(IRON).fillRect(x - P, y1 - TILE, 2 * P, TILE);
+      for (let yy = y1 - TILE; yy < y1; yy += 3 * P) rg.fillStyle(SHINE).fillRect(x - P, yy, P, P);
+      if (row % 2 === 0) post(rg, x, y1, H);
     });
   }
 
@@ -380,7 +414,6 @@ export class WorldScene extends Phaser.Scene {
 
     this.valve.setTexture(s.valveOpen ? 'st-valve-open' : 'st-valve');
     if (s.valveOpen && Math.random() < 0.3) this.fx.water.explode(2, MAP.trough.x * TILE + 20, (MAP.trough.y + 0.1) * TILE);
-    this.panel.setTexture(s.fenceOn ? 'st-panel-on' : 'st-panel-off');
     this.feeder.setTexture(`st-feeder-${s.feederHay < 5 ? 0 : s.feederHay < 50 ? 1 : 2}`);
 
     // Вода в поилке: синяя полоса с бликом, по уровню
@@ -404,7 +437,7 @@ export class WorldScene extends Phaser.Scene {
     this.ramp.setVisible(c.ramp);
     this.boxText.setText(`БАК ${share}%`).setColor(share >= 100 ? '#d82800' : share >= 50 ? '#f8b800' : '#fcfcfc');
     // Мусоровоз: подъезжает справа к баку, когда вызван, и уезжает после замены
-    const stopX = (MAP.stations.dump.x + 4.4) * TILE;
+    const stopX = (MAP.stations.dump.x - 0.3) * TILE;
     const offX = MAP.w * TILE + 140;
     const arriving = c.truckAt !== null && s.t >= c.truckAt - 8;
     const leaving = c.truckLeftAt !== null && s.t - c.truckLeftAt < 8;
@@ -439,6 +472,39 @@ export class WorldScene extends Phaser.Scene {
       if (e.trust > (this.prev.trust[i] ?? e.trust)) this.fx.heart.explode(4, e.x * TILE, e.y * TILE - 90);
       this.prev.trust[i] = e.trust;
       if (e.state === 'sleep' && Math.random() < 0.012) this.fx.z.explode(1, e.x * TILE + 30, e.y * TILE - 20);
+    });
+  }
+
+  // Над вонючим — зелёные волнистые струйки и мухи, кружащие пиксельными точками
+  private drawStink(s: State, t: number, dt: number): void {
+    this.stinkCheck -= dt;
+    if (this.stinkCheck <= 0) {
+      this.stinkCheck = 0.5;
+      this.stinkAt = stinkSources(s).slice(0, 24);
+    }
+    const g = this.stink;
+    g.clear();
+    const P = PX;
+    this.stinkAt.forEach((src, i) => {
+      const x = src.x * TILE;
+      const y = src.y * TILE;
+      for (let k = 0; k < 2; k++) {
+        const phase = (t * 0.8 + i * 0.37 + k * 0.5) % 1;
+        const bx = x + (k ? 8 : -8);
+        for (let j = 0; j < 3; j++) {
+          const yy = y - 10 - phase * 30 - j * 2 * P;
+          const xx = bx + Math.round(Math.sin(phase * 6 + j) * 1.5) * P;
+          g.fillStyle(0x80d010, 1 - phase).fillRect(Math.round(xx), Math.round(yy), P, P);
+        }
+      }
+      for (let f = 0; f < 2; f++) {
+        const a = t * (3 + f) + i * 1.7 + f * Math.PI;
+        const fx = x + Math.cos(a) * 14;
+        const fy = y - 22 + Math.sin(a * 1.3) * 7;
+        g.fillStyle(0x000000).fillRect(Math.round(fx), Math.round(fy), 2 * P, P);
+        const up = Math.floor(t * 12 + f) % 2 === 0;
+        g.fillStyle(0xfcfcfc, 0.9).fillRect(Math.round(fx) + (up ? 0 : P), Math.round(fy) - P, P, P);
+      }
     });
   }
 

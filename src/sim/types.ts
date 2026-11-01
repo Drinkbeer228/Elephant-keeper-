@@ -1,6 +1,6 @@
 import type { WhyKey } from '../data/why';
 
-export type Phase = 'acceptance' | 'shift' | 'report';
+export type Phase = 'shift' | 'report';
 
 export type CellKind = 'straw' | 'wet' | 'bareWet' | 'sawdust' | 'bare' | 'dung'; // dung — затоптанный навоз
 
@@ -27,13 +27,14 @@ export interface Item {
   y: number;
   droppedAt: number;
   liters?: number; // бак
-  dirty?: boolean; // бак, совок
+  dirty?: boolean; // бак, совок, таз после еды
   charges?: number; // опилки, солома
+  load?: number; // совок: единиц навоза в накопительном отсеке
   fill?: number; // мешок
   food?: 'kasha' | 'veg' | null; // таз: с едой или пустой грязный
   meal?: MealId;
   owner?: string; // таз: чей слот
-  stack?: number; // таз: сколько в стопке в руках
+  nested?: Item[]; // таз в руках: вложенные в него пустые тазы — стопка из настоящих тазов
   eatenAt?: number; // таз: когда опустел
 }
 
@@ -89,23 +90,6 @@ export type MealId = 'kasha1' | 'kasha2' | 'dinner';
 export interface Kitchen {
   kasha: { status: 'idle' | 'cooking' | 'ready'; readyAt: number; portions: number; meal: MealId | null };
   veg: { stage: number; nextAt: number; portions: number };
-  cleanBasins: number;
-}
-
-export type ChecklistId =
-  | 'fence'
-  | 'gate'
-  | 'fenceItems'
-  | 'standing'
-  | 'water'
-  | 'hay'
-  | 'inventory';
-
-export interface ChecklistEntry {
-  id: ChecklistId;
-  label: string;
-  defect: boolean; // сменщик оставил косяк
-  mark: boolean | null; // отметка игрока: true = в порядке, false = не в порядке
 }
 
 export interface ShiftEvent {
@@ -156,13 +140,11 @@ export interface State {
   trough: number;
   valveOpen: boolean;
   lastOverflow: number;
-  fenceOn: boolean;
   gateOpen: boolean;
   barrow: Barrow;
   container: Container;
   spareBucket: boolean;
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
-  checklist: ChecklistEntry[];
   stats: {
     drySamples: number;
     drySum: number;
@@ -182,6 +164,4 @@ export type Command =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'balance'; dir: -1 | 1 }
   | { type: 'action'; choice?: number }
-  | { type: 'inspect' }
-  | { type: 'toggleCheck'; id: ChecklistId; value: boolean }
-  | { type: 'acceptShift' };
+  | { type: 'inspect' };

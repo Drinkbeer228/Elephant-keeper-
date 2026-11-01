@@ -58,7 +58,7 @@ export function doVegStage(state: State): boolean {
   } else {
     v.stage++;
     v.portions = 3;
-    emit(state, { kind: 'good', text: 'Овощной ужин собран: три порции ждут тазов.' });
+    emit(state, { kind: 'good', text: 'Овощной ужин собран: разложи по тазам на стеллаже.' });
   }
   return true;
 }
@@ -68,7 +68,7 @@ export function updateKitchen(state: State, dt: number): void {
   if (k.status === 'cooking' && state.t >= k.readyAt) {
     k.status = 'ready';
     k.portions = 3;
-    emit(state, { kind: 'good', text: 'Каша готова: разнеси три таза по слотам.' });
+    emit(state, { kind: 'good', text: 'Каша готова: разложи по тазам на стеллаже и разнеси по одному.' });
   }
   if (state.t >= S.kasha1 - 60) hint(state, 'kasha1', 'Скоро 13:00: каша запаривается 20 минут. Иди на кормовую.');
   if (state.t >= F.vegStartFrom) hint(state, 'veg', 'С 14:00 можно начинать овощной ужин: пять этапов на кормовой, к 19:00.');

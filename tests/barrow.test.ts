@@ -62,8 +62,8 @@ describe('тачка', () => {
 
   it('тачка едет перед кипером и не проходит сквозь ограждение', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 3, y: 10.4, pushed: true });
-    at(s, 3, 11);
+    Object.assign(s.barrow, { x: 10.5, y: 10.4, pushed: true });
+    at(s, 10.5, 11);
     push(s, 0, -1, 1.5);
     // упёрлись в ограждение — дальше не пускает
     expect(s.player.y).toBeGreaterThan(9.3);
@@ -185,9 +185,9 @@ describe('тачка за оградой', () => {
   it('не помогает, если стоит по другую сторону ограждения', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 3, 3));
-    Object.assign(s.barrow, { x: 14.5, y: 6, pushed: false, tools: ['scoop', 'fork', 'broom'] });
-    s.dung.push({ id: 901, x: 12, y: 6, at: 0 });
-    at(s, 12, 6.2);
+    Object.assign(s.barrow, { x: 6, y: 10.4, pushed: false, tools: ['scoop', 'fork', 'broom'] });
+    s.dung.push({ id: 901, x: 6, y: 8.2, at: 0 });
+    at(s, 6, 8.4);
     expect(act(s) ?? '').not.toMatch(/в тачку/);
   });
 });

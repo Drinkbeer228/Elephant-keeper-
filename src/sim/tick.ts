@@ -6,7 +6,7 @@ import { updateElephants } from './elephants';
 import { emit, hint } from './events';
 import { updateFloor } from './floor';
 import { updateKitchen } from './feeding';
-import { acceptShift, finishShift } from './handover';
+import { finishShift } from './handover';
 import { updateItems } from './items';
 import { barrowOffset, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
 import type { Command, ShiftEvent, State } from './types';
@@ -37,14 +37,6 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
       case 'inspect':
         emit(state, { kind: 'info', text: inspect(state).join('\n') });
         break;
-      case 'toggleCheck': {
-        const entry = state.checklist.find((e) => e.id === c.id);
-        if (entry && state.phase === 'acceptance') entry.mark = c.value;
-        break;
-      }
-      case 'acceptShift':
-        acceptShift(state);
-        break;
     }
   }
 
@@ -72,6 +64,7 @@ export function advance(state: State, minutes: number): void {
 }
 
 function stepSim(state: State, dt: number, dtReal: number): void {
+  hint(state, 'start', 'Смена идёт. Тачка — у стойки инвентаря. Всё, что взял, верни на место: утром сменщик примет вольер по чек-листу.');
   const before = dayPart(state.t);
   state.t += dt;
   updateElephants(state, dt, dtReal);
@@ -94,16 +87,19 @@ function segDist(x: number, y: number, w: { x0: number; y0: number; x1: number; 
   return Math.hypot(x - (w.x0 + t * dx), y - (w.y0 + t * dy));
 }
 
-// Стены, ограждение, стены комнат. В подстилку — через проход для человека или открытые ворота
+// Стены, решётка, стены построек, контейнер. В вольер — через проход для человека или открытые ворота
 export function walkable(x: number, y: number, gateOpen = false): boolean {
   if (x < 0.4 || y < 0.4 || x > MAP.w - 0.4 || y > MAP.h - 0.4) return false;
-  if (x < MAP.bedding.x + 0.3 && y < MAP.fenceY + 0.3) return false;
-  if (y < MAP.bedding.y + 0.3 && x < MAP.fenceX + 0.3) return false;
+  if (x < MAP.paddock.x0 + 0.3 && y < MAP.fenceY + 0.3) return false;
+  if (y < MAP.paddock.y0 + 0.3) return false;
   const inDoor = x > MAP.door.x0 + 0.3 && x < MAP.door.x1 - 0.3;
   const inGate = gateOpen && x > MAP.elephantGate.x0 + 0.3 && x < MAP.elephantGate.x1 - 0.3;
   if (Math.abs(y - MAP.fenceY) < 0.3 && x < MAP.fenceX + 0.3 && !inDoor && !inGate) return false;
   if (Math.abs(x - MAP.fenceX) < 0.3 && y < MAP.fenceY + 0.3) return false;
   for (const w of MAP.walls) if (segDist(x, y, w) < 0.3) return false;
+  // Морской контейнер — твёрдый: обходят, заезжают только в его двери (это действие, а не проход)
+  const c = MAP.stations.dump;
+  if (Math.abs(x - c.x) < c.w / 2 + 0.3 && Math.abs(y - c.y) < c.h / 2 + 0.3) return false;
   return true;
 }
 

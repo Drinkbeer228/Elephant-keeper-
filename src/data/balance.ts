@@ -99,19 +99,19 @@ export const BALANCE = {
 
   items: {
     bagCapacity: 6,
+    scoopCapacity: 6, // отсек совка: куча — 1, затоптанная клетка — 2
     bagReach: 4.5, // мешок должен стоять не дальше этого от места уборки
     sawdustCharges: 6,
     strawCharges: 3,
     breakBase: 0.01, // шанс поломки в минуту для забытой вещи
     breakGrace: 5, // столько минут вещь лежит безопасно
     reachDistance: 2.2, // насколько далеко дотягивается хобот от центра слонихи
-    fenceOffReachFactor: 2,
   },
 
   food: {
     kashaCook: 20,
     kashaEarly: 60, // раньше этого до срока запаривать нельзя
-    basins: 6,
+    basins: 4, // на кормление нужно три, четвёртый — запас
     basinCrushAfter: 45,
     basinCrushChance: 0.01,
     hayBale: 40,
@@ -133,7 +133,6 @@ export const BALANCE = {
   },
 
   handover: {
-    maxDefects: 3,
     wetCellsRemark: 3,
     troughMin: 30,
     hayMin: 20,

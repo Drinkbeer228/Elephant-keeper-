@@ -1,11 +1,11 @@
 import { BALANCE } from '../data/balance';
-import { MAP, inBedding, inReachZone, nearStation } from '../data/map';
+import { MAP, inPaddock, inReachZone, nearStation } from '../data/map';
 import { WHY } from '../data/why';
-import { emit, hint } from './events';
 import { countWet } from './floor';
+import { basinsOnRack } from './items';
 import { MEAL_LABELS, mealStatus, type MealStatus } from './feeding';
 import { profileOf } from './elephants';
-import type { ChecklistId, MealId, State } from './types';
+import type { MealId, State } from './types';
 
 const H = BALANCE.handover;
 
@@ -19,8 +19,8 @@ export interface Report {
   meals: { label: string; statuses: { name: string; status: MealStatus }[] }[];
   losses: string[];
   footDebt: { name: string; debt: number }[];
-  acceptance: { found: number; defects: number; missed: string[]; nitpicks: string[] };
-  remarks: string[];
+  checklist: { id: HandoverCheckId; label: string; ok: boolean }[];
+  remarks: string[]; // прочие замечания сменщика, вне чек-листа
   begTreats: number;
 }
 
@@ -34,54 +34,84 @@ export function stinkSources(state: State): { x: number; y: number }[] {
     }),
   );
   for (const i of state.items) {
-    if ((i.kind === 'bucket' && (i.liters ?? 0) > 0) || (i.kind === 'basin' && !i.food && i.eatenAt !== undefined)) {
+    if ((i.kind === 'bucket' && (i.liters ?? 0) > 0) || (i.kind === 'basin' && i.dirty)) {
       if (state.t - i.droppedAt > 10) out.push(i);
     }
   }
   return out;
 }
 
-export function acceptShift(state: State): void {
-  if (state.phase !== 'acceptance') return;
-  state.phase = 'shift';
-  const found = state.checklist.filter((c) => c.defect && c.mark === false).length;
-  const defects = state.checklist.filter((c) => c.defect).length;
-  emit(state, {
-    kind: 'info',
-    text: defects ? `Смена принята. Косяков сменщика найдено: ${found} из ${defects}.` : 'Смена принята.',
-  });
-  hint(state, 'start', 'Тачка — у стойки инвентаря. Всё, что взял, верни на место до сдачи.');
+export type HandoverCheckId =
+  | 'gate'
+  | 'paddockClear'
+  | 'standing'
+  | 'water'
+  | 'hay'
+  | 'inventory'
+  | 'barrow'
+  | 'basins'
+  | 'dryBedding'
+  | 'dungCleared';
+
+function onRack(state: State, kind: 'bucket' | 'scoop' | 'fork' | 'broom'): boolean {
+  return state.items.some((i) => i.kind === kind && nearStation('rack', i.x, i.y, 0.6) && !i.dirty && !(i.liters ?? 0) && !(i.load ?? 0));
 }
 
-// Пункты чек-листа, которые сейчас не в порядке
-export function checklistProblems(state: State): ChecklistId[] {
-  const problems: ChecklistId[] = [];
-  if (!state.fenceOn) problems.push('fence');
-  if (state.gateOpen) problems.push('gate');
-  const b = state.barrow;
-  if (state.items.some((i) => inReachZone(i.x, i.y)) || inReachZone(b.x, b.y) || inBedding(b.x, b.y)) problems.push('fenceItems');
-  if (state.elephants.some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold)) problems.push('standing');
-  if (state.trough < H.troughMin) problems.push('water');
-  if (state.feederHay < H.hayMin) problems.push('hay');
-  const onRack = (kind: 'bucket' | 'scoop') =>
-    state.items.some((i) => i.kind === kind && nearStation('rack', i.x, i.y, 0.6) && !i.dirty && !(i.liters ?? 0));
-  if (!onRack('bucket') || !onRack('scoop')) problems.push('inventory');
-  return problems;
-}
+// Чек-лист сдачи: сменщик в 08:00 проверяет вольер. Тазы — только своим пунктом
+export const HANDOVER_CHECKS: { id: HandoverCheckId; label: string; ok: (s: State) => boolean }[] = [
+  { id: 'gate', label: 'Ворота закрыты', ok: (s) => !s.gateOpen },
+  {
+    id: 'paddockClear',
+    label: 'В вольере и у ограды нет посторонних вещей',
+    ok: (s) => {
+      const inside = (x: number, y: number) => inPaddock(x, y) || inReachZone(x, y);
+      return !s.items.some((i) => i.kind !== 'basin' && inside(i.x, i.y)) && !inside(s.barrow.x, s.barrow.y);
+    },
+  },
+  {
+    id: 'standing',
+    label: 'Все трое на ногах, без хромоты',
+    ok: (s) => !s.elephants.some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold),
+  },
+  { id: 'water', label: 'Вода в поилке', ok: (s) => s.trough >= H.troughMin },
+  { id: 'hay', label: 'Сено в кормушке', ok: (s) => s.feederHay >= H.hayMin },
+  {
+    id: 'inventory',
+    label: 'Инвентарь чистый, на стойке',
+    ok: (s) => (['bucket', 'scoop', 'fork', 'broom'] as const).every((k) => onRack(s, k)),
+  },
+  {
+    id: 'barrow',
+    label: 'Тачка пустая и на месте',
+    ok: (s) => {
+      const b = s.barrow;
+      const home = !b.pushed && Math.hypot(b.x - MAP.barrowStart.x, b.y - MAP.barrowStart.y) <= 1.5;
+      return home && !b.waste && !b.tools.length && !b.bales && !b.sawdust && !b.straw;
+    },
+  },
+  {
+    id: 'basins',
+    label: 'Тазы вымыты и на стеллаже',
+    ok: (s) => {
+      const all = s.items.filter((i) => i.kind === 'basin');
+      const onRack = basinsOnRack(s);
+      return s.player.held?.kind !== 'basin' && onRack.length === all.length && onRack.every((b) => !b.dirty && !b.food);
+    },
+  },
+  { id: 'dryBedding', label: 'Подстилка сухая', ok: (s) => countWet(s) <= H.wetCellsRemark },
+  {
+    id: 'dungCleared',
+    label: 'Навоз убран',
+    ok: (s) => s.dung.length + s.cells.flat().filter((c) => c.kind === 'dung').length === 0,
+  },
+];
 
 export function finishShift(state: State): Report {
-  const problems = checklistProblems(state);
-  const remarks = state.checklist.filter((c) => problems.includes(c.id)).map((c) => `✗ ${c.label}`);
-  if (countWet(state) > H.wetCellsRemark) remarks.push('Мокрая подстилка');
-  const trampled = state.cells.flat().filter((c) => c.kind === 'dung').length;
-  if (state.dung.length + trampled > 0) remarks.push(`Не убран навоз (${state.dung.length + trampled})`);
+  const checklist = HANDOVER_CHECKS.map((c) => ({ id: c.id, label: c.label, ok: c.ok(state) }));
+  const remarks: string[] = [];
   if (stinkSources(state).length >= 5) remarks.push('Мухи и вонь');
   if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
-  if (state.items.some((i) => i.kind === 'basin')) remarks.push('Тазы не убраны');
-  if (state.barrow.waste > 0) remarks.push('Тачка с мусором не вывезена');
-  if (state.barrow.pushed || Math.hypot(state.barrow.x - MAP.barrowStart.x, state.barrow.y - MAP.barrowStart.y) > 1.5) remarks.push('Тачка не на месте');
-  if (state.barrow.tools.length) remarks.push('Инвентарь брошен в тачке');
 
   const pees = state.elephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
   const inBucket = pees.reduce((s, p) => s + p.inBucket, 0);
@@ -101,22 +131,13 @@ export function finishShift(state: State): Report {
   const footDebt = state.elephants.map((e) => ({ name: profileOf(e).name, debt: Math.round(e.footDebt - e.footDebtStart) }));
   const avgDebt = footDebt.reduce((s, f) => s + f.debt, 0) / footDebt.length;
 
-  const defects = state.checklist.filter((c) => c.defect);
-  const found = defects.filter((c) => c.mark === false).length;
-  const acceptance = {
-    found,
-    defects: defects.length,
-    missed: defects.filter((c) => c.mark !== false).map((c) => c.label),
-    nitpicks: state.checklist.filter((c) => !c.defect && c.mark === false).map((c) => c.label),
-  };
-
   const parts = {
     bucket: 25 * bucketRate,
     dry: 15 * clamp01((dryAvg - 0.6) / 0.4),
     meals: 20 * mealScore,
     feet: 10 * clamp01(1 - avgDebt / BALANCE.footDebt.limpThreshold),
-    acceptance: 10 * (defects.length ? found / defects.length : 1) - 3 * acceptance.nitpicks.length,
-    remarks: Math.max(0, 20 - 5 * remarks.length),
+    handover: (30 * checklist.filter((c) => c.ok).length) / checklist.length,
+    remarks: -3 * remarks.length,
   };
   const lossPenalty = Math.min(15, 5 * losses.length);
   const score = Math.round(Math.max(0, Math.min(100, Object.values(parts).reduce((a, b) => a + b, 0) - lossPenalty)));
@@ -135,7 +156,7 @@ export function finishShift(state: State): Report {
     meals,
     losses,
     footDebt,
-    acceptance,
+    checklist,
     remarks,
     begTreats: state.stats.begTreats,
   };
@@ -155,7 +176,7 @@ function phraseFor(parts: Record<string, number>, losses: number): string {
     ['bucket', parts.bucket / 25],
     ['dry', parts.dry / 15],
     ['meals', parts.meals / 20],
-    ['remarks', parts.remarks / 20],
+    ['handover', parts.handover / 30],
     ['feet', parts.feet / 10],
   ];
   const [worst, value] = ratio.sort((a, b) => a[1] - b[1])[0];
@@ -164,7 +185,7 @@ function phraseFor(parts: Record<string, number>, losses: number): string {
     bucket: 'Сменщик: «Бак у тебя для красоты стоял?» Под ногами хлюпает.',
     dry: 'Сменщик: «Это подстилка или болото?» Идёт за вилами.',
     meals: 'Сменщик: «Слонихи на меня так смотрят, будто их вчера не кормили.»',
-    remarks: 'Сменщик молча достаёт ручку и пишет замечания. Много.',
+    handover: 'Сменщик молча достаёт ручку и идёт по чек-листу. Пунктов много.',
     feet: 'Сменщик: «Ноги им кто смотреть будет? Ветврач?»',
   };
   return lines[worst];

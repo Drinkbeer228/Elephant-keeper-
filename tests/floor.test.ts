@@ -3,6 +3,7 @@ import { advance } from '../src/sim';
 import { cellAt, setCell } from '../src/sim/floor';
 import { newItem } from '../src/sim/state';
 import { MAP } from '../src/data/map';
+import { BALANCE } from '../src/data/balance';
 import { act, at, cleanShift, el, hold } from './helpers';
 
 describe('пол', () => {
@@ -52,14 +53,16 @@ describe('пол', () => {
     expect(m.footDebt).toBe(0);
   });
 
-  it('навоз убирается совком только в открытый мешок рядом', () => {
+  it('без мешка и тачки навоз уходит в отсек совка, рядом с мешком — в мешок', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    s.dung.push({ id: 999, x: 5.5, y: 5.5, at: 0 });
+    s.dung.push({ id: 999, x: 5.5, y: 5.5, at: 0 }, { id: 998, x: 6.5, y: 5.5, at: 0 });
     at(s, 5.5, 5.8);
     s.player.held = newItem(s, 'scoop');
-    expect(act(s)).toMatch(/некуда деть/);
-    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 7, y: 5.5 });
+    expect(act(s)).toBe('Убрать навоз в совок (1/6)');
+    expect(s.player.held!.load).toBe(1);
+    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 7.5, y: 5.5 });
+    at(s, 6.5, 5.8);
     expect(act(s)).toBe('Убрать навоз в мешок');
     expect(s.dung).toHaveLength(0);
   });
@@ -70,7 +73,17 @@ describe('пол', () => {
     s.valveOpen = true;
     advance(s, 20);
     expect(s.log.some((l) => l.why === 'troughOverflow')).toBe(true);
-    expect(cellAt(s, 11.8, 2.4)!.cell.kind).toBe('wet');
+    expect(cellAt(s, MAP.trough.x - 0.4, MAP.trough.y + 0.8)!.cell.kind).toBe('wet');
+  });
+});
+
+describe('подсказки', () => {
+  it('опилки впитались — подсказка про метлу', () => {
+    const s = cleanShift();
+    s.elephants.forEach((e) => hold(e, 18, 3));
+    s.cells[2][2] = { kind: 'sawdust', since: 0 };
+    advance(s, BALANCE.floor.sawdustAbsorb + 1);
+    expect(s.log.some((l) => l.kind === 'hint' && l.text.includes('метлой'))).toBe(true);
   });
 });
 

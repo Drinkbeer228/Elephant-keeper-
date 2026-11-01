@@ -20,7 +20,7 @@ export function loadTextures(scene: Phaser.Scene): void {
   for (const [k, s] of Object.entries(items)) register(scene, k, s);
   for (const [k, s] of Object.entries(stations)) register(scene, k, s);
   for (const [k, s] of Object.entries(floorTiles())) register(scene, k, s);
-  register(scene, 'bg', background(stations['deco-cloud'], stations['deco-bush']));
+  register(scene, 'bg', background(stations['deco-cloud']));
   register(scene, 'night', nightOverlay());
   register(scene, 'glow', lampGlow());
 }
@@ -29,10 +29,14 @@ export function itemTexture(item: Item): string {
   switch (item.kind) {
     case 'bucket':
       return (item.liters ?? 0) > 0 ? 'item-bucket-full' : item.dirty ? 'item-bucket-dirty' : 'item-bucket';
+    case 'scoop':
+      return (item.load ?? 0) > 0 ? 'item-scoop-full' : 'item-scoop';
     case 'bag':
       return (item.fill ?? 0) >= 3 ? 'item-bag-full' : 'item-bag';
     case 'basin':
-      return item.food === 'kasha' ? 'item-basin-kasha' : item.food === 'veg' ? 'item-basin-veg' : 'item-basin';
+      if (item.food) return item.food === 'kasha' ? 'item-basin-kasha' : 'item-basin-veg';
+      if (item.nested?.length) return `item-basin-stack-${Math.min(4, item.nested.length + 1)}`;
+      return item.dirty ? 'item-basin-dirty' : 'item-basin';
     default:
       return `item-${item.kind}`;
   }

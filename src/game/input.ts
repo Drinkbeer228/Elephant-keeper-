@@ -1,6 +1,6 @@
 // Клавиатура и сенсорный джойстик сводятся в один вектор движения и очередь нажатий
 
-export type Press = 'action' | 'inspect' | 'pause';
+export type Press = 'action' | 'inspect' | 'pause' | number; // число — пункт меню действия, с нуля
 
 export class Input {
   private keys = new Set<string>();
@@ -15,6 +15,7 @@ export class Input {
       if (k === 'Space') this.push('action');
       else if (k === 'KeyF') this.push('inspect');
       else if (k === 'KeyP' || k === 'Escape') this.push('pause');
+      else if (/^(Digit|Numpad)[1-9]$/.test(k)) this.push(Number(k.slice(-1)) - 1);
       if (k === 'Space' || k.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

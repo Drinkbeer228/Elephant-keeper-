@@ -32,7 +32,7 @@ function section(title: string, items: [string, Sprite][], scale = SCALE): void 
 }
 
 const st = stationSprites();
-section('bg', [['background', background(st['deco-cloud'], st['deco-bush'])]], Number(params.get('bgs')) || 2);
+section('bg', [['background', background(st['deco-cloud'])]], Number(params.get('bgs')) || 2);
 for (const [id, look] of Object.entries(LOOKS)) {
   section(id, [...ELEPHANT_FRAMES.map((f) => [f, elephantFrame(look, f)] as [string, Sprite]), ['portrait', elephantPortrait(look)]]);
 }

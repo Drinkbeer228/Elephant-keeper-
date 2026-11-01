@@ -16,24 +16,39 @@ const pending: Command[] = [];
 const input = new Input();
 
 const hud = new Hud(document.getElementById('hud')!, input, {
-  toggleCheck: (id, value) => pending.push({ type: 'toggleCheck', id, value }),
-  accept: () => pending.push({ type: 'acceptShift' }),
   restart: () => location.reload(),
   setPaused: (p) => (paused = p),
 });
 if (params.has('bot')) hud.closeIntro();
 
 function frame(dt: number): FrameResult {
+  const before = availableAction(state);
   for (const press of input.takePresses()) {
-    if (press === 'pause') hud.togglePause();
-    else if (!hud.introOpen && !paused) pending.push({ type: press });
+    if (press === 'pause') {
+      if (hud.menuOpen) hud.closeMenu();
+      else hud.togglePause();
+    } else if (hud.introOpen || paused) continue;
+    else if (typeof press === 'number') {
+      // Пункт меню: команда уйдёт с номером, симуляция сама найдёт то же меню
+      if (hud.menuOpen && before?.choices?.[press]) {
+        pending.push({ type: 'action', choice: press });
+        hud.closeMenu();
+      }
+    } else if (press === 'action') {
+      if (hud.menuOpen) hud.closeMenu();
+      else if (before?.choices) hud.openMenu(before);
+      else pending.push({ type: 'action' });
+    } else pending.push({ type: press });
   }
   if (hud.introOpen || paused) {
     hud.render(state, availableAction(state));
     return { actionReady: false };
   }
   const move = input.move();
-  if (move.x || move.y) hud.hideInspect();
+  if (move.x || move.y) {
+    hud.hideInspect();
+    hud.closeMenu();
+  }
   let commands: Command[] = [{ type: 'move', dx: move.x, dy: move.y }, ...pending.splice(0)];
   const lean = input.balance();
   if (lean) commands.push({ type: 'balance', dir: lean });
@@ -50,6 +65,7 @@ function frame(dt: number): FrameResult {
   if (inspected) hud.showInspect(inspected);
   hud.pushEvents(events, inspected);
   const action = availableAction(state);
+  hud.syncMenu(action);
   hud.render(state, action);
   return { actionReady: !!action && !action.disabled };
 }

@@ -1,48 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { advance, createShift, tick, walkable } from '../src/sim';
-import { MAP } from '../src/data/map';
-import { newItem } from '../src/sim/state';
+import { advance, createShift, type State } from '../src/sim';
+import { finishShift } from '../src/sim/handover';
+import { BALANCE } from '../src/data/balance';
+import { inPaddock } from '../src/data/map';
+import { addItem, newItem } from '../src/sim/state';
 import { cleanShift, el, hold } from './helpers';
 
-describe('приём и сдача смены', () => {
-  it('найденный косяк сменщика засчитан, пропущенный — нет, лишний ✗ — придирка', () => {
-    const s = createShift(7, { defects: ['fence', 'water'], mess: false });
-    expect(s.fenceOn).toBe(false);
-    expect(s.trough).toBe(0);
-    tick(s, 0, [
-      { type: 'toggleCheck', id: 'fence', value: false },
-      { type: 'toggleCheck', id: 'water', value: true },
-      { type: 'toggleCheck', id: 'hay', value: false },
-      { type: 'acceptShift' },
-    ]);
+describe('смена и сдача', () => {
+  it('смена идёт сразу: время, слонихи, закрытые ворота', () => {
+    const s = createShift(1);
     expect(s.phase).toBe('shift');
-    advance(s, 1440);
-    expect(s.phase).toBe('report');
-    const r = s.report!;
-    expect(r.acceptance.found).toBe(1);
-    expect(r.acceptance.defects).toBe(2);
-    expect(r.acceptance.missed).toEqual(['Вода в доступе']);
-    expect(r.acceptance.nitpicks).toEqual(['Сено в доступе']);
-    // Электропастух так и не включили — сменщик это отметит
-    expect(r.remarks).toContain('✗ Электропастух работает');
+    expect(s.gateOpen).toBe(false);
+    expect(s.trough).toBeGreaterThanOrEqual(30);
+    expect(s.feederHay).toBeGreaterThanOrEqual(20);
+    const before = s.elephants.map((e) => [e.x, e.y]);
+    advance(s, 30);
+    expect(s.t).toBeGreaterThanOrEqual(30);
+    expect(s.elephants.some((e, i) => e.x !== before[i][0] || e.y !== before[i][1])).toBe(true);
   });
 
-  it('пока смена не принята, время стоит', () => {
-    const s = createShift(3);
-    tick(s, 30);
-    expect(s.t).toBe(0);
+  it('чистая смена сдаётся со всеми ✓', () => {
+    const r = finishShift(cleanShift());
+    expect(r.checklist).toHaveLength(10);
+    expect(r.checklist.every((c) => c.ok)).toBe(true);
   });
 
-  it('смена целиком без кипера: доходит до табеля, слонихи не выходят из подстилки', () => {
+  it.each([
+    ['gate', (s: State): unknown => (s.gateOpen = true)],
+    ['paddockClear', (s: State): unknown => addItem(s, 'bucket', 5, 5)],
+    ['standing', (s: State): unknown => (s.elephants[0].footDebt += BALANCE.footDebt.limpThreshold)],
+    ['water', (s: State): unknown => (s.trough = 10)],
+    ['hay', (s: State): unknown => (s.feederHay = 5)],
+    ['inventory', (s: State): unknown => (s.items.find((i) => i.kind === 'fork')!.x += 3)],
+    ['barrow', (s: State): unknown => (s.barrow.x += 3)],
+    ['basins', (s: State): unknown => Object.assign(s.items.find((i) => i.kind === 'basin')!, { x: 12.6, y: 10.6 })],
+    ['dryBedding', (s: State): unknown => [0, 1, 2, 3].forEach((cx) => (s.cells[0][cx] = { kind: 'wet', since: 0 }))],
+    ['dungCleared', (s: State): unknown => s.dung.push({ id: 999, x: 5.5, y: 5.5, at: 0 })],
+  ] as const)('пункт %s ловит своё нарушение и только его', (id, spoil) => {
+    const s = cleanShift();
+    spoil(s);
+    const r = finishShift(s);
+    expect(r.checklist.filter((c) => !c.ok).map((c) => c.id)).toEqual([id]);
+  });
+
+  it('чек-лист весит 30 баллов: один ✗ стоит 3', () => {
+    const a = cleanShift();
+    const b = structuredClone(a);
+    b.gateOpen = true;
+    expect(finishShift(a).score - finishShift(b).score).toBe(3);
+  });
+
+  it('смена целиком без кипера: доходит до табеля, слонихи не выходят из вольера', () => {
     const s = cleanShift(42);
     for (let i = 0; i < 1440 * 2 && s.phase === 'shift'; i++) {
       advance(s, 0.5);
-      for (const e of s.elephants) {
-        expect(e.x).toBeGreaterThanOrEqual(MAP.bedding.x);
-        expect(e.x).toBeLessThanOrEqual(MAP.bedding.x + MAP.bedding.cols);
-        expect(e.y).toBeGreaterThanOrEqual(MAP.bedding.y);
-        expect(e.y).toBeLessThanOrEqual(MAP.bedding.y + MAP.bedding.rows);
-      }
+      for (const e of s.elephants) expect(inPaddock(e.x, e.y)).toBe(true);
     }
     expect(s.phase).toBe('report');
     const r = s.report!;
@@ -75,24 +87,6 @@ describe('вещи у ограждения', () => {
     };
     expect(run(0)).toContain('вилы');
     expect(run(100)).toEqual([]);
-  });
-});
-
-describe('кипер', () => {
-  it('через ограждение не пройти; человеку — проход, слону — ворота, когда открыты', () => {
-    expect(walkable(3, 9)).toBe(false);
-    expect(walkable(5, 9)).toBe(true);
-    expect(walkable(10.2, 9)).toBe(false);
-    expect(walkable(10.2, 9, true)).toBe(true);
-    expect(walkable(13, 5)).toBe(false);
-    expect(walkable(7, 4)).toBe(true);
-  });
-
-  it('в комнаты — через двери, сквозь стены нельзя', () => {
-    expect(walkable(10.5, 11.6)).toBe(false);
-    expect(walkable(12.4, 11.6)).toBe(true);
-    expect(walkable(16, 13)).toBe(false);
-    expect(walkable(18.1, 11.6)).toBe(true);
   });
 });
 

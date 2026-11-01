@@ -3,24 +3,43 @@ import { Sprite, ellipse, grid, line, rect, union } from './pixel';
 
 // Станции и обстановка в пиксель-арте. Картинка стоит на нижней строке кадра.
 
+// Стойка вдоль левой стены: доска с крючками, вид сбоку, крючки смотрят в коридор
 function rack(): Sprite {
-  const s = new Sprite(72, 22);
-  s.shape(rect(2, 2, 5, 21), T.wood);
-  s.shape(rect(66, 2, 69, 21), T.wood);
-  s.shape(rect(34, 2, 37, 21), T.wood);
-  s.shape(rect(1, 4, 70, 8), T.wood);
-  s.shape(rect(1, 14, 70, 17), T.wood);
-  // Крючки
-  for (const x of [14, 26, 46, 58]) {
-    s.set(x, 9, C.grey);
-    s.set(x, 10, C.grey);
-    s.set(x + 1, 11, C.grey);
+  const s = new Sprite(12, 56);
+  s.shape(rect(1, 0, 5, 55), T.wood);
+  s.shape(rect(0, 0, 7, 2), T.wood);
+  for (const y of [12, 28, 44]) {
+    s.set(6, y, C.grey);
+    s.set(7, y, C.grey);
+    s.set(8, y, C.grey);
+    s.set(8, y - 1, C.grey);
   }
-  // Шляпки гвоздей
-  for (const x of [3, 35, 67]) {
-    s.set(x + 1, 6, C.k);
-    s.set(x + 1, 15, C.k);
-  }
+  for (const y of [6, 20, 36, 50]) s.set(3, y, C.k);
+  return s;
+}
+
+function hose(): Sprite {
+  const s = new Sprite(16, 20);
+  s.shape(rect(6, 0, 9, 4), T.steel);
+  s.shape(ellipse(8, 10, 7, 6.5), T.green);
+  s.fill(ellipse(8, 10, 3.6, 3.2), C.greenDark);
+  s.fill(ellipse(8, 10, 1.6, 1.4), C.k);
+  s.shape(line([[3, 15], [2, 19]], 1), T.green);
+  s.shape(rect(1, 18, 4, 19), T.steel);
+  return s;
+}
+
+function grain(): Sprite {
+  const s = new Sprite(26, 18);
+  const sack = (x: number, y: number) => {
+    s.shape(union(ellipse(x + 5, y + 8, 5, 5.5), rect(x + 3, y, x + 7, y + 4)), T.cream);
+    s.fill(rect(x + 3, y + 2, x + 7, y + 2), C.orange);
+    s.set(x + 4, y + 9, C.goldDark);
+    s.set(x + 6, y + 10, C.goldDark);
+  };
+  sack(0, 4);
+  sack(14, 4);
+  sack(7, 0);
   return s;
 }
 
@@ -119,15 +138,6 @@ function strawPile(): Sprite {
   return s;
 }
 
-function dump(): Sprite {
-  const s = new Sprite(28, 20);
-  s.shape(union(rect(2, 6, 25, 19)), T.green);
-  s.shape(rect(0, 3, 27, 6), T.green);
-  for (let x = 6; x <= 21; x += 5) for (let y = 9; y <= 17; y++) s.set(x, y, C.greenDark);
-  s.shape(rect(11, 0, 16, 3), T.steel);
-  return s;
-}
-
 function valve(open: boolean): Sprite {
   const s = new Sprite(12, 22);
   s.shape(rect(4, 0, 7, 21), T.steel);
@@ -137,16 +147,6 @@ function valve(open: boolean): Sprite {
   s.fill(rect(2, 9, 9, 10), C.red);
   s.set(5, 10, C.k);
   if (open) for (let y = 18; y < 22; y++) s.set(5, y, C.blueLight);
-  return s;
-}
-
-function panel(on: boolean): Sprite {
-  const s = new Sprite(12, 20);
-  s.shape(rect(5, 8, 7, 19), T.steel);
-  s.shape(rect(0, 0, 11, 9), T.metal);
-  const bolt = grid(['..ky', '.ky.', 'kyyk', '.yk.', 'yk..'], { k: C.k, y: C.gold });
-  s.draw(bolt, 3, 2);
-  s.fill(ellipse(9, 2, 1.2, 1.2), on ? C.greenLight : C.red);
   return s;
 }
 
@@ -175,30 +175,6 @@ function mat(): Sprite {
   return s;
 }
 
-function sacks(): Sprite {
-  const s = new Sprite(32, 16);
-  const sack = (x: number) => {
-    s.shape(union(ellipse(x + 5, 10, 5, 5.5), rect(x + 3, 2, x + 7, 6)), T.cream);
-    s.fill(rect(x + 3, 4, x + 7, 4), C.orange);
-  };
-  sack(0);
-  sack(10);
-  sack(20);
-  return s;
-}
-
-function barrow(): Sprite {
-  const s = new Sprite(26, 16);
-  s.shape(line([[18, 6], [25, 3]], 0.8), T.wood);
-  s.shape(union(rect(2, 3, 18, 9), rect(4, 9, 16, 11)), T.green);
-  s.shape(ellipse(10, 3, 7, 2.2), T.straw);
-  s.shape(ellipse(7, 13, 2.8, 2.8), T.black);
-  s.set(7, 13, C.grey);
-  s.fill(rect(15, 11, 15, 15), C.k);
-  return s;
-}
-
-// Тачка: корпус и содержимое отдельными слоями — их собирает вид
 function barrowBase(): Sprite {
   const s = new Sprite(28, 18);
   s.shape(line([[19, 9], [27, 5]], 0.9), T.wood);
@@ -238,19 +214,39 @@ function barrowHeap(tone: 'sawdust' | 'straw'): Sprite {
   return s;
 }
 
-// Большой мусорный бак: дверца сбоку открыта (заезд) или закрыта
+// Синий морской контейнер: рифлёные стенки, крыша светлее; двери на торце к зрителю — открыты (заезд) или закрыты
 function container(open: boolean): Sprite {
   const s = new Sprite(46, 30);
-  s.shape(union(rect(1, 6, 44, 29), rect(0, 4, 45, 7)), T.green);
-  for (let x = 8; x < 44; x += 7) s.fill(rect(x, 9, x, 27), C.greenDark);
+  s.shape(rect(0, 0, 45, 6), T.blue);
+  s.shape(rect(0, 6, 45, 29), T.blue);
+  for (let x = 3; x < 44; x += 3) s.fill(rect(x, 8, x, 27), C.blueDark);
+  s.fill(rect(1, 1, 44, 1), C.blueLight);
+  // Двери на правой половине торца
   if (open) {
-    s.fill(rect(2, 12, 12, 29), C.k);
-    s.fill(rect(3, 13, 11, 29), '#1c1c20');
+    s.fill(rect(24, 8, 43, 28), C.k);
+    s.fill(rect(25, 9, 42, 28), '#14141c');
   } else {
-    s.shape(rect(2, 11, 13, 29), { L: C.greenLight, M: '#00c800', D: C.greenDark });
-    s.fill(rect(10, 19, 11, 20), C.grey);
+    s.shape(rect(24, 8, 33, 28), { L: C.blueLight, M: C.blue, D: C.navy });
+    s.shape(rect(34, 8, 43, 28), { L: C.blueLight, M: C.blue, D: C.navy });
+    for (const x of [27, 30, 37, 40]) s.fill(rect(x, 9, x, 27), C.greyMid);
+    s.fill(rect(31, 17, 32, 19), C.gold);
   }
-  s.shape(rect(18, 0, 27, 4), T.steel);
+  return s;
+}
+
+// Стеллаж тазов в кормовой: стальная рама вдоль стены, вид сбоку
+function basinRack(): Sprite {
+  const s = new Sprite(12, 56);
+  s.shape(rect(1, 0, 3, 55), T.steel);
+  s.shape(rect(8, 0, 10, 55), T.steel);
+  for (const y of [8, 21, 34, 47]) s.shape(rect(0, y, 11, y + 1), T.steel);
+  return s;
+}
+
+// Столб навеса и край крыши
+function shedPost(): Sprite {
+  const s = new Sprite(6, 44);
+  s.shape(rect(1, 0, 4, 43), T.wood);
   return s;
 }
 
@@ -288,14 +284,6 @@ function drain(): Sprite {
   return s;
 }
 
-function ladder(): Sprite {
-  const s = new Sprite(12, 30);
-  s.shape(rect(1, 0, 2, 29), T.wood);
-  s.shape(rect(9, 0, 10, 29), T.wood);
-  for (let y = 3; y < 29; y += 5) s.shape(rect(2, y, 9, y + 1), T.wood);
-  return s;
-}
-
 function bale(): Sprite {
   const s = new Sprite(16, 10);
   s.shape(rect(0, 1, 15, 9), T.straw);
@@ -310,13 +298,6 @@ function bale(): Sprite {
 function cloud(): Sprite {
   const s = new Sprite(32, 14);
   s.shape(union(ellipse(8, 9, 6, 4.5), ellipse(15, 6, 7, 5.5), ellipse(23, 8, 6.5, 5), rect(4, 9, 28, 12)), T.cloud);
-  return s;
-}
-
-function bush(): Sprite {
-  const s = new Sprite(28, 12);
-  s.shape(union(ellipse(7, 8, 6.5, 5), ellipse(14, 6, 7, 6), ellipse(21, 8, 6.5, 5), rect(2, 8, 26, 11)), T.green);
-  for (const [x, y] of [[10, 4], [16, 3], [21, 5]]) s.set(x, y, C.greenLight);
   return s;
 }
 
@@ -337,6 +318,8 @@ function bulb(color: string): Sprite {
 export function stationSprites(): Record<string, Sprite> {
   return {
     'st-rack': rack(),
+    'st-hose': hose(),
+    'st-grain': grain(),
     'st-sawdust': sawdustBin(),
     'st-bags': bagsPile(),
     'st-wash': wash(),
@@ -344,11 +327,8 @@ export function stationSprites(): Record<string, Sprite> {
     'st-kitchen-cooking': kitchen(true),
     'st-hay': hayStack(),
     'st-straw': strawPile(),
-    'st-dump': dump(),
     'st-valve': valve(false),
     'st-valve-open': valve(true),
-    'st-panel-on': panel(true),
-    'st-panel-off': panel(false),
     'st-trough': trough(),
     'st-feeder-0': feeder(0),
     'st-feeder-1': feeder(1),
@@ -363,15 +343,13 @@ export function stationSprites(): Record<string, Sprite> {
     'barrow-straw': barrowHeap('straw'),
     'st-container-open': container(true),
     'st-container-closed': container(false),
+    'st-basin-rack': basinRack(),
+    'st-shed-post': shedPost(),
     'st-ramp': ramp(),
     'st-drain': drain(),
     truck: truck(),
-    'deco-sacks': sacks(),
-    'deco-barrow': barrow(),
-    'deco-ladder': ladder(),
     'deco-bale': bale(),
     'deco-cloud': cloud(),
-    'deco-bush': bush(),
     'deco-lantern': lantern(),
     'deco-bulb-r': bulb(C.red),
     'deco-bulb-y': bulb(C.gold),

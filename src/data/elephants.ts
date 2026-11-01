@@ -8,7 +8,6 @@ export interface ElephantProfile {
   name: string;
   color: number;
   signal: SignalKind;
-  signalText: string; // что видит игрок над слонихой
   signalHint: string; // подсказка первой смены
   signalLead: number; // игровых минут от сигнала до мочи
   bladderPerMinute: number;
@@ -28,7 +27,6 @@ export const ELEPHANTS: ElephantProfile[] = [
     name: 'Претти',
     color: 0x8a8f99,
     signal: 'frontStomp',
-    signalText: 'топ передней ногой!',
     signalHint: 'Претти топнула передней ногой — бак, быстро! У неё почти нет запаса времени.',
     signalLead: 5,
     bladderPerMinute: 0.36,
@@ -39,14 +37,13 @@ export const ELEPHANTS: ElephantProfile[] = [
     bedtime: 930, // 23:30
     trust: 40,
     start: { x: 10, y: 3 },
-    slot: { x: 11.5, y: 8.3 },
+    slot: { x: 14.4, y: 8.5 },
   },
   {
     id: 'margo',
     name: 'Марго',
     color: 0x6f7682,
     signal: 'fenceStare',
-    signalText: 'смотрит, выдыхает, топает задней',
     signalHint: 'Марго подошла к ограждению и громко выдыхает — это она просится. Время есть, но не тяни.',
     signalLead: 11,
     bladderPerMinute: 0.3,
@@ -57,14 +54,13 @@ export const ELEPHANTS: ElephantProfile[] = [
     bedtime: 840, // 22:00
     trust: 45,
     start: { x: 6.5, y: 4 },
-    slot: { x: 9.5, y: 8.3 },
+    slot: { x: 9.6, y: 8.5 },
   },
   {
     id: 'audrey',
     name: 'Одри',
     color: 0x9aa0a8,
     signal: 'none',
-    signalText: '',
     signalHint: 'Одри не подаёт сигнала. Её ловят только «погулять»: бак под неё, когда пузырь полон наполовину и больше (смотри осмотром, F).',
     signalLead: 0,
     bladderPerMinute: 0.33,
@@ -75,6 +71,6 @@ export const ELEPHANTS: ElephantProfile[] = [
     bedtime: 780, // 21:00
     trust: 60,
     start: { x: 3.5, y: 5 },
-    slot: { x: 3.5, y: 8.3 },
+    slot: { x: 4.6, y: 8.5 },
   },
 ];

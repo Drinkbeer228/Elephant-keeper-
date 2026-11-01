@@ -30,4 +30,13 @@ describe('плейтест ботом', () => {
     console.log('средний балл', Math.round(avg));
     expect(avg).toBeGreaterThanOrEqual(25);
   });
+
+  it('плейтест детерминирован: тот же seed — тот же табель', () => {
+    for (const { seed, r } of results) {
+      const again = createShift(seed);
+      playShift(again);
+      expect(again.report!.score, `seed ${seed}`).toBe(r.score);
+      expect(again.report!.checklist).toEqual(r.checklist);
+    }
+  }, 60000);
 });

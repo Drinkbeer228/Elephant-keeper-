@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { MAP, inBedding, inReachZone } from '../data/map';
+import { MAP, inPaddock, inReachZone } from '../data/map';
 import { emit } from './events';
 import { chance } from './rng';
 import { addItem } from './state';
@@ -25,7 +25,7 @@ function d(a: { x: number; y: number }, b: { x: number; y: number }): number {
 
 // Вещи, до которых слониха может дотянуться
 export function reachableItems(state: State): Item[] {
-  return state.items.filter((i) => i.kind !== 'basin' && (inBedding(i.x, i.y) || inReachZone(i.x, i.y)));
+  return state.items.filter((i) => i.kind !== 'basin' && (inPaddock(i.x, i.y) || inReachZone(i.x, i.y)));
 }
 
 function inUse(state: State, item: Item): boolean {
@@ -37,20 +37,19 @@ function inUse(state: State, item: Item): boolean {
 }
 
 export function updateItems(state: State, dt: number): void {
-  const reachFactor = state.fenceOn ? 1 : I.fenceOffReachFactor;
   for (const item of [...state.items]) {
     if (item.kind === 'basin') {
       updateBasin(state, item, dt);
       continue;
     }
-    if (!inBedding(item.x, item.y) && !inReachZone(item.x, item.y)) continue;
+    if (!inPaddock(item.x, item.y) && !inReachZone(item.x, item.y)) continue;
     if (state.t - item.droppedAt < I.breakGrace || inUse(state, item)) continue;
     const near = state.elephants
-      .filter((e) => e.state !== 'sleep' && d(e, item) <= I.reachDistance * (inBedding(item.x, item.y) ? 1 : reachFactor))
+      .filter((e) => e.state !== 'sleep' && d(e, item) <= I.reachDistance)
       .sort((a, b) => d(a, item) - d(b, item))[0];
     if (!near) continue;
     const focus = near.state === 'reach' && near.targetItem === item.id ? 5 : 1;
-    const p = I.breakBase * (1 - near.trust / 100) * (0.5 + near.boredom / 200) * focus * (state.fenceOn ? 1 : 2);
+    const p = I.breakBase * (1 - near.trust / 100) * (0.5 + near.boredom / 200) * focus;
     if (chance(state, p * dt)) breakItem(state, item);
   }
 }
@@ -68,12 +67,21 @@ export function breakItem(state: State, item: Item): void {
 
 function updateBasin(state: State, basin: Item, dt: number): void {
   if (basin.food || basin.eatenAt === undefined) return;
-  if (!inBedding(basin.x, basin.y) && !inReachZone(basin.x, basin.y)) return;
+  if (!inPaddock(basin.x, basin.y) && !inReachZone(basin.x, basin.y)) return;
   if (state.t - basin.eatenAt < BALANCE.food.basinCrushAfter) return;
   if (!chance(state, BALANCE.food.basinCrushChance * dt)) return;
   state.items = state.items.filter((i) => i !== basin);
   state.stats.basinsLost++;
   emit(state, { kind: 'bad', text: 'Таз раздавлен: его не забрали после еды.', why: 'basinCrushed' });
+}
+
+// Тазы на стеллаже в кормовой: стоят на своих местах
+export function basinsOnRack(state: State): Item[] {
+  return state.items.filter((i) => i.kind === 'basin' && MAP.basinSpots.some((p) => d(i, p) <= 0.3));
+}
+
+export function freeBasinSpot(state: State): { x: number; y: number } | null {
+  return MAP.basinSpots.find((p) => !state.items.some((i) => i.kind === 'basin' && d(i, p) <= 0.3)) ?? null;
 }
 
 export function openBagNear(state: State, x: number, y: number): Item | undefined {

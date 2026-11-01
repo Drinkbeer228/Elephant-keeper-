@@ -3,13 +3,14 @@
 // Видит то же, что игрок с осмотром (пузырь, сено, вода), — то есть играет как опытный кипер.
 
 import { availableAction, tick, walkable, type Command, type State } from '../sim';
-import { MAP, inBedding, inReachZone } from '../data/map';
+import { MAP, inPaddock, inReachZone } from '../data/map';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { profileOf, bucketUnder } from '../sim/elephants';
 import { kashaDue, mealTime, vegStageAvailable } from '../sim/feeding';
 import { sawdustAbsorbed } from '../sim/floor';
-import type { Elephant, Item, MealId } from '../sim/types';
+import { ITEM_NAMES, basinsOnRack } from '../sim/items';
+import type { Elephant, Item } from '../sim/types';
 
 type P = { x: number; y: number };
 
@@ -22,23 +23,26 @@ interface Step {
   timeout?: number; // тиков
 }
 
-const PARK_BUCKET = { x: 7.6, y: 10.6 };
-const PARK_BAG = { x: 8.6, y: 10.6 };
-const SAFE = { x: 7.0, y: 12.6 };
+// Бак и мешок паркуются на дорожке за полосой, до которой дотягивается хобот
+const PARK_BUCKET = { x: 16.0, y: 10.6 };
+const PARK_BAG = { x: 17.4, y: 10.6 };
+const SAFE = { x: 14.0, y: 10.8 }; // на дорожке, подальше от тачки, стойки и станций
+// Откуда подходить к станциям: со стороны двери или прохода
+const st = MAP.stations;
 const AT = {
-  rack: { x: 1.7, y: 12.3 },
-  sawdust: { x: 4.4, y: 14.4 },
-  bags: { x: 5.8, y: 14.4 },
-  wash: { x: 15.0, y: 13.2 },
-  kitchen: { x: 19.2, y: 12.4 },
-  hay: { x: 18.6, y: 3.2 },
-  straw: { x: 18.6, y: 5.8 },
-  dump: { x: 19.9, y: 7.1 },
-  drain: { x: 12.4, y: 14.0 },
-  valve: { x: 14.4, y: 2.4 },
-  fencePanel: { x: 3.3, y: 9.8 },
-  gate: { x: 10.2, y: 10.0 },
-  feeder: { x: 2.4, y: 2.6 },
+  rack: { x: st.rack.x + st.rack.w / 2 + 0.6, y: 13.0 },
+  basinRack: { x: st.basinRack.x + st.basinRack.w / 2 + 0.6, y: st.basinRack.y },
+  sawdust: { x: st.sawdust.x, y: st.sawdust.y - 0.8 },
+  bags: { x: st.bags.x, y: st.bags.y - 0.8 },
+  wash: { x: st.wash.x, y: st.wash.y + st.wash.h / 2 + 0.5 },
+  kitchen: { x: st.kitchen.x, y: st.kitchen.y - st.kitchen.h / 2 - 0.5 },
+  hay: { x: st.hay.x, y: st.hay.y - st.hay.h / 2 - 0.5 },
+  straw: { x: st.straw.x, y: st.straw.y - st.straw.h / 2 - 0.5 },
+  dump: { x: st.dump.x, y: st.dump.y - st.dump.h / 2 - 0.5 },
+  drain: { x: st.drain.x, y: st.drain.y - 0.6 },
+  valve: { x: st.valve.x, y: st.valve.y + 0.6 },
+  gate: { x: st.gate.x, y: 10.0 },
+  feeder: { x: MAP.feeder.x + 0.2, y: MAP.feeder.y + 1.0 },
 };
 
 function d(a: P, b: P): number {
@@ -106,18 +110,25 @@ function astar(from: P, to: P): P[] {
 }
 
 const routes = new Map<string, P[]>();
-function route(from: P, to: P): P[] {
+export function route(from: P, to: P): P[] {
   if (clear(from, to)) return [to];
   const key = `${node(from)}-${node(to)}`;
+  // В кэше — только промежуточные клетки: точная цель у каждого запроса своя
   let path = routes.get(key);
   if (!path) {
-    path = astar(from, to);
+    path = astar(from, to).slice(0, -1);
     if (routes.size > 2000) routes.clear();
     routes.set(key, path);
   }
-  const pts = [...path];
+  const pts = [...path, to];
   while (pts.length > 1 && clear(from, pts[1])) pts.shift();
   return pts;
+}
+
+// Откуда брать вещь: у решётки — с дорожки сквозь прутья, внутри вольера — с места, снаружи — чуть ниже
+export function reachPoint(item: P): P {
+  if (inPaddock(item.x, item.y) && item.y > MAP.fenceY - 0.6) return { x: item.x, y: MAP.fenceY + 0.35 };
+  return { x: item.x, y: item.y + (inPaddock(item.x, item.y) ? 0 : 0.35) };
 }
 
 function cellCenter(cx: number, cy: number): P {
@@ -125,7 +136,8 @@ function cellCenter(cx: number, cy: number): P {
 }
 
 function insideClamp(p: P): P {
-  return { x: Math.min(Math.max(p.x, 1.6), 12.5), y: Math.min(Math.max(p.y, 1.6), 8.5) };
+  const k = MAP.paddock;
+  return { x: Math.min(Math.max(p.x, k.x0 + 0.6), k.x1 - 0.6), y: Math.min(Math.max(p.y, k.y0 + 0.6), k.y1 - 0.5) };
 }
 
 export interface BotStats {
@@ -145,15 +157,27 @@ export class Bot {
   private stillTicks = 0;
   private nudge = 0;
   private nudgeDir = { x: 0, y: 0 };
+  // Свой генератор от seed: бот не трогает случайности смены, а смена повторяется
+  private rng: number;
   stats: BotStats = { ticks: 0, busyTicks: 0, jobs: {}, aborted: {}, jobTicks: {} };
 
-  constructor(private s: State) {}
+  constructor(private s: State) {
+    this.rng = s.seed ^ 0x5bd1e995;
+  }
+
+  // mulberry32, как в src/sim/rng.ts
+  private random(): number {
+    this.rng = (this.rng + 0x6d2b79f5) | 0;
+    let t = this.rng;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
 
   // Один кадр: какие команды отдать
   frame(): Command[] {
     const s = this.s;
     this.stats.ticks++;
-    if (s.phase === 'acceptance') return this.accept();
     if (s.phase !== 'shift') return [];
 
     // Сигнал важнее всего: бросить текущее дело (кроме таза с едой в руках)
@@ -163,12 +187,6 @@ export class Bot {
     this.stats.busyTicks++;
     this.stats.jobTicks[this.job] = (this.stats.jobTicks[this.job] ?? 0) + 1;
     return this.run();
-  }
-
-  private accept(): Command[] {
-    const cmds: Command[] = this.s.checklist.map((c) => ({ type: 'toggleCheck', id: c.id, value: !c.defect }));
-    cmds.push({ type: 'acceptShift' });
-    return cmds;
   }
 
   private abort(reason: string): void {
@@ -230,7 +248,7 @@ export class Bot {
     this.lastPos = { x: p.x, y: p.y };
     if (this.stillTicks > 20 && this.nudge === 0) {
       this.nudge = 12;
-      this.nudgeDir = { x: Math.random() - 0.5, y: Math.random() - 0.5 };
+      this.nudgeDir = { x: this.random() - 0.5, y: this.random() - 0.5 };
     }
     if (this.nudge > 0) {
       this.nudge--;
@@ -272,23 +290,25 @@ export class Bot {
       .sort((a, b) => b.bladder - a.bladder)[0];
     if (full) return this.start('toilet', this.toilet(full));
 
-    const basin = s.items.find((i) => i.kind === 'basin' && !i.food);
+    // Пустые тазы — собрать стопкой, вымыть, поставить на стеллаж
+    const onRack = basinsOnRack(s);
+    const loose = (i: Item) => i.kind === 'basin' && !i.food && !onRack.includes(i);
+    const basin = s.items.find(loose);
     if (basin) {
-      const all = s.items.filter((i) => i.kind === 'basin' && !i.food);
-      const steps: Step[] = [...this.freeHands(), this.take(basin, /Взять: пустой таз/)];
+      const all = s.items.filter(loose);
+      const steps: Step[] = [...this.freeHands(), this.take(basin, /Взять: (грязный|чистый) таз/)];
       for (const b of all.filter((x) => x !== basin)) {
-        steps.push({ label: 'ещё таз', to: () => (s.items.includes(b) && s.player.held?.kind === 'basin' ? { x: b.x, y: b.y + 0.3 } : null), expect: /Взять ещё пустой таз/, done: () => !s.items.includes(b) });
+        steps.push({ label: 'ещё таз', to: () => (s.items.includes(b) && s.player.held?.kind === 'basin' ? reachPoint(b) : null), expect: /Взять ещё пустой таз/, done: () => !s.items.includes(b) });
       }
-      steps.push(this.at('мойка', AT.wash, /Вымыть таз/, () => !s.player.held));
+      steps.push(...this.putAway(() => s.player.held));
       return this.start('basin', steps);
     }
 
-    const loose = s.items.find(
-      (i) => i.kind !== 'basin' && (inBedding(i.x, i.y) || inReachZone(i.x, i.y)) && !s.elephants.some((e) => e.signalStarted !== undefined && d(e, i) < 1.2),
+    const stray = s.items.find(
+      (i) => i.kind !== 'basin' && (inPaddock(i.x, i.y) || inReachZone(i.x, i.y)) && !s.elephants.some((e) => e.signalStarted !== undefined && d(e, i) < 1.2),
     );
-    if (loose) return this.start('loose', [...this.freeHands(), this.take(loose), ...this.putAway(() => s.player.held)]);
+    if (stray) return this.start('loose', [...this.freeHands(), this.take(stray), ...this.putAway(() => s.player.held)]);
 
-    if (!s.fenceOn) return this.start('fence', [...this.freeHands(), this.at('пастух', AT.fencePanel, /Включить электропастух/)]);
     if (s.gateOpen) return this.start('gate', [...this.freeHands(), this.at('задвижка', AT.gate, /Закрыть задвижку/)]);
     if (!s.valveOpen && s.trough < 40) return this.start('valveOpen', [...this.freeHands(), this.at('вентиль', AT.valve, /Открыть вентиль/)]);
     if (s.feederHay < 35) {
@@ -317,8 +337,9 @@ export class Bot {
   private take(item: Item, expect?: RegExp): Step {
     return {
       label: `взять ${item.kind}`,
-      to: () => (this.s.items.includes(item) ? { x: item.x, y: item.y + (inBedding(item.x, item.y) ? 0 : 0.35) } : null),
-      expect: expect ?? /^Взять: /,
+      to: () => (this.s.items.includes(item) ? reachPoint(item) : null),
+      // Берём именно этот предмет: рядом может лежать другой, и «Взять» достанется ему
+      expect: expect ?? new RegExp(`^Взять: ${ITEM_NAMES[item.kind].split(' ')[0]}`),
       done: () => this.s.player.held === item,
     };
   }
@@ -343,6 +364,7 @@ export class Bot {
         ];
       case 'scoop':
         return [
+          { label: 'высыпать совок', to: () => ((it.load ?? 0) > 0 ? AT.dump : null), expect: /Высыпать совок/, done: () => !it.load },
           { label: 'мойка совок', to: () => (it.dirty ? AT.wash : null), expect: /Вымыть совок/, done: () => !it.dirty },
           this.at('стойка', AT.rack, /Положить на стойку/, () => !this.s.player.held),
         ];
@@ -353,8 +375,14 @@ export class Bot {
         return (it.fill ?? 0) >= 3
           ? [this.at('помойка', AT.dump, /Выбросить мешок/, () => !this.s.player.held)]
           : [this.dropAt(PARK_BAG, /Поставить открытый мешок/)];
-      case 'basin':
-        return it.food ? [this.dropAt(SAFE)] : [this.at('мойка', AT.wash, /Вымыть таз/, () => !this.s.player.held)];
+      case 'basin': {
+        if (it.food) return [this.dropAt(SAFE)];
+        const dirty = () => [it, ...(it.nested ?? [])].some((b) => b.dirty);
+        return [
+          { label: 'мойка', to: () => (this.s.player.held === it && dirty() ? AT.wash : null), expect: /Вымыть таз/, done: () => !dirty() },
+          this.at('стеллаж', AT.basinRack, /Поставить тазы? на стеллаж/, () => this.s.player.held !== it),
+        ];
+      }
       case 'hay':
         return [this.at('кормушка', AT.feeder, /Заложить сено/, () => !this.s.player.held)];
       default:
@@ -384,7 +412,7 @@ export class Bot {
       to: () => {
         if (s.player.held?.kind === 'bucket') return null;
         const b = bucket();
-        return b ? { x: b.x, y: b.y + (inBedding(b.x, b.y) ? 0 : 0.35) } : null;
+        return b ? { x: b.x, y: b.y + (inPaddock(b.x, b.y) ? 0 : 0.35) } : null;
       },
       expect: /Взять: бак/,
       done: () => s.player.held?.kind === 'bucket',
@@ -413,7 +441,7 @@ export class Bot {
     steps.push({
       label: 'забрать бак',
       to: () => {
-        const b = s.items.find((i) => i.kind === 'bucket' && d(i, e) < 2.5) ?? s.items.find((i) => i.kind === 'bucket' && inBedding(i.x, i.y));
+        const b = s.items.find((i) => i.kind === 'bucket' && d(i, e) < 2.5) ?? s.items.find((i) => i.kind === 'bucket' && inPaddock(i.x, i.y));
         return b ? { x: b.x, y: b.y } : null;
       },
       expect: /Взять: бак/,
@@ -431,35 +459,42 @@ export class Bot {
   private mealJob(): Step[] | null {
     const s = this.s;
     const k = s.kitchen;
-    const deliver = (meal: MealId, re: RegExp): Step[] | null => {
-      const target = s.elephants.find(
-        (e) => s.meals[meal][e.id] === null && !s.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food),
-      );
-      if (!target || k.cleanBasins <= 0) return null;
-      const slot = profileOf(target).slot;
-      const name = profileOf(target).name;
-      void slot;
-      void name;
-      const steps: Step[] = [...this.freeHands(), this.at('кормовая', AT.kitchen, re, () => s.player.held?.kind === 'basin')];
-      for (const e of s.elephants) {
-        const sl = profileOf(e).slot;
-        const nm = profileOf(e).name;
-        steps.push({
-          label: `слот ${nm}`,
-          to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: 9.55 } : null),
-          expect: new RegExp(`для ${nm}`),
-          done: () => s.meals[meal][e.id] !== null,
-        });
+    // На стеллаже стоят тазы с едой — разнести по одному тем, кому этого приёма ещё не дали
+    const full = basinsOnRack(s).filter((b) => b.food);
+    const meal = full[0]?.meal;
+    if (meal) {
+      const hungry = s.elephants.filter((e) => s.meals[meal][e.id] === null && !s.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food));
+      if (hungry.length) {
+        const steps: Step[] = [...this.freeHands()];
+        for (const e of hungry.slice(0, full.length)) {
+          const sl = profileOf(e).slot;
+          const nm = profileOf(e).name;
+          steps.push({
+            label: 'взять таз с едой',
+            to: () => {
+              if (s.player.held) return null;
+              const b = basinsOnRack(s).find((x) => x.food);
+              return b ? { x: b.x + 0.5, y: b.y } : null;
+            },
+            expect: /^Взять: таз с /,
+            done: () => !!s.player.held?.food,
+          });
+          steps.push({
+            label: `слот ${nm}`,
+            to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: 9.55 } : null),
+            expect: new RegExp(`для ${nm}`),
+            done: () => s.meals[meal][e.id] !== null,
+          });
+        }
+        return steps;
       }
-      return steps;
-    };
-    if (k.kasha.status === 'ready' && k.kasha.portions > 0 && k.kasha.meal) {
-      const job = deliver(k.kasha.meal, /Взять тазы? с кашей/);
-      if (job) return job;
     }
-    if (k.veg.portions > 0 && s.t >= mealTime('dinner') - 45) {
-      const job = deliver("dinner", /Взять тазы? с овощами/);
-      if (job) return job;
+    const clean = basinsOnRack(s).some((b) => !b.food && !b.dirty);
+    if (clean && k.kasha.status === 'ready' && k.kasha.portions > 0) {
+      return [...this.freeHands(), this.at('кормовая', AT.kitchen, /Разложить кашу по тазам/)];
+    }
+    if (clean && k.veg.portions > 0 && s.t >= mealTime('dinner') - 45) {
+      return [...this.freeHands(), this.at('кормовая', AT.kitchen, /Разложить ужин по тазам/)];
     }
     const due = kashaDue(s);
     if (due && k.kasha.status === 'idle' && s.t >= mealTime(due) - 26) {
@@ -496,7 +531,10 @@ export class Bot {
     const awayFromElephants = (p: P) => !s.elephants.some((e) => d(e, p) < 1.0);
 
     if (s.dung.length) {
-      return ['dung', this.bagged('scoop', s.dung.map((x) => ({ x: x.x, y: x.y })), /Убрать навоз в мешок/)];
+      const piles = s.dung.map((x) => ({ x: x.x, y: x.y }));
+      // Немного куч — набегом с совком: в отсек, потом высыпать в контейнер. Много — с мешком
+      if (piles.length <= BALANCE.items.scoopCapacity) return ['dung', this.scooped(piles)];
+      return ['dung', this.bagged('scoop', piles, /Убрать навоз в мешок/)];
     }
     const trampled = cells.filter((c) => c.kind === 'dung' && awayFromElephants(c.p)).map((c) => c.p);
     if (trampled.length) return ['trampled', this.bagged('scoop', trampled, /Счистить затоптанный навоз/)];
@@ -560,6 +598,16 @@ export class Bot {
       expect: /^(Выбросить мешок|Поставить открытый мешок)/,
       done: () => !s.player.held,
     });
+    return steps;
+  }
+
+  private scooped(targets: P[]): Step[] {
+    const s = this.s;
+    const steps: Step[] = [...this.freeHands(), ...this.toolSteps('scoop')];
+    for (const p of targets.sort((a, b) => a.x - b.x)) {
+      steps.push({ label: 'совок → отсек', to: () => (s.player.held?.kind === 'scoop' && s.dung.some((d) => d.x === p.x && d.y === p.y) ? p : null), expect: /Убрать навоз в (совок|тачку|мешок)/, timeout: 30 * 6 });
+    }
+    steps.push(...this.putAway(() => s.player.held));
     return steps;
   }
 

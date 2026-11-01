@@ -4,5 +4,5 @@ export { availableAction, barrowSummary, inspect, itemLabel, type ActionOption }
 export { clockText, dayPart } from './clock';
 export { profileOf } from './elephants';
 export { sawdustAbsorbed } from './floor';
-export type { Report } from './handover';
+export { stinkSources, type Report } from './handover';
 export type * from './types';

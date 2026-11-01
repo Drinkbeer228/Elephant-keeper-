@@ -18,11 +18,12 @@ export function dist(a: { x: number; y: number }, b: { x: number; y: number }): 
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// Где слонихи гуляют: весь вольер, подстилка и трава
 const BOUNDS = {
-  x0: MAP.bedding.x + 0.7,
-  y0: MAP.bedding.y + 0.7,
-  x1: MAP.bedding.x + MAP.bedding.cols - 0.7,
-  y1: MAP.bedding.y + MAP.bedding.rows - 0.6,
+  x0: MAP.paddock.x0 + 0.7,
+  y0: MAP.paddock.y0 + 0.7,
+  x1: MAP.paddock.x1 - 0.7,
+  y1: MAP.paddock.y1 - 0.6,
 };
 
 function clampInside(x: number, y: number): { x: number; y: number } {
@@ -138,10 +139,11 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
   }
 }
 
-// Свежий навоз слонихи обходят. Залежавшийся — затаптывают и разносят следами по подстилке
+// Свежий навоз слонихи обходят. Залежавшийся — затаптывают и разносят следами по подстилке.
+// На траве куча так и лежит: затаптывать некуда, её убирают совком
 function trample(state: State, e: Elephant): void {
   if (e.state === 'sleep') return;
-  const pile = state.dung.find((d) => state.t - d.at > E.dungTolerance && dist(e, d) < 0.75);
+  const pile = state.dung.find((d) => state.t - d.at > E.dungTolerance && dist(e, d) < 0.75 && cellAt(state, d.x, d.y));
   if (pile) {
     state.dung = state.dung.filter((d) => d !== pile);
     const ref = cellAt(state, pile.x, pile.y);
@@ -271,6 +273,7 @@ function finishBasin(state: State, e: Elephant, p: ElephantProfile): void {
     e.boredom = clamp(e.boredom - 5);
     if (leftover) emit(state, { kind: 'info', text: `${p.name} оставила полтаза каши. Врачу это важно.`, elephantId: e.id });
     basin.food = null;
+    basin.dirty = true;
     basin.eatenAt = state.t;
     basin.droppedAt = state.t;
   }

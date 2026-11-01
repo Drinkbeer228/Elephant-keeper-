@@ -23,10 +23,10 @@ export function renderReport(r: Report): string {
           .join('')}</td></tr>
         <tr><th>Ноги</th><td>${r.footDebt.map((f) => `${f.name}: ${f.debt}`).join(' · ')} <small>— минут на мокром; от 300 хромают</small></td></tr>
         <tr><th>Потери</th><td>${r.losses.length ? r.losses.join(', ') : 'нет'}</td></tr>
-        <tr><th>Приём</th><td>Косяков сменщика найдено: ${r.acceptance.found} из ${r.acceptance.defects}${
-          r.acceptance.missed.length ? `<div>Пропустил: ${r.acceptance.missed.join(', ')}</div>` : ''
-        }${r.acceptance.nitpicks.length ? `<div>Придрался зря: ${r.acceptance.nitpicks.join(', ')}</div>` : ''}</td></tr>
-        <tr><th>Замечания</th><td>${r.remarks.length ? r.remarks.map((x) => `<div>${x.replace(/^✗ /, `<span class="cross">${ICON.cross}</span> `)}</div>`).join('') : 'нет — чистая сдача'}</td></tr>
+        <tr><th>Сдача</th><td>${r.checklist
+          .map((c) => `<div><span class="${c.ok ? 'check' : 'cross'}">${c.ok ? ICON.check : ICON.cross}</span> ${c.label}</div>`)
+          .join('')}</td></tr>
+        <tr><th>Замечания</th><td>${r.remarks.length ? r.remarks.map((x) => `<div>${x}</div>`).join('') : 'нет'}</td></tr>
       </table>
       <button class="btn primary big" data-restart>Ещё смена</button>
     </div>`;

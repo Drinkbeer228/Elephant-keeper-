@@ -11,8 +11,6 @@ export class ElephantView {
   private sprite: Phaser.GameObjects.Image;
   private shadow: Phaser.GameObjects.Image;
   private name: Phaser.GameObjects.Text;
-  private status: Phaser.GameObjects.Text;
-  private bubble: Phaser.GameObjects.Image;
   facing = 1;
   private phase = 0;
   private last = { x: 0, y: 0 };
@@ -29,14 +27,9 @@ export class ElephantView {
     this.name = scene.add
       .text(0, 0, profile.name.toUpperCase(), { fontFamily: FONT, fontSize: '8px', color: '#fcfcfc', backgroundColor: '#000000', padding: { x: 3, y: 2 } })
       .setOrigin(0.5, 1);
-    this.status = scene.add
-      .text(0, 0, '', { fontFamily: FONT, fontSize: '8px', color: '#000000', backgroundColor: '#f8b800', padding: { x: 3, y: 3 } })
-      .setOrigin(0.5, 1)
-      .setVisible(false);
-    this.bubble = scene.add.image(0, 0, 'fx-bubble').setScale(PX).setOrigin(0.5, 1).setVisible(false);
   }
 
-  update(e: Elephant, s: State, time: number): void {
+  update(e: Elephant, _s: State, time: number): void {
     const px = Math.round(e.x * TILE);
     const py = Math.round(e.y * TILE + 16);
     const moved = Math.hypot(px - this.last.x, py - this.last.y);
@@ -74,19 +67,8 @@ export class ElephantView {
     this.sprite.setTexture(`el-${id}-${frame}`).setFlipX(this.facing < 0).setPosition(px + dx, py).setDepth(py);
     this.shadow.setTexture(e.state === 'sleep' ? 'shadow-lying' : 'shadow-el').setPosition(px, py - 2).setDepth(py - 1);
 
-    // Подписи: имя или статус в плашке; при сигнале над ней «!»
+    // Над слонихой — только имя. Что она хочет, игрок читает по поведению: топот, стойка у решётки
     const top = py - (e.state === 'sleep' ? 16 : 31) * PX * (id === 'audrey' ? 0.88 : 1);
-    const status = signaling ? this.profile.signalText || 'писает!' : s.t <= e.praiseUntil ? 'в бак! угости' : e.state === 'sway' ? 'качается' : '';
-    this.name.setVisible(!status).setPosition(px, top).setDepth(20000);
-    this.status
-      .setVisible(!!status)
-      .setText(`${this.profile.name.toUpperCase()}: ${status}`)
-      .setBackgroundColor(signaling ? '#f8b800' : s.t <= e.praiseUntil ? '#80d010' : '#fcb4a4')
-      .setPosition(px, top)
-      .setDepth(20002);
-    this.bubble
-      .setVisible(signaling)
-      .setPosition(px, top - 16 - (Math.floor(time * 4) % 2) * PX)
-      .setDepth(20001);
+    this.name.setPosition(px, top).setDepth(20000);
   }
 }

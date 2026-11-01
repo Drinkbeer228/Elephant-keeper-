@@ -1,5 +1,6 @@
 import { BALANCE } from '../data/balance';
 import { MAP } from '../data/map';
+import { hint } from './events';
 import { chance, pick } from './rng';
 import type { Cell, State } from './types';
 
@@ -99,6 +100,9 @@ export function updateFloor(state: State): void {
       }
     }
     toWet.forEach(([cx, cy]) => setCell(state, cx, cy, 'wet'));
+  }
+  if (!state.stats.hintsShown.includes('broom') && state.cells.some((row) => row.some((c) => sawdustAbsorbed(state, c)))) {
+    hint(state, 'broom', 'Опилки впитали мочу — вымети их метлой до пола, потом стели солому.');
   }
   if (state.t - state.stats.lastDryCheck >= fl.dryCheckEvery) {
     state.stats.lastDryCheck = state.t;
