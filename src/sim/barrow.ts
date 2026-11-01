@@ -39,7 +39,8 @@ export function updateBalance(state: State, dtReal: number, moving: boolean, inp
     b.balance = 0;
     return;
   }
-  const load = b.bales - B.stableBales;
+  // Третий тюк — раскачка, четвёртый — ещё сильнее, но не вдвое
+  const load = (b.bales - B.stableBales) ** 0.7;
   if (moving) {
     const noise = (randomRange(state, -1, 1) * B.noise + b.balance * B.drift) * load;
     b.balance += noise * dtReal;
@@ -47,7 +48,8 @@ export function updateBalance(state: State, dtReal: number, moving: boolean, inp
   } else {
     b.balance *= Math.max(0, 1 - dtReal * 2);
   }
-  b.balance -= input * B.control * dtReal;
+  // Игрок сдвигает стопку: −1 влево (Q, ◀), +1 вправо (E, ▶)
+  b.balance += input * B.control * dtReal;
   if (Math.abs(b.balance) >= 1) {
     const side = b.balance > 0 ? 1 : -1;
     b.bales--;

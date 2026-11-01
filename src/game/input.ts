@@ -12,7 +12,7 @@ export class Input {
       if (e.repeat) return;
       const k = e.code;
       this.keys.add(k);
-      if (k === 'Space' || k === 'KeyE') this.push('action');
+      if (k === 'Space') this.push('action');
       else if (k === 'KeyF') this.push('inspect');
       else if (k === 'KeyP' || k === 'Escape') this.push('pause');
       if (k === 'Space' || k.startsWith('Arrow')) e.preventDefault();
@@ -29,6 +29,15 @@ export class Input {
     const q = this.queue;
     this.queue = [];
     return q;
+  }
+
+  stickBalance = 0; // кнопки ◀ ▶ на телефоне
+
+  // Q / E — выравнивать тюки на тачке
+  balance(): -1 | 0 | 1 {
+    const k = this.keys;
+    const v = (k.has('KeyE') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0) || this.stickBalance;
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
   }
 
   move(): { x: number; y: number } {

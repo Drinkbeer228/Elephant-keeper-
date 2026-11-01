@@ -1,10 +1,11 @@
 import { WHY } from '../data/why';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
-import { clockText, dayPart, itemLabel, profileOf, type ActionOption, type ChecklistId, type ShiftEvent, type State } from '../sim';
+import { barrowSummary, clockText, dayPart, itemLabel, profileOf, type ActionOption, type ChecklistId, type ShiftEvent, type State } from '../sim';
 import type { Input } from '../game/input';
 import { renderReport } from './report';
 import { ICON, itemIcon, portraitIcon } from './icons';
+import { barrowUrl } from '../game/textures';
 
 // Интерфейс поверх canvas: часы, слонихи, ресурсы, подсказка действия, лента событий, чек-лист, кнопки
 
@@ -45,6 +46,14 @@ export class Hud {
         <button class="icon panel" data-el="pauseBtn" aria-label="Пауза">${ICON.pause}</button>
       </div>
       <div class="held panel" data-el="held"></div>
+      <div class="balance panel hidden" data-el="balance">
+        <span>БАЛАНС</span>
+        <div class="bar"><i data-el="needle"></i></div>
+        <div class="lean">
+          <button class="btn ghost" data-el="leanL">&lt; Q</button>
+          <button class="btn ghost" data-el="leanR">E &gt;</button>
+        </div>
+      </div>
       <div class="feed" data-el="feed"></div>
       <div class="inspect panel hidden" data-el="inspect"></div>
       <div class="checklist hidden" data-el="checklist"></div>
@@ -65,9 +74,10 @@ export class Hud {
           <p>Ты заступаешь на сутки при трёх слонихах — <b>Претти</b>, <b>Марго</b> и <b>Одри</b>. Утром сменщик примет у тебя слоновник и будет придираться.</p>
           <ol class="rules">
             <li><b>Приём смены.</b> Обойди слоновник и отметь 7 пунктов. Найденный косяк сменщика — не твой.</li>
-            <li><b>Туалет.</b> У каждой свой сигнал. Успей подставить бак — иначе мокрая подстилка и больные ноги. Одри не предупреждает: веди её «погулять».</li>
-            <li><b>Пол.</b> Мокрое — вилами в мешок, потом опилки, метла, солома. Навоз — совком, сразу.</li>
+            <li><b>Туалет.</b> У каждой свой сигнал. Успей подставить бак — иначе мокрая подстилка и больные ноги. Угости за бак, бак вылей в решётку слива. Одри не предупреждает: веди её «погулять».</li>
+            <li><b>Пол.</b> Мокрое — вилами, потом опилки, метла, солома. Навоз — совком, сразу.</li>
             <li><b>Корм.</b> Каша в 13:00 и 17:00, овощной ужин к 19:00. Пустые тазы — собрать и вымыть.</li>
+            <li><b>Тачка.</b> Возит инвентарь, опилки, солому, тюки и мусор. Поставь рядом — и убирай. Три тюка и больше качаются: держи равновесие Q / E.</li>
           </ol>
           <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd> действие · <kbd>F</kbd> осмотр · <kbd>P</kbd> пауза</p>
           <button class="btn primary big" data-el="introBtn">Заступить на смену</button>
@@ -90,6 +100,17 @@ export class Hud {
     tap('introBtn', () => this.closeIntro());
     tap('resumeBtn', () => this.togglePause());
     this.els.inspect.addEventListener('pointerdown', () => this.els.inspect.classList.add('hidden'));
+    // Кнопки равновесия держат нажатыми
+    const hold = (name: string, dir: -1 | 1) => {
+      const el = this.els[name];
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        input.stickBalance = dir;
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(ev, () => (input.stickBalance = 0));
+    };
+    hold('leanL', -1);
+    hold('leanR', 1);
     input.bindStick(this.els.stick, this.els.knob);
   }
 
@@ -172,12 +193,20 @@ export class Hud {
       <span class="r${low(s.feederHay, BALANCE.handover.hayMin)}" title="Сено в кормушке">${ICON.hay}${Math.round(s.feederHay)}%</span>
       <span class="r${s.kitchen.cleanBasins === 0 ? ' low' : ''}" title="Чистых тазов">${ICON.bowl}${s.kitchen.cleanBasins}</span>`;
 
-    const heldKey = s.player.held ? `${s.player.held.kind}-${itemLabel(s.player.held)}` : '';
+    const heldKey = s.barrow.pushed ? `barrow-${barrowSummary(s)}` : s.player.held ? `${s.player.held.kind}-${itemLabel(s.player.held)}` : '';
     if (heldKey !== this.lastHeld) {
       this.lastHeld = heldKey;
-      this.els.held.innerHTML = s.player.held
-        ? `<img src="${itemIcon(s.player.held)}" alt=""><span>В руках: <b>${itemLabel(s.player.held)}</b></span>`
-        : `<span class="muted">Руки свободны</span>`;
+      this.els.held.innerHTML = s.barrow.pushed
+        ? `<img src="${barrowUrl()}" alt=""><span>Тачка: <b>${barrowSummary(s)}</b></span>`
+        : s.player.held
+          ? `<img src="${itemIcon(s.player.held)}" alt=""><span>В руках: <b>${itemLabel(s.player.held)}</b></span>`
+          : `<span class="muted">Руки свободны</span>`;
+    }
+    const balancing = s.barrow.pushed && s.barrow.bales > BALANCE.barrow.stableBales;
+    this.els.balance.classList.toggle('hidden', !balancing);
+    if (balancing) {
+      this.els.needle.style.left = `${50 + s.barrow.balance * 50}%`;
+      this.els.balance.classList.toggle('danger', Math.abs(s.barrow.balance) > 0.65);
     }
     this.els.hint.innerHTML = action ? `${action.disabled ? ICON.info : ICON.hand}<span>${action.label}</span>` : '';
     this.els.hint.classList.toggle('disabled', !!action?.disabled);

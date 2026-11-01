@@ -35,6 +35,8 @@ function frame(dt: number): FrameResult {
   const move = input.move();
   if (move.x || move.y) hud.hideInspect();
   let commands: Command[] = [{ type: 'move', dx: move.x, dy: move.y }, ...pending.splice(0)];
+  const lean = input.balance();
+  if (lean) commands.push({ type: 'balance', dir: lean });
   const inspected = commands.some((c) => c.type === 'inspect') ? inspect(state).join('\n') : undefined;
   let events = tick(state, dt, commands);
   if (bot) {

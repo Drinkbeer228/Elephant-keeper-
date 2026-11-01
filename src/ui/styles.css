@@ -281,6 +281,59 @@ svg {
   padding-left: 6px;
 }
 
+/* ——— равновесие тюков на тачке ——— */
+
+.balance {
+  position: absolute;
+  left: 50%;
+  top: calc(80px + var(--safe-t));
+  transform: translateX(-50%);
+  width: min(320px, calc(100% - 20px));
+  padding: 8px 12px 10px;
+  display: grid;
+  gap: 6px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--gold);
+}
+
+.balance .bar {
+  position: relative;
+  height: 14px;
+  border: 2px solid var(--white);
+  background: linear-gradient(90deg, var(--red) 0 15%, var(--k) 15% 85%, var(--red) 85% 100%);
+}
+
+.balance .bar i {
+  position: absolute;
+  top: -4px;
+  width: 6px;
+  height: 18px;
+  margin-left: -3px;
+  background: var(--gold);
+  border: 2px solid var(--k);
+}
+
+.balance.danger {
+  border-color: var(--red);
+  animation: blinkBorder 0.25s steps(1) infinite;
+}
+
+@keyframes blinkBorder {
+  50% {
+    border-color: var(--white);
+  }
+}
+
+.balance .lean {
+  display: flex;
+  justify-content: space-between;
+}
+
+.balance .lean .btn {
+  pointer-events: auto;
+}
+
 /* ——— лента событий ——— */
 
 .feed {

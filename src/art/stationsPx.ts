@@ -198,6 +198,96 @@ function barrow(): Sprite {
   return s;
 }
 
+// Тачка: корпус и содержимое отдельными слоями — их собирает вид
+function barrowBase(): Sprite {
+  const s = new Sprite(28, 18);
+  s.shape(line([[19, 9], [27, 5]], 0.9), T.wood);
+  s.shape(line([[19, 12], [27, 9]], 0.9), T.wood);
+  s.shape(union(rect(2, 5, 20, 11), rect(4, 11, 18, 13)), T.green);
+  s.fill(rect(4, 6, 18, 7), C.greenDark);
+  s.shape(ellipse(7.5, 14.5, 3, 3), T.black);
+  s.set(7, 14, C.grey);
+  s.fill(rect(16, 13, 16, 17), C.k);
+  s.fill(rect(15, 17, 17, 17), C.k);
+  return s;
+}
+
+function barrowWaste(level: 1 | 2 | 3): Sprite {
+  const s = new Sprite(28, 18);
+  const h = [0, 2, 3.5, 5][level];
+  s.shape(ellipse(11, 6.5, 8.5, h), T.dung);
+  for (const [x, y] of [[7, 5], [12, 4], [15, 6], [9, 6]]) if (y > 6.5 - h) s.set(x, y, C.goldDark);
+  return s;
+}
+
+function barrowTools(): Sprite {
+  const s = new Sprite(28, 18);
+  s.shape(line([[5, 6], [2, 0.5]], 0.7), T.wood);
+  s.shape(rect(0, 0, 3, 1), T.steel);
+  s.shape(line([[10, 6], [10, 0]], 0.7), T.wood);
+  for (const x of [8, 10, 12]) s.set(x, 0, C.grey);
+  s.shape(line([[15, 6], [18, 1]], 0.7), T.wood);
+  s.shape(rect(16, 0, 20, 2), T.straw);
+  return s;
+}
+
+function barrowHeap(tone: 'sawdust' | 'straw'): Sprite {
+  const s = new Sprite(28, 18);
+  s.shape(ellipse(11, 6, 7, 2.6), tone === 'sawdust' ? T.cream : T.straw);
+  if (tone === 'straw') for (const [x, y] of [[7, 5], [10, 4], [14, 5]]) s.set(x, y, C.goldDark);
+  return s;
+}
+
+// Большой мусорный бак: дверца сбоку открыта (заезд) или закрыта
+function container(open: boolean): Sprite {
+  const s = new Sprite(46, 30);
+  s.shape(union(rect(1, 6, 44, 29), rect(0, 4, 45, 7)), T.green);
+  for (let x = 8; x < 44; x += 7) s.fill(rect(x, 9, x, 27), C.greenDark);
+  if (open) {
+    s.fill(rect(2, 12, 12, 29), C.k);
+    s.fill(rect(3, 13, 11, 29), '#1c1c20');
+  } else {
+    s.shape(rect(2, 11, 13, 29), { L: C.greenLight, M: '#00c800', D: C.greenDark });
+    s.fill(rect(10, 19, 11, 20), C.grey);
+  }
+  s.shape(rect(18, 0, 27, 4), T.steel);
+  return s;
+}
+
+function ramp(): Sprite {
+  const s = new Sprite(30, 30);
+  s.shape(line([[1, 28], [27, 3]], 2.4), T.wood);
+  for (let i = 0; i < 6; i++) s.set(4 + i * 4, 25 - i * 4, C.redDark);
+  s.shape(rect(25, 3, 27, 29), T.wood);
+  return s;
+}
+
+function truck(): Sprite {
+  const s = new Sprite(76, 40);
+  // Кузов-контейнеровоз
+  s.shape(rect(2, 8, 50, 30), T.green);
+  for (let x = 9; x < 50; x += 8) s.fill(rect(x, 11, x, 27), C.greenDark);
+  s.shape(rect(0, 30, 74, 33), T.steel);
+  // Кабина
+  s.shape(union(rect(52, 10, 72, 30), rect(56, 6, 70, 10)), T.red);
+  s.fill(rect(58, 12, 68, 18), C.skyLight);
+  s.fill(rect(59, 13, 62, 14), C.white);
+  s.fill(rect(73, 24, 74, 28), C.gold);
+  // Колёса
+  for (const x of [12, 36, 62]) {
+    s.shape(ellipse(x, 34, 4.6, 4.6), T.black);
+    s.fill(ellipse(x, 34, 1.6, 1.6), C.grey);
+  }
+  return s;
+}
+
+function drain(): Sprite {
+  const s = new Sprite(16, 9);
+  s.shape(rect(0, 0, 15, 8), T.steel);
+  for (let x = 2; x <= 13; x += 3) s.fill(rect(x, 2, x + 1, 6), C.k);
+  return s;
+}
+
 function ladder(): Sprite {
   const s = new Sprite(12, 30);
   s.shape(rect(1, 0, 2, 29), T.wood);
@@ -264,6 +354,18 @@ export function stationSprites(): Record<string, Sprite> {
     'st-feeder-1': feeder(1),
     'st-feeder-2': feeder(2),
     'st-mat': mat(),
+    'barrow-base': barrowBase(),
+    'barrow-waste-1': barrowWaste(1),
+    'barrow-waste-2': barrowWaste(2),
+    'barrow-waste-3': barrowWaste(3),
+    'barrow-tools': barrowTools(),
+    'barrow-sawdust': barrowHeap('sawdust'),
+    'barrow-straw': barrowHeap('straw'),
+    'st-container-open': container(true),
+    'st-container-closed': container(false),
+    'st-ramp': ramp(),
+    'st-drain': drain(),
+    truck: truck(),
     'deco-sacks': sacks(),
     'deco-barrow': barrow(),
     'deco-ladder': ladder(),

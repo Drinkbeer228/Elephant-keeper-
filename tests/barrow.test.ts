@@ -65,7 +65,7 @@ describe('тачка', () => {
         const dir = (i % 60 < 30 ? -1 : 1) as -1 | 1;
         const cmds: Parameters<typeof tick>[2] = [{ type: 'move', dx: dir, dy: 0 }];
         // Выравнивать в сторону, противоположную крену
-        if (steer && Math.abs(s.barrow.balance) > 0.05) cmds.push({ type: 'balance', dir: s.barrow.balance > 0 ? 1 : -1 });
+        if (steer && Math.abs(s.barrow.balance) > 0.05) cmds.push({ type: 'balance', dir: s.barrow.balance > 0 ? -1 : 1 });
         tick(s, 1 / 30, cmds);
       }
       return s.barrow.bales;

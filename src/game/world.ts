@@ -7,6 +7,7 @@ import { MAP } from '../data/map';
 import { dayPart, sawdustAbsorbed, type State } from '../sim';
 import { ElephantView } from './elephantView';
 import { KeeperView } from './keeperView';
+import { BarrowView } from './barrowView';
 import { itemTexture, loadTextures } from './textures';
 
 // Мир в пиксель-арте: шатёр, подстилка по клеткам, станции, ограждение, слонихи, кипер, свет и эффекты.
@@ -40,6 +41,11 @@ export class WorldScene extends Phaser.Scene {
   private kitchenText!: Phaser.GameObjects.Text;
   private valve!: Phaser.GameObjects.Image;
   private panel!: Phaser.GameObjects.Image;
+  private barrow!: BarrowView;
+  private box!: Phaser.GameObjects.Image;
+  private ramp!: Phaser.GameObjects.Image;
+  private boxText!: Phaser.GameObjects.Text;
+  private truck!: Phaser.GameObjects.Image;
   private fx: Record<string, Phaser.GameObjects.Particles.ParticleEmitter> = {};
   private prev = { tallies: '', trust: [] as number[], dung: new Set<number>() };
 
@@ -152,9 +158,14 @@ export class WorldScene extends Phaser.Scene {
     this.kitchen = this.img(k.x, k.y, 'st-kitchen', k.y);
     this.tag('КОРМОВАЯ', k.x, k.y - this.kitchen.displayHeight - 2);
     this.kitchenText = this.tag('', k.x, k.y - this.kitchen.displayHeight - 18).setColor('#f8b800');
+    // Большой мусорный бак у нижней стены, рядом трап и место для мусоровоза
     const d = at('dump');
-    this.img(d.x, MAP.h * TILE - 6, 'st-dump', -700);
-    this.tag('ПОМОЙКА', d.x, MAP.h * TILE - 6 - 62);
+    this.box = this.img(d.x, d.y + 4, 'st-container-open', d.y);
+    this.ramp = this.img(d.x - 24 * PX, d.y + 4, 'st-ramp', d.y + 1).setVisible(false);
+    this.boxText = this.tag('', d.x, d.y + 4 - this.box.displayHeight - 2);
+    this.truck = this.img(MAP.w * TILE + 200, MAP.h * TILE - 4, 'truck', MAP.h * TILE + 50);
+    // Решётки слива на настиле
+    for (const k of ['drain', 'drain2'] as const) this.img(st[k].x * TILE, st[k].y * TILE, 'st-drain', -870, 0.5);
     const v = at('valve');
     this.valve = this.img(v.x, v.y + 6, 'st-valve', v.y);
     this.tag('ВЕНТИЛЬ', v.x + 30, v.y - 40);
@@ -165,7 +176,6 @@ export class WorldScene extends Phaser.Scene {
     // Обстановка двора
     for (const [key, x, y] of [
       ['deco-sacks', 16.3, 2.7],
-      ['deco-barrow', 16.6, 7.8],
       ['deco-ladder', 21.3, 2.6],
       ['deco-bale', 18.3, 8.7],
       ['deco-bale', 21, 8.3],
@@ -187,6 +197,7 @@ export class WorldScene extends Phaser.Scene {
     // Живые
     this.elephants = ELEPHANTS.map((p) => new ElephantView(this, p, (x, y) => this.fx.dust.explode(6, x, y)));
     this.keeper = new KeeperView(this);
+    this.barrow = new BarrowView(this);
 
     // Свет
     this.glow = this.add.image(0, 0, 'glow').setOrigin(0).setScale(PX).setDepth(30000).setBlendMode(Phaser.BlendModes.ADD);
@@ -222,6 +233,8 @@ export class WorldScene extends Phaser.Scene {
     this.drawStations(s);
     s.elephants.forEach((e, i) => this.elephants[i].update(e, s, t));
     this.keeper.update(s, t, frame.actionReady);
+    this.barrow.update(s);
+    this.drawContainer(s, dt);
     this.effects(s);
     this.drawLight(s, t);
     if (this.follow) {
@@ -382,6 +395,24 @@ export class WorldScene extends Phaser.Scene {
       w.fillStyle(0x3cbcfc).fillRect(left, top + 5 * PX - h, 26 * PX, PX);
       w.fillStyle(0xfcfcfc).fillRect(left + 4 * PX, top + 5 * PX - h, 3 * PX, PX);
     }
+  }
+
+  private drawContainer(s: State, dt: number): void {
+    const c = s.container;
+    const share = Math.round((c.fill / BALANCE.container.capacity) * 100);
+    this.box.setTexture(c.doorClosed ? 'st-container-closed' : 'st-container-open');
+    this.ramp.setVisible(c.ramp);
+    this.boxText.setText(`БАК ${share}%`).setColor(share >= 100 ? '#d82800' : share >= 50 ? '#f8b800' : '#fcfcfc');
+    // Мусоровоз: подъезжает справа к баку, когда вызван, и уезжает после замены
+    const stopX = (MAP.stations.dump.x + 4.4) * TILE;
+    const offX = MAP.w * TILE + 140;
+    const arriving = c.truckAt !== null && s.t >= c.truckAt - 8;
+    const leaving = c.truckLeftAt !== null && s.t - c.truckLeftAt < 8;
+    const target = arriving ? stopX : leaving ? offX : offX;
+    const speed = 260 * dt;
+    if (leaving && this.truck.x < stopX - 5) this.truck.x = stopX;
+    this.truck.x += Math.max(-speed, Math.min(speed, target - this.truck.x));
+    this.truck.setVisible(this.truck.x < MAP.w * TILE + 120);
   }
 
   private effects(s: State): void {

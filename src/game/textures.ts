@@ -48,6 +48,11 @@ export function itemUrl(item: Item): string {
   if (!itemUrls.has(key)) itemUrls.set(key, url(items[key]));
   return itemUrls.get(key)!;
 }
+let barrowIcon = '';
+export function barrowUrl(): string {
+  if (!barrowIcon) barrowIcon = url(stations['barrow-base']);
+  return barrowIcon;
+}
 const portraits = new Map<string, string>();
 export function portraitUrl(id: string): string {
   if (!portraits.has(id)) portraits.set(id, url(elephantPortrait(LOOKS[id])));
