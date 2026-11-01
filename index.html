@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Симулятор дежурного кипера слоновника</title>
+    <meta name="description" content="Полноценная 2D ретро-игра в стиле пиксель-арт: уход за слонихами Одри, Марго и Претти, уборка навоза, кормление, сбор анализов и инспекция." />
+    <meta property="og:title" content="Симулятор дежурного кипера слоновника" />
+    <meta property="og:description" content="2D ретро-симулятор дежурного кипера слоновника: уход за слонихами, уборка, кормление, анализы и инспекция." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      :root {
+        --sat: env(safe-area-inset-top, 0px);
+        --sab: env(safe-area-inset-bottom, 0px);
+        --sal: env(safe-area-inset-left, 0px);
+        --sar: env(safe-area-inset-right, 0px);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        background-color: #120e0c;
+        color: #f5eedb;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overscroll-behavior: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      /* =========================================================
+         1. АДАПТИВНАЯ ВЁРСТКА (PORTRAIT + LANDSCAPE)
+         Игра доступна в обеих ориентациях: мир фиксирован
+         (CANVAS_WIDTH/CANVAS_HEIGHT), wrapper масштабируется под
+         доступную площадь с сохранением пропорций.
+         ========================================================= */
+
+      /* =========================================================
+         2. ИГРОВОЕ ПОЛЕ (адаптивное масштабирование)
+         ========================================================= */
+      #game-wrapper {
+        position: relative;
+        width: min(calc(100vw - var(--sal) - var(--sar)), calc((100dvh - var(--sat) - var(--sab)) * 1.470588));
+        height: min(calc(100dvh - var(--sat) - var(--sab)), calc((100vw - var(--sal) - var(--sar)) * 0.68));
+        max-width: 100vw;
+        max-height: 100dvh;
+        aspect-ratio: 1000 / 680;
+        background: #000;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 0 2px #3c2a1e;
+        border-radius: 4px;
+        overflow: hidden;
+        touch-action: none;
+        margin: auto;
+      }
+
+      canvas#gameCanvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        touch-action: none;
+      }
+
+      /* Скрытый div root для React Vite совместимости */
+      #root {
+        display: none;
+      }
+
+      /* =========================================================
+         3. СЕНСОРНОЕ УПРАВЛЕНИЕ ПОВЕРХ CANVAS (LANDSCAPE HUD)
+         ========================================================= */
+      #touch-controls-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 30;
+        display: block;
+      }
+
+      /* Скрытие сенсорного оверлея на ПК с точным курсором (мышь/трекпад) */
+      @media (hover: hover) and (pointer: fine) {
+        #touch-controls-layer {
+          display: none !important;
+        }
+      }
+
+      /* Верхние правые кнопки быстрого доступа к HUD */
+      #touch-hud-btns {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        pointer-events: auto;
+      }
+
+      .touch-hud-btn {
+        width: 44px;
+        height: 38px;
+        min-width: 44px;
+        min-height: 38px;
+        border-radius: 8px;
+        background: rgba(40, 30, 24, 0.88);
+        border: 1.5px solid #4a382c;
+        color: #f5eedb;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        position: relative;
+        touch-action: manipulation;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+      }
+      .touch-hud-btn:active {
+        background: #5c4333;
+        transform: scale(0.93);
+      }
+      #touch-tasks-badge,
+      #touch-alerts-badge {
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        background: #e74c3c;
+        color: #fff;
+        font-size: 9px;
+        font-weight: bold;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #14100e;
+      }
+
+      /* Виртуальный джойстик в левом нижнем углу */
+      #touch-joystick-wrap {
+        position: absolute;
+        bottom: 12px;
+        left: 14px;
+        width: 108px;
+        height: 108px;
+        pointer-events: auto;
+        touch-action: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #touch-joystick-base {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(45, 34, 26, 0.78) 0%, rgba(20, 15, 12, 0.92) 100%);
+        border: 2px solid rgba(212, 175, 55, 0.5);
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5);
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: none;
+      }
+      #touch-joystick-knob {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #f1c40f 0%, #d4ac0d 60%, #b7950b 100%);
+        border: 2.5px solid #ffffff;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+        position: absolute;
+        pointer-events: none;
+        transition: transform 0.04s ease-out;
+      }
+      .j-arrow {
+        position: absolute;
+        font-size: 11px;
+        color: rgba(245, 238, 219, 0.55);
+        pointer-events: none;
+        font-weight: bold;
+      }
+      .j-up { top: 6px; }
+      .j-down { bottom: 6px; }
+      .j-left { left: 7px; }
+      .j-right { right: 7px; }
+
+      /* Кластер действий в правом нижнем углу */
+      #touch-actions-wrap {
+        position: absolute;
+        bottom: 12px;
+        right: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        pointer-events: auto;
+        touch-action: none;
+      }
+      #touch-btn-inspect {
+        width: 48px;
+        height: 66px;
+        border-radius: 12px;
+        background: rgba(36, 51, 66, 0.88);
+        border: 2px solid #3498db;
+        color: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: manipulation;
+        font-size: 18px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+      }
+      #touch-btn-inspect.highlighted {
+        border-color: #f1c40f;
+        background: rgba(46, 65, 87, 0.95);
+        box-shadow: 0 0 12px rgba(241, 196, 15, 0.6);
+      }
+      #touch-btn-inspect small {
+        font-size: 9px;
+        font-family: monospace;
+        margin-top: 2px;
+        font-weight: bold;
+      }
+      #touch-btn-action {
+        width: 66px;
+        height: 66px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #27ae60 0%, #1e824c 100%);
+        border: 3px solid #2ecc71;
+        box-shadow: 0 4px 14px rgba(46, 204, 113, 0.4);
+        color: #ffffff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        touch-action: none;
+        transition: transform 0.08s ease, filter 0.08s ease;
+      }
+      #touch-btn-action:active,
+      #touch-btn-action.holding {
+        transform: scale(0.93);
+        filter: brightness(1.2);
+        border-color: #f1c40f;
+        box-shadow: 0 0 18px rgba(241, 196, 15, 0.7);
+      }
+      #touch-action-icon {
+        font-size: 22px;
+        line-height: 1;
+      }
+      #touch-action-label {
+        font-size: 9px;
+        font-weight: bold;
+        font-family: monospace;
+        margin-top: 2px;
+        text-align: center;
+        max-width: 58px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* =========================================================
+         4. ПОРТРЕТНАЯ КОМПОНОВКА (PHONE PORTRAIT)
+         Игровое поле и весь HUD рисуются внутри canvas фиксированного
+         размера (1000×680), wrapper масштабируется целиком с сохранением
+         пропорций. Координаты касаний преобразуются через
+         getBoundingClientRect(), поэтому остаются корректными при любом
+         масштабе. В портрете HTML-слой touch-controls перестраивается в
+         компактную двухстрочную компоновку: строка быстрого доступа
+         (планшет/звук/пауза) сверху, джойстик и кнопки действий — внизу.
+         Все интерактивные элементы сохраняют область касания >= 44 CSS px
+         на типичном телефоне (~390px ширины) и не перекрывают друг друга.
+         ========================================================= */
+      @media (orientation: portrait) {
+        body.portrait-layout #touch-hud-btns {
+          top: 4px;
+          right: 6px;
+          gap: 5px;
+        }
+        body.portrait-layout .touch-hud-btn {
+          width: 44px;
+          height: 44px;
+        }
+        body.portrait-layout #touch-joystick-wrap {
+          bottom: 6px;
+          left: 6px;
+          width: 100px;
+          height: 100px;
+        }
+        body.portrait-layout #touch-joystick-base {
+          width: 92px;
+          height: 92px;
+        }
+        body.portrait-layout #touch-actions-wrap {
+          bottom: 6px;
+          right: 6px;
+          gap: 8px;
+        }
+        body.portrait-layout #touch-btn-inspect {
+          width: 44px;
+          height: 60px;
+        }
+        body.portrait-layout #touch-btn-action {
+          width: 60px;
+          height: 60px;
+        }
+        body.portrait-layout #touch-action-label {
+          max-width: 52px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Основное игровое поле -->
+    <div id="game-wrapper">
+      <canvas id="gameCanvas" width="1000" height="680"></canvas>
+
+      <!-- Сенсорное управление поверх холста -->
+      <div id="touch-controls-layer">
+        <!-- Верхние правые кнопки быстрого доступа к HUD -->
+        <div id="touch-hud-btns">
+          <button id="touch-btn-journal" class="touch-hud-btn" title="Журнал и тревоги (J)">
+            📜<span id="touch-alerts-badge">0</span>
+          </button>
+          <button id="touch-btn-tablet" class="touch-hud-btn" title="Планшет смены (Tab)">
+            📋<span id="touch-tasks-badge">1</span>
+          </button>
+          <button id="touch-btn-sound" class="touch-hud-btn" title="Звук (M)">🔊</button>
+          <button id="touch-btn-pause" class="touch-hud-btn" title="Пауза (P / Esc)">⏸️</button>
+        </div>
+
+        <!-- Нижний левый угол: Виртуальный джойстик движения -->
+        <div id="touch-joystick-wrap">
+          <div id="touch-joystick-base">
+            <span class="j-arrow j-up">▲</span>
+            <span class="j-arrow j-down">▼</span>
+            <span class="j-arrow j-left">◀</span>
+            <span class="j-arrow j-right">▶</span>
+            <div id="touch-joystick-knob"></div>
+          </div>
+        </div>
+
+        <!-- Нижний правый угол: Кнопка действия (SPACE) и осмотра (F) -->
+        <div id="touch-actions-wrap">
+          <button id="touch-btn-inspect" title="Осмотр слонихи (F)">
+            <span>👁️</span>
+            <small>F/ИНСП</small>
+          </button>
+          <button id="touch-btn-action" title="Действие (Пробел / Удержание)">
+            <div id="touch-action-icon">🔨</div>
+            <div id="touch-action-label">SPACE</div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
