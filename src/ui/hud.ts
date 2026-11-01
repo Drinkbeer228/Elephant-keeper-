@@ -79,7 +79,7 @@ export class Hud {
             <li><b>Корм.</b> Каша в 13:00 и 17:00, овощной ужин к 19:00. Пустые тазы — собрать и вымыть.</li>
             <li><b>Тачка.</b> Возит инвентарь, опилки, солому, тюки и мусор. Поставь рядом — и убирай. Три тюка и больше качаются: держи равновесие Q / E.</li>
           </ol>
-          <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd> действие · <kbd>F</kbd> осмотр · <kbd>P</kbd> пауза</p>
+          <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd><kbd>E</kbd> равновесие · <kbd>P</kbd> пауза</p>
           <button class="btn primary big" data-el="introBtn">Заступить на смену</button>
         </div>
       </div>
