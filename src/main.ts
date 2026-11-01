@@ -22,6 +22,10 @@ const hud = new Hud(document.getElementById('hud')!, input, {
   setPaused: (p) => (paused = p),
 });
 if (params.has('bot')) hud.closeIntro();
+// Телефон свернул игру или погас экран — по возвращении ждёт пауза
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !paused && !hud.introOpen) hud.togglePause();
+});
 
 function frame(dt: number): FrameResult {
   const before = availableAction(state);

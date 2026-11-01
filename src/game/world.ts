@@ -111,7 +111,12 @@ export class WorldScene extends Phaser.Scene {
     } else {
       this.follow = true;
       cam.setBounds(0, 0, MAP.w * TILE, MAP.h * TILE);
-      cam.setZoom(Math.max(width / (9.5 * TILE), height / (13 * TILE)));
+      // Телефон боком: видно ~7 клеток в высоту и ~16 в ширину, иначе кипер теряется в кадре
+      cam.setZoom(
+        width > height
+          ? Math.max(height / (7 * TILE), width / (16 * TILE))
+          : Math.max(width / (9.5 * TILE), height / (13 * TILE)),
+      );
     }
   }
 
