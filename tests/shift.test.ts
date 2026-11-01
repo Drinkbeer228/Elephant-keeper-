@@ -86,3 +86,12 @@ describe('кипер', () => {
     expect(walkable(7, 4)).toBe(true);
   });
 });
+
+describe('табель', () => {
+  it('смена без единого кормления — не больше одной звезды, даже если чисто', () => {
+    const s = cleanShift(9);
+    s.t = 1439;
+    advance(s, 2);
+    expect(s.report!.stars).toBe(1);
+  });
+});

@@ -98,7 +98,10 @@ export function finishShift(state: State): Report {
   };
   const lossPenalty = Math.min(15, 5 * losses.length);
   const score = Math.round(Math.max(0, Math.min(100, Object.values(parts).reduce((a, b) => a + b, 0) - lossPenalty)));
-  const stars = score >= BALANCE.score.threeStars ? 3 : score >= BALANCE.score.twoStars ? 2 : 1;
+  // Голодные слонихи — потолок оценки, как бы чисто ни было в слоновнике
+  const mealsMissed = meals.filter((m) => m.statuses.every((x) => x.status === 'missed')).length;
+  const cap = mealsMissed >= 2 ? 1 : mealsMissed === 1 ? 2 : 3;
+  const stars = Math.min(cap, score >= BALANCE.score.threeStars ? 3 : score >= BALANCE.score.twoStars ? 2 : 1) as 1 | 2 | 3;
 
   const report: Report = {
     score,

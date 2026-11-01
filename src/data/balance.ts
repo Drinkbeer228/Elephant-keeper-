@@ -17,6 +17,7 @@ export const BALANCE = {
   player: {
     speed: 3.4, // клеток в реальную секунду
     reach: 1.3, // радиус взаимодействия, клеток
+    stationReach: 0.9, // до края станции
   },
 
   elephant: {

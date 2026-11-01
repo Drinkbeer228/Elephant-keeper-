@@ -18,7 +18,7 @@ export interface ActionOption {
 const REACH = BALANCE.player.reach;
 
 function near(state: State, id: Parameters<typeof nearStation>[0]): boolean {
-  return nearStation(id, state.player.x, state.player.y, REACH);
+  return nearStation(id, state.player.x, state.player.y, BALANCE.player.stationReach);
 }
 
 function nearestElephant(state: State, maxDist = REACH + BALANCE.elephant.radius): Elephant | undefined {
