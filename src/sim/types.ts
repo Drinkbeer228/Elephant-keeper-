@@ -2,7 +2,7 @@ import type { WhyKey } from '../data/why';
 
 export type Phase = 'acceptance' | 'shift' | 'report';
 
-export type CellKind = 'straw' | 'wet' | 'bareWet' | 'sawdust' | 'bare';
+export type CellKind = 'straw' | 'wet' | 'bareWet' | 'sawdust' | 'bare' | 'dung'; // dung — затоптанный навоз
 
 export interface Cell {
   kind: CellKind;
@@ -77,6 +77,8 @@ export interface Elephant {
   lyingInWet: boolean;
   praiseUntil: number;
   begTreats: number;
+  dirtyFeet: number; // сколько клеток ещё испачкает следами
+  lastCell: string;
   tally: Tally;
   targetItem?: number;
   signalStarted?: number;
@@ -179,7 +181,7 @@ export interface State {
 export type Command =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'balance'; dir: -1 | 1 }
-  | { type: 'action' }
+  | { type: 'action'; choice?: number }
   | { type: 'inspect' }
   | { type: 'toggleCheck'; id: ChecklistId; value: boolean }
   | { type: 'acceptShift' };

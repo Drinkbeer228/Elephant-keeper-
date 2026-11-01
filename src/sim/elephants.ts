@@ -70,10 +70,11 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     e.bowel = 0;
     e.tally.dung++;
     state.dung.push({ id: state.nextItemId++, x: e.x, y: e.y + 0.5, at: state.t });
-    hint(state, 'dung', 'Навоз убирают сразу, пока слонихи в нём не стоят. Удобнее всего — с тачкой: в ней совок, вилы и метла.');
+    hint(state, 'dung', 'Навоз убирают совком. Свежий слонихи обходят, залежавшийся — затопчут.');
   }
 
   if (e.bladder >= 100 && e.signalStarted === undefined) startSignal(state, e, p);
+  trample(state, e);
 
   switch (e.state) {
     case 'walk': {
@@ -97,14 +98,18 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     case 'eatHay': {
       const eat = Math.min(E.hayFeederPerMinute * dt, state.feederHay);
       state.feederHay -= eat;
+      const before = e.hunger;
       e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
+      e.bowel += (before - e.hunger) * E.eatToBowel;
       e.boredom = clamp(e.boredom - 0.1 * dt);
       e.timer -= dt;
       if (e.timer <= 0 || e.hunger < 5 || state.feederHay <= 0) decide(state, e);
       break;
     }
     case 'drink': {
+      const before = e.thirst;
       e.thirst = clamp(e.thirst - E.drinkPerMinute * dt);
+      e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
       state.trough = Math.max(0, state.trough - E.troughPerMinute * dt);
       e.timer -= dt;
       if (e.timer <= 0 || e.thirst < 5 || state.trough <= 0) decide(state, e);
@@ -133,6 +138,28 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
   }
 }
 
+// Свежий навоз слонихи обходят. Залежавшийся — затаптывают и разносят следами по подстилке
+function trample(state: State, e: Elephant): void {
+  if (e.state === 'sleep') return;
+  const pile = state.dung.find((d) => state.t - d.at > E.dungTolerance && dist(e, d) < 0.75);
+  if (pile) {
+    state.dung = state.dung.filter((d) => d !== pile);
+    const ref = cellAt(state, pile.x, pile.y);
+    if (ref) state.cells[ref.cy][ref.cx] = { kind: 'dung', since: state.t };
+    e.dirtyFeet = E.trackCells;
+    hint(state, 'trampled', 'Залежавшийся навоз затоптали — теперь по подстилке пойдут следы.');
+  }
+  const ref = cellAt(state, e.x, e.y);
+  if (!ref) return;
+  const key = `${ref.cx},${ref.cy}`;
+  if (key === e.lastCell) return;
+  e.lastCell = key;
+  if (e.dirtyFeet > 0 && ref.cell.kind !== 'dung') {
+    e.dirtyFeet--;
+    if (chance(state, 0.7)) state.cells[ref.cy][ref.cx] = { kind: 'dung', since: state.t };
+  }
+}
+
 function clamp(v: number): number {
   return Math.min(100, Math.max(0, v));
 }
@@ -143,8 +170,7 @@ function startSignal(state: State, e: Elephant, p: ElephantProfile): void {
     pee(state, e);
     return;
   }
-  hint(state, `signal-${p.id}`, p.signalHint);
-  emit(state, { kind: 'info', text: `${p.name}: ${p.signalText}`, elephantId: e.id });
+  emit(state, { kind: 'info', text: `${p.name} просится`, elephantId: e.id });
   if (p.signal === 'fenceStare') {
     walkTo(e, e.x, MAP.fenceY - 0.6, 'signal');
   } else {
@@ -166,7 +192,7 @@ export function pee(state: State, e: Elephant): void {
     bucket.dirty = true;
     e.tally.inBucket++;
     e.praiseUntil = state.t + E.praiseWindow;
-    emit(state, { kind: 'good', text: `${p.name} — в бак! Угости её, пока помнит за что.`, elephantId: e.id });
+    emit(state, { kind: 'good', text: `${p.name} — в бак!`, elephantId: e.id });
   } else {
     wetAround(state, e.x, e.y, E.peeWetRadius);
     e.tally.missed++;
@@ -239,7 +265,9 @@ function finishBasin(state: State, e: Elephant, p: ElephantProfile): void {
   const basin = ownBasin(state, e);
   if (basin) {
     const leftover = basin.food === 'kasha' && chance(state, p.leftoverChance);
+    const before = e.hunger;
     e.hunger = clamp(e.hunger - (leftover ? E.mealHunger / 2 : E.mealHunger));
+    e.bowel += (before - e.hunger) * E.eatToBowel;
     e.boredom = clamp(e.boredom - 5);
     if (leftover) emit(state, { kind: 'info', text: `${p.name} оставила полтаза каши. Врачу это важно.`, elephantId: e.id });
     basin.food = null;
@@ -306,24 +334,23 @@ export function decide(state: State, e: Elephant): void {
     }
   }
   if (chance(state, 0.6)) {
-    walkTo(e, randomRange(state, BOUNDS.x0, BOUNDS.x1), randomRange(state, BOUNDS.y0, BOUNDS.y1), 'idle');
+    let x = randomRange(state, BOUNDS.x0, BOUNDS.x1);
+    let y = randomRange(state, BOUNDS.y0, BOUNDS.y1);
+    for (let i = 0; i < 6 && state.dung.some((d) => Math.hypot(d.x - x, d.y - y) < 1.4); i++) {
+      x = randomRange(state, BOUNDS.x0, BOUNDS.x1);
+      y = randomRange(state, BOUNDS.y0, BOUNDS.y1);
+    }
+    walkTo(e, x, y, 'idle');
   } else {
     e.state = 'idle';
     e.timer = randomRange(state, 3, 8);
   }
 }
 
+// Лакомство — только за бак: доверие растёт, скуки меньше
 export function treat(state: State, e: Elephant): void {
-  const p = profileOf(e);
-  if (state.t <= e.praiseUntil) {
-    e.trust = clamp(e.trust + E.treatTrust);
-    e.boredom = clamp(e.boredom + E.treatBoredom);
-    e.praiseUntil = -1;
-    emit(state, { kind: 'good', text: `${p.name} получила лакомство за бак. Доверие растёт.`, elephantId: e.id });
-  } else {
-    e.begTreats++;
-    state.stats.begTreats++;
-    e.boredom = clamp(e.boredom - 2);
-    emit(state, { kind: 'bad', text: `${p.name} взяла лакомство просто так — теперь будет выпрашивать.`, why: 'begTreat', elephantId: e.id });
-  }
+  if (state.t > e.praiseUntil) return;
+  e.trust = clamp(e.trust + E.treatTrust);
+  e.boredom = clamp(e.boredom + E.treatBoredom);
+  e.praiseUntil = -1;
 }

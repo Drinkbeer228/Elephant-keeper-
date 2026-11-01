@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { inBedding, inReachZone, nearStation } from '../data/map';
+import { MAP, inBedding, inReachZone, nearStation } from '../data/map';
 import { WHY } from '../data/why';
 import { emit, hint } from './events';
 import { countWet } from './floor';
@@ -24,6 +24,23 @@ export interface Report {
   begTreats: number;
 }
 
+// Источники вони: залежавшийся навоз, затоптанное, бак с мочой, грязные тазы
+export function stinkSources(state: State): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (const d of state.dung) if (state.t - d.at > 20) out.push(d);
+  state.cells.forEach((row, cy) =>
+    row.forEach((c, cx) => {
+      if (c.kind === 'dung') out.push({ x: MAP.bedding.x + cx + 0.5, y: MAP.bedding.y + cy + 0.5 });
+    }),
+  );
+  for (const i of state.items) {
+    if ((i.kind === 'bucket' && (i.liters ?? 0) > 0) || (i.kind === 'basin' && !i.food && i.eatenAt !== undefined)) {
+      if (state.t - i.droppedAt > 10) out.push(i);
+    }
+  }
+  return out;
+}
+
 export function acceptShift(state: State): void {
   if (state.phase !== 'acceptance') return;
   state.phase = 'shift';
@@ -33,7 +50,7 @@ export function acceptShift(state: State): void {
     kind: 'info',
     text: defects ? `Смена принята. Косяков сменщика найдено: ${found} из ${defects}.` : 'Смена принята.',
   });
-  hint(state, 'start', 'С утра — ночная грязь. Тачка во дворе у сенника: прикати её к стойке, сложи инвентарь, и в слоновник.');
+  hint(state, 'start', 'Тачка — у стойки инвентаря. Всё, что взял, верни на место до сдачи.');
 }
 
 // Пункты чек-листа, которые сейчас не в порядке
@@ -56,11 +73,15 @@ export function finishShift(state: State): Report {
   const problems = checklistProblems(state);
   const remarks = state.checklist.filter((c) => problems.includes(c.id)).map((c) => `✗ ${c.label}`);
   if (countWet(state) > H.wetCellsRemark) remarks.push('Мокрая подстилка');
-  if (state.dung.length > 0) remarks.push(`Не убран навоз (${state.dung.length})`);
+  const trampled = state.cells.flat().filter((c) => c.kind === 'dung').length;
+  if (state.dung.length + trampled > 0) remarks.push(`Не убран навоз (${state.dung.length + trampled})`);
+  if (stinkSources(state).length >= 5) remarks.push('Мухи и вонь');
   if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
   if (state.items.some((i) => i.kind === 'basin')) remarks.push('Тазы не убраны');
   if (state.barrow.waste > 0) remarks.push('Тачка с мусором не вывезена');
+  if (state.barrow.pushed || Math.hypot(state.barrow.x - MAP.barrowStart.x, state.barrow.y - MAP.barrowStart.y) > 1.5) remarks.push('Тачка не на месте');
+  if (state.barrow.tools.length) remarks.push('Инвентарь брошен в тачке');
 
   const pees = state.elephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
   const inBucket = pees.reduce((s, p) => s + p.inBucket, 0);

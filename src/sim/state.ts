@@ -114,6 +114,8 @@ function createElephant(p: (typeof ELEPHANTS)[number]): Elephant {
     lyingInWet: false,
     praiseUntil: -1,
     begTreats: 0,
+    dirtyFeet: 0,
+    lastCell: '',
     tally: { inBucket: 0, missed: 0, dung: 0 },
   };
 }

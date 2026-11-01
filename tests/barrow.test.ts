@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { advance, tick } from '../src/sim';
 import { cellAt, setCell } from '../src/sim/floor';
 import { BALANCE } from '../src/data/balance';
-import { act, at, cleanShift, el, hold } from './helpers';
+import { MAP } from '../src/data/map';
+import { act, at, cleanShift, el, hold, stand } from './helpers';
 
 function push(s: ReturnType<typeof cleanShift>, dx: number, dy: number, seconds: number, balance?: -1 | 1): void {
   for (let i = 0; i < seconds * 30; i++) {
@@ -13,13 +14,13 @@ function push(s: ReturnType<typeof cleanShift>, dx: number, dy: number, seconds:
 }
 
 describe('тачка', () => {
-  it('взять тачку, сложить инвентарь со стойки, вернуть обратно', () => {
+  it('везти тачку от её места к стойке, сложить инвентарь, вернуть обратно', () => {
     const s = cleanShift();
-    s.barrow.x = 3.5;
-    s.barrow.y = 10.9;
-    at(s, 3.5, 10.2);
-    expect(act(s)).toMatch(/^Взять тачку/);
+    at(s, MAP.barrowStart.x, MAP.barrowStart.y - 0.8);
+    expect(act(s)).toBe('Везти тачку');
     expect(s.barrow.pushed).toBe(true);
+    Object.assign(s.barrow, { x: 1.6, y: 12.2 });
+    at(s, 2.4, 12.2);
     expect(act(s)).toBe('Сложить инвентарь в тачку');
     expect(s.barrow.tools.sort()).toEqual(['broom', 'fork', 'scoop']);
     expect(s.items.some((i) => i.kind === 'scoop')).toBe(false);
@@ -28,27 +29,40 @@ describe('тачка', () => {
     expect(s.items.filter((i) => ['scoop', 'fork', 'broom'].includes(i.kind))).toHaveLength(3);
   });
 
-  it('тачка рядом — уборка без беготни: навоз, мокрое, опилки, метла, солома', () => {
+  it('из стоящей тачки берут инструмент, убирают в неё и кладут инструмент обратно', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
     Object.assign(s.barrow, { x: 5, y: 4, pushed: false, tools: ['scoop', 'fork', 'broom'], sawdust: 8, straw: 8, parkedAt: 0 });
     s.dung.push({ id: 900, x: 3.5, y: 3.5, at: 0 });
     setCell(s, 2, 2, 'wet');
+    at(s, 4.4, 4);
+    expect(act(s, 'Взять: совок')).toMatch(/совок/);
+    expect(s.player.held?.kind).toBe('scoop');
     at(s, 3.5, 3.6);
-    expect(act(s)).toBe('Совком — навоз в тачку');
-    expect(act(s)).toBe('Вилами — мокрую солому в тачку');
-    expect(act(s)).toBe('Засыпать опилками из тачки');
-    expect(act(s)).toBe('Опилки ещё впитывают');
+    expect(act(s)).toBe('Убрать навоз в тачку');
+    at(s, 4.4, 4);
+    expect(act(s)).toBe('Положить в тачку: совок со скребком');
+    expect(act(s, 'Взять: вилы')).toBe('Взять: вилы');
+    at(s, 3.5, 3.6);
+    expect(act(s)).toBe('Убрать мокрую солому в тачку');
+    at(s, 4.4, 4);
+    act(s);
+    expect(act(s, 'Взять ведро опилок')).toMatch(/опилок/);
+    at(s, 3.5, 3.6);
+    expect(act(s)).toBe('Засыпать опилками');
     advance(s, 21);
-    expect(act(s)).toBe('Метлой — опилки в тачку');
-    expect(act(s)).toBe('Постелить солому из тачки');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('straw');
+    at(s, 4.4, 4);
+    expect(act(s)).toMatch(/^Вернуть в тачку: ведро опилок/);
+    act(s, 'Взять: метл');
+    at(s, 3.5, 3.6);
+    expect(act(s)).toBe('Вымести опилки в тачку');
+    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('bare');
     expect(s.barrow.waste).toBe(3);
   });
 
   it('тачка едет перед кипером и не проходит сквозь ограждение', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 4, y: 11, pushed: true });
+    Object.assign(s.barrow, { x: 3, y: 10.4, pushed: true });
     at(s, 3, 11);
     push(s, 0, -1, 1.5);
     // упёрлись в ограждение — дальше не пускает
@@ -59,8 +73,8 @@ describe('тачка', () => {
   it('три тюка раскачиваются: без балансировки падают, с ней доезжают', () => {
     const ride = (steer: boolean) => {
       const s = cleanShift(3);
-      Object.assign(s.barrow, { x: 17, y: 11.5, pushed: true, bales: 3 });
-      at(s, 16, 11.5);
+      Object.assign(s.barrow, { x: 8, y: 10.4, pushed: true, bales: 3 });
+      at(s, 7, 10.4);
       for (let i = 0; i < 30 * 6; i++) {
         const dir = (i % 60 < 30 ? -1 : 1) as -1 | 1;
         const cmds: Parameters<typeof tick>[2] = [{ type: 'move', dx: dir, dy: 0 }];
@@ -76,8 +90,8 @@ describe('тачка', () => {
 
   it('два тюка едут спокойно', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 17, y: 11.5, pushed: true, bales: 2 });
-    at(s, 16, 11.5);
+    Object.assign(s.barrow, { x: 8, y: 10.4, pushed: true, bales: 2 });
+    at(s, 7, 10.4);
     push(s, -1, 0, 3);
     expect(s.barrow.bales).toBe(2);
   });
@@ -108,8 +122,8 @@ describe('тачка', () => {
 
 describe('мусорный бак', () => {
   const atBox = (s: ReturnType<typeof cleanShift>) => {
-    at(s, 14.2, 13.4);
-    Object.assign(s.barrow, { x: 14.2, y: 14.1, pushed: true });
+    stand(s, 'dump');
+    Object.assign(s.barrow, { x: MAP.stations.dump.x, y: s.player.y + 0.6, pushed: true });
   };
 
   it('пока не наполовину — заезжаешь и высыпаешь', () => {
@@ -128,14 +142,14 @@ describe('мусорный бак', () => {
     s.barrow.waste = 5;
     expect(act(s)).toMatch(/закрой дверцу/);
     s.barrow.pushed = false;
-    s.barrow.x = 11;
+    s.barrow.x = 15;
     expect(act(s)).toBe('Закрыть дверцу бака');
     expect(act(s)).toBe('Поставить трап к баку');
     atBox(s);
     expect(act(s)).toBe('Поднять по трапу и высыпать тачку');
     s.container.fill = BALANCE.container.capacity;
     s.barrow.pushed = false;
-    s.barrow.x = 11;
+    s.barrow.x = 15;
     expect(act(s)).toBe('Позвонить: вывезти мусорный бак');
     advance(s, BALANCE.container.truckDelay + 1);
     expect(s.container.fill).toBe(0);
@@ -161,7 +175,7 @@ describe('туалет и слив', () => {
     at(s, margo.x, margo.y + 0.2);
     act(s);
     expect(s.player.held?.kind).toBe('bucket');
-    at(s, 5.1, 10.6);
+    stand(s, 'drain');
     expect(act(s)).toBe('Вылить бак в слив');
     expect(s.player.held?.liters).toBe(0);
   });

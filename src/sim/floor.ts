@@ -71,7 +71,8 @@ export function footHarm(state: State, x: number, y: number): number {
   const ref = cellAt(state, x, y);
   if (!ref) return 0;
   const f = BALANCE.footDebt;
-  let harm = isWet(ref.cell) ? f.wet : ref.cell.kind === 'sawdust' ? f.sawdust : ref.cell.kind === 'bare' ? f.bare : f.straw;
+  const k = ref.cell.kind;
+  let harm = k === 'dung' ? f.trampled : isWet(ref.cell) ? f.wet : k === 'sawdust' ? f.sawdust : k === 'bare' ? f.bare : f.straw;
   if (state.dung.some((d) => Math.hypot(d.x - x, d.y - y) < 0.9)) harm += f.dung;
   return harm;
 }

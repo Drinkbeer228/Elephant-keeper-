@@ -79,11 +79,20 @@ describe('вещи у ограждения', () => {
 });
 
 describe('кипер', () => {
-  it('через ограждение не пройти, через проход — можно', () => {
-    expect(walkable(4, 9)).toBe(false);
-    expect(walkable(7, 9)).toBe(true);
+  it('через ограждение не пройти; человеку — проход, слону — ворота, когда открыты', () => {
+    expect(walkable(3, 9)).toBe(false);
+    expect(walkable(5, 9)).toBe(true);
+    expect(walkable(10.2, 9)).toBe(false);
+    expect(walkable(10.2, 9, true)).toBe(true);
     expect(walkable(13, 5)).toBe(false);
     expect(walkable(7, 4)).toBe(true);
+  });
+
+  it('в комнаты — через двери, сквозь стены нельзя', () => {
+    expect(walkable(10.5, 11.6)).toBe(false);
+    expect(walkable(12.4, 11.6)).toBe(true);
+    expect(walkable(16, 13)).toBe(false);
+    expect(walkable(18.1, 11.6)).toBe(true);
   });
 });
 

@@ -27,7 +27,6 @@ export function renderReport(r: Report): string {
           r.acceptance.missed.length ? `<div>Пропустил: ${r.acceptance.missed.join(', ')}</div>` : ''
         }${r.acceptance.nitpicks.length ? `<div>Придрался зря: ${r.acceptance.nitpicks.join(', ')}</div>` : ''}</td></tr>
         <tr><th>Замечания</th><td>${r.remarks.length ? r.remarks.map((x) => `<div>${x.replace(/^✗ /, `<span class="cross">${ICON.cross}</span> `)}</div>`).join('') : 'нет — чистая сдача'}</td></tr>
-        ${r.begTreats ? `<tr><th>Лакомства просто так</th><td>${r.begTreats}</td></tr>` : ''}
       </table>
       <button class="btn primary big" data-restart>Ещё смена</button>
     </div>`;

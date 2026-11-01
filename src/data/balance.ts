@@ -30,7 +30,11 @@ export const BALANCE = {
     praiseWindow: 10, // сколько минут после «в бак» лакомство считается заслуженным
     walkCommandDelay: 1, // «Давай гуляй»: через сколько минут сходит в бак
     walkCommandMinBladder: 50,
-    bowelPerMinute: 1 / 240,
+    bowelPerMinute: 1 / 400, // фон; остальное — от еды
+    drinkToBladder: 0.55, // выпитое → пузырь
+    eatToBowel: 0.5, // съеденное → кишечник
+    dungTolerance: 90, // столько минут свежий навоз обходят, потом затаптывают
+    trackCells: 3, // сколько клеток разнесёт на ногах
     hungerPerMinute: 0.12,
     thirstPerMinute: 0.15,
     boredomPerMinute: 0.08,
@@ -77,6 +81,7 @@ export const BALANCE = {
     // В минуту, пока слониха стоит на клетке такого вида; лёжа — вдвое
     wet: 1.0,
     dung: 0.5,
+    trampled: 1.5, // затоптанный навоз: и мокро, и аммиак
     sawdust: 0.1,
     bare: 0.1,
     lyingFactor: 1.5,

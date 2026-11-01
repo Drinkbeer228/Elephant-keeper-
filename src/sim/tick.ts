@@ -27,8 +27,11 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
         balanceInput += c.dir;
         break;
       case 'action': {
+        // У действия может быть меню (тачка): тогда выбирают пункт по номеру
         const a = availableAction(state);
-        a?.run(state);
+        if (a?.choices) {
+          if (c.choice !== undefined) a.choices[c.choice]?.run(state);
+        } else a?.run(state);
         break;
       }
       case 'inspect':
@@ -84,14 +87,23 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   if (state.t >= BALANCE.time.shiftEnd) finishShift(state);
 }
 
-// Стены и ограждение: через ограждение — только в проходе
-export function walkable(x: number, y: number): boolean {
+function segDist(x: number, y: number, w: { x0: number; y0: number; x1: number; y1: number }): number {
+  const dx = w.x1 - w.x0;
+  const dy = w.y1 - w.y0;
+  const t = Math.max(0, Math.min(1, ((x - w.x0) * dx + (y - w.y0) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(x - (w.x0 + t * dx), y - (w.y0 + t * dy));
+}
+
+// Стены, ограждение, стены комнат. В подстилку — через проход для человека или открытые ворота
+export function walkable(x: number, y: number, gateOpen = false): boolean {
   if (x < 0.4 || y < 0.4 || x > MAP.w - 0.4 || y > MAP.h - 0.4) return false;
   if (x < MAP.bedding.x + 0.3 && y < MAP.fenceY + 0.3) return false;
   if (y < MAP.bedding.y + 0.3 && x < MAP.fenceX + 0.3) return false;
-  const inGate = x > MAP.gate.x0 + 0.3 && x < MAP.gate.x1 - 0.3;
-  if (Math.abs(y - MAP.fenceY) < 0.3 && x < MAP.fenceX + 0.3 && !inGate) return false;
+  const inDoor = x > MAP.door.x0 + 0.3 && x < MAP.door.x1 - 0.3;
+  const inGate = gateOpen && x > MAP.elephantGate.x0 + 0.3 && x < MAP.elephantGate.x1 - 0.3;
+  if (Math.abs(y - MAP.fenceY) < 0.3 && x < MAP.fenceX + 0.3 && !inDoor && !inGate) return false;
   if (Math.abs(x - MAP.fenceX) < 0.3 && y < MAP.fenceY + 0.3) return false;
+  for (const w of MAP.walls) if (segDist(x, y, w) < 0.3) return false;
   return true;
 }
 
@@ -110,9 +122,10 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number): { mov
   let off = { x: b.x - p.x, y: b.y - p.y };
   if (pushed) {
     const want = barrowOffset(p.facing);
-    if (walkable(p.x + want.x, p.y + want.y)) off = want;
+    if (walkable(p.x + want.x, p.y + want.y, state.gateOpen)) off = want;
   }
-  const ok = (x: number, y: number) => walkable(x, y) && (!pushed || walkable(x + off.x, y + off.y));
+  const g = state.gateOpen;
+  const ok = (x: number, y: number) => walkable(x, y, g) && (!pushed || walkable(x + off.x, y + off.y, g));
   const x0 = p.x;
   const y0 = p.y;
   if (ok(p.x + nx * step, p.y)) p.x += nx * step;

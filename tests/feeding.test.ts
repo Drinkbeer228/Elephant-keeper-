@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { advance } from '../src/sim';
 import { mealStatus } from '../src/sim/feeding';
 import { profileOf } from '../src/sim/elephants';
-import { act, at, cleanShift, hold } from './helpers';
+import { act, at, cleanShift, hold, stand } from './helpers';
 
 function serveKasha(s: ReturnType<typeof cleanShift>): void {
-  at(s, 16.5, 11);
+  stand(s, 'kitchen');
   expect(act(s)).toBe('Взять тазы с кашей (3)');
   for (const e of s.elephants) {
     const slot = profileOf(e).slot;
@@ -18,7 +18,7 @@ describe('корм', () => {
   it('каша: раньше 12:00 не запарить, в 12:40 — готова к 13:00, подана вовремя', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
-    at(s, 16.5, 11);
+    stand(s, 'kitchen');
     advance(s, 200); // 11:20
     expect(act(s)).toMatch(/Кормовая: каша в 13:00/);
     advance(s, 80); // 12:40
@@ -32,7 +32,7 @@ describe('корм', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
     advance(s, 300);
-    at(s, 16.5, 11);
+    stand(s, 'kitchen');
     act(s);
     advance(s, 21);
     advance(s, 5);
@@ -56,7 +56,7 @@ describe('корм', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
     advance(s, 365); // 14:05, утренняя каша уже не актуальна
-    at(s, 16.5, 11);
+    stand(s, 'kitchen');
     const labels: string[] = [];
     for (let i = 0; i < 5; i++) {
       let label = act(s)!;
@@ -78,12 +78,12 @@ describe('корм', () => {
   it('слониха сама идёт к тазу и съедает', () => {
     const s = cleanShift();
     advance(s, 280);
-    at(s, 16.5, 11);
+    stand(s, 'kitchen');
     act(s);
     advance(s, 21);
     const audrey = s.elephants.find((e) => e.id === 'audrey')!;
     audrey.hunger = 80;
-    at(s, 16.5, 11);
+    stand(s, 'kitchen');
     act(s);
     at(s, 3.5, 9.2);
     act(s);
@@ -105,7 +105,7 @@ describe('тазы стопкой', () => {
     expect(act(s)).toBe('Взять: пустой таз');
     at(s, 4.3, 8.5);
     expect(act(s)).toBe('Взять ещё пустой таз (будет 2)');
-    at(s, 9.8, 12.5);
+    stand(s, 'wash');
     expect(act(s)).toBe('Вымыть тазы (2)');
     expect(s.kitchen.cleanBasins).toBe(clean + 2);
   });

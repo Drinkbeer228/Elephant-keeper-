@@ -22,36 +22,27 @@ interface Step {
   timeout?: number; // тиков
 }
 
-const GATE_IN = { x: 7, y: 8.3 };
-const GATE_OUT = { x: 7, y: 9.8 };
-const CORNER = { x: 14.3, y: 10 };
-const PARK_BUCKET = { x: 7.6, y: 10.9 };
-const PARK_BAG = { x: 9, y: 11 };
-const SAFE = { x: 8.4, y: 12.2 };
+const PARK_BUCKET = { x: 7.6, y: 10.6 };
+const PARK_BAG = { x: 8.6, y: 10.6 };
+const SAFE = { x: 7.0, y: 12.6 };
 const AT = {
-  rack: { x: 3.5, y: 10.9 },
-  sawdust: { x: 6.6, y: 10.9 },
-  bags: { x: 2.4, y: 12.9 },
-  wash: { x: 9.8, y: 12.5 },
-  kitchen: { x: 16.5, y: 11.2 },
-  hay: { x: 18.6, y: 3.5 },
-  straw: { x: 18.6, y: 6.2 },
-  dump: { x: 14.2, y: 13.4 },
-  drain: { x: 5.1, y: 11.0 },
+  rack: { x: 1.7, y: 12.3 },
+  sawdust: { x: 4.4, y: 14.4 },
+  bags: { x: 5.8, y: 14.4 },
+  wash: { x: 15.0, y: 13.2 },
+  kitchen: { x: 19.2, y: 12.4 },
+  hay: { x: 18.6, y: 3.2 },
+  straw: { x: 18.6, y: 5.8 },
+  dump: { x: 19.9, y: 7.1 },
+  drain: { x: 12.4, y: 14.0 },
   valve: { x: 14.4, y: 2.4 },
-  fencePanel: { x: 14.6, y: 10.6 },
-  gate: { x: 7, y: 10.2 },
+  fencePanel: { x: 3.3, y: 9.8 },
+  gate: { x: 10.2, y: 10.0 },
   feeder: { x: 2.4, y: 2.6 },
 };
 
 function d(a: P, b: P): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-type Zone = 'in' | 'bottom' | 'right';
-function zone(p: P): Zone {
-  if (p.x < MAP.fenceX && p.y < MAP.fenceY) return 'in';
-  return p.y >= MAP.fenceY ? 'bottom' : 'right';
 }
 
 function clear(a: P, b: P): boolean {
@@ -62,21 +53,71 @@ function clear(a: P, b: P): boolean {
   return true;
 }
 
+// Поиск пути по сетке 0.5 клетки (стены, ограждение, двери)
+const G = 0.5;
+const GW = Math.round(MAP.w / G);
+const GH = Math.round(MAP.h / G);
+const open: boolean[] = [];
+for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) open.push(walkable((gx + 0.5) * G, (gy + 0.5) * G));
+
+function node(p: P): number {
+  const gx = Math.max(0, Math.min(GW - 1, Math.floor(p.x / G)));
+  const gy = Math.max(0, Math.min(GH - 1, Math.floor(p.y / G)));
+  return gy * GW + gx;
+}
+
+function astar(from: P, to: P): P[] {
+  const start = node(from);
+  const goal = node(to);
+  const g = new Map<number, number>([[start, 0]]);
+  const came = new Map<number, number>();
+  const frontier: [number, number][] = [[0, start]];
+  const h = (n: number) => Math.hypot((n % GW) - (goal % GW), Math.floor(n / GW) - Math.floor(goal / GW));
+  while (frontier.length) {
+    frontier.sort((a, b) => a[0] - b[0]);
+    const [, cur] = frontier.shift()!;
+    if (cur === goal) break;
+    const cx = cur % GW;
+    const cy = Math.floor(cur / GW);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        const n = ny * GW + nx;
+        if (!open[n] && n !== goal) continue;
+        if (dx && dy && (!open[cy * GW + nx] || !open[ny * GW + cx])) continue;
+        const cost = (g.get(cur) ?? 0) + (dx && dy ? 1.414 : 1);
+        if (cost < (g.get(n) ?? Infinity)) {
+          g.set(n, cost);
+          came.set(n, cur);
+          frontier.push([cost + h(n), n]);
+        }
+      }
+  }
+  const path: P[] = [to];
+  let n = goal;
+  while (came.has(n)) {
+    n = came.get(n)!;
+    if (n !== start) path.unshift({ x: ((n % GW) + 0.5) * G, y: (Math.floor(n / GW) + 0.5) * G });
+  }
+  return path;
+}
+
+const routes = new Map<string, P[]>();
 function route(from: P, to: P): P[] {
-  const a = zone(from);
-  const b = zone(to);
-  const ways: Record<string, P[]> = {
-    'in-bottom': [GATE_IN, GATE_OUT],
-    'bottom-in': [GATE_OUT, GATE_IN],
-    'bottom-right': [CORNER],
-    'right-bottom': [CORNER],
-    'in-right': [GATE_IN, GATE_OUT, CORNER],
-    'right-in': [CORNER, GATE_OUT, GATE_IN],
-  };
-  const points = a === b ? [to] : [...ways[`${a}-${b}`], to];
-  // Срезать углы: если до следующей точки путь свободен, текущую пропускаем
-  while (points.length > 1 && clear(from, points[1])) points.shift();
-  return points;
+  if (clear(from, to)) return [to];
+  const key = `${node(from)}-${node(to)}`;
+  let path = routes.get(key);
+  if (!path) {
+    path = astar(from, to);
+    if (routes.size > 2000) routes.clear();
+    routes.set(key, path);
+  }
+  const pts = [...path];
+  while (pts.length > 1 && clear(from, pts[1])) pts.shift();
+  return pts;
 }
 
 function cellCenter(cx: number, cy: number): P {
@@ -150,7 +191,9 @@ export class Bot {
       return [];
     }
 
-    if (d(p, target) > 0.25 && !(this.pressed && st.done)) return this.move(target);
+    // Подсказка уже нужная и цель рядом — жмём, не дожидаясь точного места (как человек)
+    const close = st.expect && !st.wait && d(p, target) < 1.0 && st.expect.test(availableAction(s)?.label ?? '');
+    if (d(p, target) > 0.25 && !close && !(this.pressed && st.done)) return this.move(target);
 
     if (st.wait) {
       return st.wait() ? this.next() : [];
@@ -455,6 +498,8 @@ export class Bot {
     if (s.dung.length) {
       return ['dung', this.bagged('scoop', s.dung.map((x) => ({ x: x.x, y: x.y })), /Убрать навоз в мешок/)];
     }
+    const trampled = cells.filter((c) => c.kind === 'dung' && awayFromElephants(c.p)).map((c) => c.p);
+    if (trampled.length) return ['trampled', this.bagged('scoop', trampled, /Счистить затоптанный навоз/)];
     const wet = cells.filter((c) => c.kind === 'wet' && awayFromElephants(c.p)).map((c) => c.p);
     if (wet.length) return ['wet', this.bagged('fork', wet, /Убрать мокрую солому/)];
     const bareWet = cells.filter((c) => c.kind === 'bareWet' && awayFromElephants(c.p)).map((c) => c.p);
