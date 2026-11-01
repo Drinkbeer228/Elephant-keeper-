@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { advance, createShift, walkable } from '../src/sim';
 import { MAP, inPaddock } from '../src/data/map';
 import { pee } from '../src/sim/elephants';
-import { countWet } from '../src/sim/floor';
+import { cellAt, countWet } from '../src/sim/floor';
+import { BALANCE } from '../src/data/balance';
+import { newItem } from '../src/sim/state';
 import { nearContainer } from '../src/sim/barrow';
 import { act, at, cleanShift, driveTo, el, hold } from './helpers';
 import { reachPoint, route } from '../src/dev/bot';
@@ -30,7 +32,15 @@ describe('карта-комплекс', () => {
     expect(walkable(7.1, 11.4)).toBe(true); // мойка
     expect(walkable(11.8, 11.4)).toBe(true); // кормовая
     expect(walkable(12.0, 15.6)).toBe(false); // задняя стена
-    expect(walkable(13.7, 15.6)).toBe(true); // задняя дверь кормовой
+    expect(walkable(13.7, 15.6)).toBe(false); // задняя дверь кормовой закрыта до поставок (этап 2)
+  });
+
+  it('вольер — от левого края карты до правой решётки', () => {
+    expect(inPaddock(0.5, 5)).toBe(true);
+    expect(walkable(0.6, 5)).toBe(true);
+    expect(walkable(0.2, 5)).toBe(false);
+    expect(MAP.bedding.x).toBe(0);
+    expect(MAP.bedding.cols).toBe(13);
   });
 
   it('трава — часть вольера, дорожка — нет', () => {
@@ -51,13 +61,49 @@ describe('карта-комплекс', () => {
     expect(maxX).toBeGreaterThan(MAP.bedding.x + MAP.bedding.cols);
   });
 
-  it('моча на траве: промах засчитан, подстилка не мокнет', () => {
+  it('моча на траве: промах засчитан, на лугу лужа, подстилка не мокнет', () => {
     const s = cleanShift();
     const e = el(s, 'pretty');
     hold(e, 17, 5);
     pee(s, e);
     expect(e.tally.missed).toBe(1);
     expect(countWet(s)).toBe(0);
+    expect(cellAt(s, 17, 5)!.cell.kind).toBe('puddle');
+  });
+
+  it('на лугу бак под слонихой работает так же, как на подстилке', () => {
+    const s = cleanShift();
+    const e = el(s, 'pretty');
+    hold(e, 17, 5);
+    s.items.push({ ...newItem(s, 'bucket', { liters: 0 }), x: 17, y: 5 });
+    pee(s, e);
+    expect(e.tally.inBucket).toBe(1);
+    expect(cellAt(s, 17, 5)!.cell.kind).toBe('grass');
+  });
+
+  it('лужа на траве впитывается сама', () => {
+    const s = cleanShift();
+    s.elephants.forEach((e) => hold(e, 3, 3));
+    const ref = cellAt(s, 17, 5)!;
+    s.cells[ref.cy][ref.cx] = { kind: 'puddle', since: 0 };
+    advance(s, BALANCE.floor.puddleDry + 1);
+    expect(cellAt(s, 17, 5)!.cell.kind).toBe('grass');
+  });
+
+  it('навоз на лугу затаптывают, совком счищают до травы', () => {
+    const s = cleanShift();
+    s.elephants.forEach((e) => hold(e, 3, 3));
+    const e = el(s, 'margo');
+    s.dung.push({ id: 960, x: 17.5, y: 5.5, at: 0 });
+    hold(e, 17.5, 5.5);
+    s.t = BALANCE.elephant.dungTolerance + 5;
+    advance(s, 1);
+    expect(cellAt(s, 17.5, 5.5)!.cell.kind).toBe('dung');
+    hold(e, 3, 3);
+    s.player.held = newItem(s, 'scoop');
+    at(s, 17.5, 5.5);
+    expect(act(s)).toBe('Счистить затоптанный навоз в совок (2/6)');
+    expect(cellAt(s, 17.5, 5.5)!.cell.kind).toBe('grass');
   });
 
   it('тачку везут из дежурки по дорожке и заезжают в открытый контейнер', () => {

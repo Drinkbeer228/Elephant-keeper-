@@ -2,6 +2,7 @@ import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { MAP } from '../data/map';
 import { randomInt } from './rng';
+import { groundOf } from './floor';
 import type { Elephant, Item, State } from './types';
 
 export interface ShiftOptions {
@@ -17,18 +18,20 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     nextItemId: 1,
     player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 } },
     elephants: ELEPHANTS.map(createElephant),
-    cells: Array.from({ length: MAP.bedding.rows }, () =>
-      Array.from({ length: MAP.bedding.cols }, () => ({ kind: 'straw' as const, since: 0 })),
+    cells: Array.from({ length: MAP.floor.rows }, () =>
+      Array.from({ length: MAP.floor.cols }, (_, cx) => ({ kind: groundOf(cx), since: 0 })),
     ),
     dung: [],
+    litter: [],
     items: [],
     kitchen: {
       kasha: { status: 'idle', readyAt: 0, portions: 0, meal: null },
-      veg: { stage: 0, nextAt: 0, portions: 0 },
+      veg: { portions: 0 },
     },
     feederHay: BALANCE.food.hayStart,
     trough: 80,
     valveOpen: false,
+    dutyLight: false,
     lastOverflow: 0,
     gateOpen: false,
     barrow: {
@@ -42,6 +45,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       waste: 0,
       balance: 0,
       parkedAt: 0,
+      trail: 0,
     },
     container: { fill: 0, doorClosed: false, ramp: false, truckAt: null, truckLeftAt: null },
     spareBucket: true,
@@ -62,6 +66,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       hintsShown: [],
     },
     log: [],
+    prep: null,
     report: null,
   };
 
@@ -70,6 +75,10 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
   addItem(state, 'scoop', spots.scoop.x, spots.scoop.y, { dirty: false });
   addItem(state, 'fork', spots.fork.x, spots.fork.y);
   addItem(state, 'broom', spots.broom.x, spots.broom.y);
+  // Корзина для овощей — у стеллажа в кормовой
+  addItem(state, 'basket', MAP.basketSpot.x, MAP.basketSpot.y);
+  // Ведро для опилок — пустое, у кучи под навесом
+  addItem(state, 'sawdust', MAP.pailSpot.x, MAP.pailSpot.y, { charges: 0 });
   // Тазы — чистые, на стеллаже в кормовой
   MAP.basinSpots.slice(0, BALANCE.food.basins).forEach((p) => addItem(state, 'basin', p.x, p.y, { food: null, dirty: false }));
 

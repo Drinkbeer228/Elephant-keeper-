@@ -67,23 +67,13 @@ describe('корм', () => {
     expect(s.log.some((l) => l.why === 'basinCrushed')).toBe(true);
   });
 
-  it('ужин: пять этапов на кормовой, между ними ожидание', () => {
+  it('готовы и каша, и нарезанный ужин — сначала раскладывают кашу, потом ужин', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
-    advance(s, 365); // 14:05, утренняя каша уже не актуальна
+    advance(s, 545);
+    s.kitchen.kasha = { status: 'ready', readyAt: s.t, portions: 3, meal: 'kasha2' };
+    s.kitchen.veg.portions = 3;
     stand(s, 'kitchen');
-    const labels: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      let label = act(s)!;
-      // С 16:00 кормовая сначала предлагает вторую кашу, ужин — следующим нажатием
-      if (label.startsWith('Запарить')) label = act(s)!;
-      labels.push(label);
-      advance(s, 31);
-    }
-    expect(labels[0]).toBe('Ужин: Замочить овощи');
-    expect(labels[4]).toBe('Ужин: Собрать ужин по тазам');
-    expect(s.kitchen.veg.portions).toBe(3);
-    // Каша к 17:00 тоже готова — её раскладывают первой, овощи следом
     expect(availableAction(s)?.label).toBe('Разложить кашу по тазам (3)');
     s.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
     expect(availableAction(s)?.label).toBe('Разложить ужин по тазам (3)');

@@ -34,7 +34,7 @@ describe('тачка', () => {
     s.elephants.forEach((e) => hold(e, 11, 7));
     Object.assign(s.barrow, { x: 5, y: 4, pushed: false, tools: ['scoop', 'fork', 'broom'], sawdust: 8, straw: 8, parkedAt: 0 });
     s.dung.push({ id: 900, x: 3.5, y: 3.5, at: 0 });
-    setCell(s, 2, 2, 'wet');
+    setCell(s, 3 - MAP.bedding.x, 2, 'wet');
     at(s, 4.4, 4);
     expect(act(s, 'Взять: совок')).toMatch(/совок/);
     expect(s.player.held?.kind).toBe('scoop');

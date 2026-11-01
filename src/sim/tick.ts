@@ -5,10 +5,10 @@ import { dayPart, pace } from './clock';
 import { updateElephants } from './elephants';
 import { emit, hint } from './events';
 import { updateFloor } from './floor';
-import { updateKitchen } from './feeding';
+import { cutSpot, updateKitchen } from './feeding';
 import { finishShift } from './handover';
 import { updateItems } from './items';
-import { barrowOffset, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
+import { barrowOffset, spillFromBarrow, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
 import type { Command, ShiftEvent, State } from './types';
 
 // Один кадр игры: dtReal — реальные секунды с прошлого кадра
@@ -34,6 +34,12 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
         } else a?.run(state);
         break;
       }
+      case 'prepCut':
+        cutSpot(state, c.spot);
+        break;
+      case 'prepClose':
+        if (state.prep) state.prep.open = false;
+        break;
       case 'inspect':
         emit(state, { kind: 'info', text: inspect(state).join('\n') });
         break;
@@ -90,13 +96,13 @@ function segDist(x: number, y: number, w: { x0: number; y0: number; x1: number; 
 // Стены, решётка, стены построек, контейнер. В вольер — через проход для человека или открытые ворота
 export function walkable(x: number, y: number, gateOpen = false): boolean {
   if (x < 0.4 || y < 0.4 || x > MAP.w - 0.4 || y > MAP.h - 0.4) return false;
-  if (x < MAP.paddock.x0 + 0.3 && y < MAP.fenceY + 0.3) return false;
   if (y < MAP.paddock.y0 + 0.3) return false;
   const inDoor = x > MAP.door.x0 + 0.3 && x < MAP.door.x1 - 0.3;
   const inGate = gateOpen && x > MAP.elephantGate.x0 + 0.3 && x < MAP.elephantGate.x1 - 0.3;
   if (Math.abs(y - MAP.fenceY) < 0.3 && x < MAP.fenceX + 0.3 && !inDoor && !inGate) return false;
   if (Math.abs(x - MAP.fenceX) < 0.3 && y < MAP.fenceY + 0.3) return false;
   for (const w of MAP.walls) if (segDist(x, y, w) < 0.3) return false;
+  for (const w of MAP.barriers) if (segDist(x, y, w) < 0.3) return false;
   // Морской контейнер — твёрдый: обходят, заезжают только в его двери (это действие, а не проход)
   const c = MAP.stations.dump;
   if (Math.abs(x - c.x) < c.w / 2 + 0.3 && Math.abs(y - c.y) < c.h / 2 + 0.3) return false;
@@ -130,5 +136,7 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number): { mov
     b.x = p.x + off.x;
     b.y = p.y + off.y;
   }
-  return { moving: Math.hypot(p.x - x0, p.y - y0) > 0.001, turned };
+  const moved = Math.hypot(p.x - x0, p.y - y0);
+  if (pushed) spillFromBarrow(state, moved);
+  return { moving: moved > 0.001, turned };
 }

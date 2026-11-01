@@ -5,7 +5,7 @@ import { barrowSummary, clockText, dayPart, itemLabel, profileOf, type ActionOpt
 import type { Input } from '../game/input';
 import { renderReport } from './report';
 import { ICON, itemIcon, portraitIcon } from './icons';
-import { barrowUrl } from '../game/textures';
+import { barrowUrl, vegUrl } from '../game/textures';
 import { basinsOnRack } from '../sim/items';
 
 // Интерфейс поверх canvas: часы, слонихи, ресурсы, подсказка действия, лента событий, чек-лист, кнопки
@@ -13,7 +13,12 @@ import { basinsOnRack } from '../sim/items';
 export interface HudCallbacks {
   restart: () => void;
   setPaused: (paused: boolean) => void;
+  prepCut: (spot: number) => void;
+  prepClose: () => void;
 }
+
+const VEG_TITLES: Record<string, string> = { carrot: 'морковь', potato: 'картофель', beet: 'свёкла' };
+const SPOT_NAMES: Record<string, string> = { top: 'ботва', tail: 'хвостик', rot: 'гниль', eye: 'глазок' };
 
 interface Toast {
   el: HTMLElement;
@@ -26,6 +31,9 @@ export class Hud {
   private lastChips = '';
   private lastHeld: string | null = null;
   private menuKey: string | null = null;
+  private prepKey = '';
+  private prepSel = 0;
+  private uncut: number[] = [];
   private reportShown = false;
   paused = false;
   introOpen = true;
@@ -55,6 +63,12 @@ export class Hud {
       <div class="feed" data-el="feed"></div>
       <div class="inspect panel hidden" data-el="inspect"></div>
       <div class="menu panel hidden" data-el="menu"></div>
+      <div class="prep panel hidden" data-el="prep">
+        <b data-el="prepTitle"></b>
+        <div class="board"><img data-el="prepImg" alt=""><div class="spots" data-el="prepSpots"></div></div>
+        <small>Нажми на дефект или выбери стрелками и срежь (Space) · Esc — отойти</small>
+        <button class="btn ghost" data-el="prepClose">Отойти от стола</button>
+      </div>
       <div class="bottom">
         <div class="stick" data-el="stick"><div class="knob" data-el="knob"></div></div>
         <div class="actionHint panel" data-el="hint"></div>
@@ -73,8 +87,9 @@ export class Hud {
           <ol class="rules">
             <li><b>Смена идёт сразу.</b> Утром сменщик примет вольер по чек-листу: ворота, вода, сено, инвентарь на стойке, тачка, тазы, чистота.</li>
             <li><b>Туалет.</b> Смотри на слоних: у каждой свой знак — топот, стойка у решётки. Успей подставить бак — иначе мокрая подстилка и больные ноги. Угости за бак, бак вылей в решётку слива. Одри не предупреждает: веди её «погулять».</li>
-            <li><b>Пол.</b> Мокрое — вилами, потом опилки; впитали — метлой до пола, сверху солома. Навоз — совком, сразу: в его отсек, в тачку или мешок.</li>
-            <li><b>Корм.</b> Каша в 13:00 и 17:00, овощной ужин к 19:00. Разложи по тазам на стеллаже, носи по одному. Пустые — стопкой на мойку и обратно на стеллаж.</li>
+            <li><b>Пол.</b> Мокрое — вилами, потом опилки (ведро — у кучи под навесом); впитали — метлой до пола, сверху солома. Навоз — совком, сразу: в его отсек, в тачку или мешок. Сор с тачки на дорожке — метлой.</li>
+            <li><b>Корм.</b> Каша в 13:00 и 17:00. Ужин к 19:00: с 14:00 овощи со стеллажа в корзину, замочить и промыть на мойке, почистить и нарезать у стола. Разложи по тазам на стеллаже, носи по одному; пустые — стопкой на мойку и обратно.</li>
+            <li><b>Ночь.</b> В вольере темно: включи дежурный свет у двери дежурки, утром выключи.</li>
             <li><b>Тачка.</b> Возит инвентарь, опилки, солому, тюки и мусор. Поставь рядом — и убирай. Три тюка и больше качаются: держи равновесие Q / E.</li>
           </ol>
           <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd><kbd>E</kbd> равновесие · <kbd>P</kbd> пауза</p>
@@ -98,6 +113,19 @@ export class Hud {
     tap('introBtn', () => this.closeIntro());
     tap('resumeBtn', () => this.togglePause());
     this.els.inspect.addEventListener('pointerdown', () => this.els.inspect.classList.add('hidden'));
+    // Чистка овощей: дефект нажимают пальцем или мышью; стрелки выбирают, Space режет (через main)
+    this.els.prepSpots.addEventListener('pointerdown', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-spot]');
+      if (!b) return;
+      e.preventDefault();
+      this.cb.prepCut(Number(b.dataset.spot));
+    });
+    tap('prepClose', () => this.cb.prepClose());
+    window.addEventListener('keydown', (e) => {
+      if (this.els.prep.classList.contains('hidden')) return;
+      const dir = e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : 0;
+      if (dir) this.moveSel(dir);
+    });
     this.els.menu.addEventListener('pointerdown', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-choice]');
       if (!b) return;
@@ -158,6 +186,39 @@ export class Hud {
   // Отошёл или содержимое изменилось — меню устарело
   syncMenu(a: ActionOption | null): void {
     if (this.menuKey !== null && Hud.menuKeyOf(a) !== this.menuKey) this.closeMenu();
+  }
+
+  // Выбранный дефект — для Space и кнопки действия на телефоне
+  get prepSelected(): number {
+    return this.prepSel;
+  }
+
+  private moveSel(dir: -1 | 1): void {
+    if (!this.uncut.length) return;
+    const i = this.uncut.indexOf(this.prepSel);
+    this.prepSel = this.uncut[(i + dir + this.uncut.length) % this.uncut.length];
+    this.prepKey = '';
+  }
+
+  private renderPrep(s: State): void {
+    const prep = s.prep;
+    this.els.prep.classList.toggle('hidden', !prep?.open);
+    if (!prep?.open) return;
+    const piece = prep.pieces[prep.index];
+    this.uncut = piece.spots.map((p, i) => (p.cut ? -1 : i)).filter((i) => i >= 0);
+    if (!this.uncut.includes(this.prepSel)) this.prepSel = this.uncut[0] ?? 0;
+    const key = JSON.stringify([prep.index, piece.spots.map((p) => p.cut), this.prepSel]);
+    if (key === this.prepKey) return;
+    this.prepKey = key;
+    this.els.prepTitle.textContent = `Чистка: ${VEG_TITLES[piece.kind]} (${prep.index + 1}/3) · осталось ${this.uncut.length}`;
+    (this.els.prepImg as HTMLImageElement).src = vegUrl(piece);
+    this.els.prepSpots.innerHTML = piece.spots
+      .map((p, i) =>
+        p.cut
+          ? ''
+          : `<button class="spot${i === this.prepSel ? ' sel' : ''}" data-spot="${i}" style="left:${p.x * 100}%;top:${p.y * 100}%" aria-label="${SPOT_NAMES[p.kind]}"><span>${SPOT_NAMES[p.kind]}</span></button>`,
+      )
+      .join('');
   }
 
   hideInspect(): void {
@@ -243,12 +304,17 @@ export class Hud {
       this.els.needle.style.left = `${50 + s.barrow.balance * 50}%`;
       this.els.balance.classList.toggle('danger', Math.abs(s.barrow.balance) > 0.65);
     }
-    this.els.hint.innerHTML = action
-      ? `${action.disabled ? ICON.info : ICON.hand}<span>${action.label}${action.choices ? ' <em>· выбор</em>' : ''}</span>`
-      : '';
+    // Во время чистки подсказка говорит, что срежет кнопка действия
+    const prepSpot = s.prep?.open ? s.prep.pieces[s.prep.index].spots[this.prepSel] : undefined;
+    this.els.hint.innerHTML = prepSpot
+      ? `${ICON.hand}<span>Срезать: ${SPOT_NAMES[prepSpot.kind]}</span>`
+      : action
+        ? `${action.disabled ? ICON.info : ICON.hand}<span>${action.label}${action.choices ? ' <em>· выбор</em>' : ''}</span>`
+        : '';
     this.els.hint.classList.toggle('disabled', !!action?.disabled);
     this.els.hint.classList.toggle('empty', !action);
     this.els.actionBtn.classList.toggle('ready', !!action && !action.disabled);
+    this.renderPrep(s);
 
     if (s.phase === 'report' && s.report && !this.reportShown) {
       this.reportShown = true;

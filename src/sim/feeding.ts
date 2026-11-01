@@ -1,9 +1,10 @@
 import { BALANCE } from '../data/balance';
-import { MAP } from '../data/map';
+import { MAP, nearStation } from '../data/map';
 import { clockText } from './clock';
 import { emit, hint } from './events';
 import { wetAround } from './floor';
-import type { MealId, State } from './types';
+import { randomInt, randomRange } from './rng';
+import type { MealId, State, VegKind, VegSpot } from './types';
 
 const F = BALANCE.food;
 const S = BALANCE.schedule;
@@ -14,7 +15,6 @@ export const MEAL_LABELS: Record<MealId, string> = {
   dinner: 'Овощи 19:00',
 };
 
-export const VEG_STAGES = ['Замочить овощи', 'Взбить грязь щёткой', 'Промыть в корзинах', 'Откалибровать и нарезать', 'Собрать ужин по тазам'];
 
 export function mealTime(meal: MealId): number {
   return meal === 'kasha1' ? S.kasha1 : meal === 'kasha2' ? S.kasha2 : S.dinner;
@@ -42,25 +42,65 @@ export function startKasha(state: State): boolean {
   return true;
 }
 
-export function vegStageAvailable(state: State): boolean {
-  const v = state.kitchen.veg;
-  return v.stage < VEG_STAGES.length && state.t >= F.vegStartFrom && state.t >= v.nextAt && !allServed(state, 'dinner');
+export function allServedDinner(state: State): boolean {
+  return allServed(state, 'dinner');
 }
 
-export function doVegStage(state: State): boolean {
-  if (!vegStageAvailable(state)) return false;
-  const v = state.kitchen.veg;
-  const name = VEG_STAGES[v.stage];
-  if (v.stage < F.vegWaits.length) {
-    v.nextAt = state.t + F.vegWaits[v.stage];
-    v.stage++;
-    emit(state, { kind: 'info', text: `${name}: готово. Следующий этап с ${clockText(v.nextAt)}.` });
-  } else {
-    v.stage++;
-    v.portions = 3;
-    emit(state, { kind: 'good', text: 'Овощной ужин собран: разложи по тазам на стеллаже.' });
+// Овощи для ужина: на доске три овоща — морковь, картофель, свёкла, у каждого 2–4 дефекта
+export function startPrep(state: State): void {
+  if (state.prep) {
+    state.prep.open = true;
+    return;
   }
-  return true;
+  const kinds: VegKind[] = ['carrot', 'potato', 'beet'];
+  state.prep = { pieces: kinds.map((k) => ({ kind: k, spots: vegSpots(state, k) })), index: 0, open: true };
+}
+
+function vegSpots(state: State, kind: VegKind): VegSpot[] {
+  const spots: VegSpot[] = [];
+  const at = (k: VegSpot['kind'], x: number, y: number) => spots.push({ kind: k, x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100, cut: false });
+  // Случайная точка на теле овоща, не ближе 0.15 к уже отмеченным
+  const free = (x0: number, x1: number, y0: number, y1: number): [number, number] => {
+    let p: [number, number] = [x0, y0];
+    for (let i = 0; i < 8; i++) {
+      p = [randomRange(state, x0, x1), randomRange(state, y0, y1)];
+      if (spots.every((s) => Math.hypot(s.x - p[0], s.y - p[1]) >= 0.15)) break;
+    }
+    return p;
+  };
+  if (kind === 'carrot') {
+    at('top', 0.08, 0.5);
+    at('tail', 0.94, 0.55);
+    for (let i = randomInt(state, 0, 2); i > 0; i--) at('rot', ...free(0.3, 0.75, 0.4, 0.6));
+  } else if (kind === 'beet') {
+    at('top', 0.5, 0.1);
+    at('tail', 0.5, 0.93);
+    for (let i = randomInt(state, 0, 2); i > 0; i--) at('rot', ...free(0.32, 0.68, 0.38, 0.72));
+  } else {
+    for (let i = randomInt(state, 2, 3); i > 0; i--) at('eye', ...free(0.22, 0.78, 0.3, 0.7));
+    for (let i = randomInt(state, 0, 1); i > 0; i--) at('rot', ...free(0.25, 0.75, 0.3, 0.7));
+  }
+  return spots;
+}
+
+const VEG_NAMES: Record<VegKind, string> = { carrot: 'Морковь', potato: 'Картофель', beet: 'Свёкла' };
+
+// Срезать дефект на текущем овоще; последний срез — овощи почищены
+export function cutSpot(state: State, spot: number): void {
+  const prep = state.prep;
+  if (!prep || !nearStation('kitchen', state.player.x, state.player.y, BALANCE.player.stationReach + 0.3)) return;
+  const piece = prep.pieces[prep.index];
+  const s = piece.spots[spot];
+  if (!s || s.cut) return;
+  s.cut = true;
+  if (piece.spots.some((x) => !x.cut)) return;
+  emit(state, { kind: 'good', text: `${VEG_NAMES[piece.kind]} почищена.` });
+  prep.index++;
+  if (prep.index < prep.pieces.length) return;
+  state.prep = null;
+  const basket = state.items.find((i) => i.kind === 'basket' && i.veg === 'washed');
+  if (basket) basket.veg = 'peeled';
+  emit(state, { kind: 'good', text: 'Овощи почищены — нарезай ужин.' });
 }
 
 export function updateKitchen(state: State, dt: number): void {
@@ -71,7 +111,9 @@ export function updateKitchen(state: State, dt: number): void {
     emit(state, { kind: 'good', text: 'Каша готова: разложи по тазам на стеллаже и разнеси по одному.' });
   }
   if (state.t >= S.kasha1 - 60) hint(state, 'kasha1', 'Скоро 13:00: каша запаривается 20 минут. Иди на кормовую.');
-  if (state.t >= F.vegStartFrom) hint(state, 'veg', 'С 14:00 можно начинать овощной ужин: пять этапов на кормовой, к 19:00.');
+  if (state.t >= F.vegStartFrom) {
+    hint(state, 'veg', 'С 14:00 — овощной ужин к 19:00: корзину к овощному стеллажу, на мойке замочить и промыть, у стола почистить и нарезать.');
+  }
 
   if (state.valveOpen) {
     state.trough += F.troughFill * dt;

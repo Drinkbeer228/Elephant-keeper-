@@ -297,8 +297,8 @@ function bedSpot(state: State, e: Elephant): { x: number; y: number } | null {
   state.cells.forEach((row, cy) =>
     row.forEach((c, cx) => {
       if (c.kind !== 'straw') return;
-      const x = MAP.bedding.x + cx + 0.5;
-      const y = MAP.bedding.y + cy + 0.5;
+      const x = MAP.floor.x + cx + 0.5;
+      const y = MAP.floor.y + cy + 0.5;
       const dd = Math.hypot(x - e.x, y - e.y);
       if (dd > 3 || dd >= bestD) return;
       if (state.dung.some((d) => Math.hypot(d.x - x, d.y - y) < 1)) return;

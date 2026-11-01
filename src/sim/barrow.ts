@@ -84,6 +84,19 @@ export function updateBarrowRisk(state: State, dt: number): void {
   emit(state, { kind: 'bad', text: 'Слониха опрокинула тачку — всё вывалилось!', why: 'barrowTipped' });
 }
 
+// Тачка с соломой, опилками или тюками рассыпает понемногу по пути. В вольере это не учитывается —
+// там подстилка и трава; на дорожке, в постройках и на асфальте остаётся сор для метлы
+export function spillFromBarrow(state: State, moved: number): void {
+  const b = state.barrow;
+  const kind = b.sawdust > 0 ? 'sawdust' : b.straw > 0 ? 'straw' : b.bales > 0 ? 'hay' : null;
+  if (!b.pushed || !kind || moved <= 0) return;
+  b.trail += moved;
+  if (b.trail < B.litterEvery) return;
+  b.trail = 0;
+  if (inPaddock(b.x, b.y) || state.litter.length >= B.litterMax || !chance(state, B.litterChance)) return;
+  state.litter.push({ id: state.nextItemId++, x: b.x + randomRange(state, -0.3, 0.3), y: b.y + randomRange(state, 0, 0.3), kind });
+}
+
 // ——— мусорный бак ———
 
 export function containerShare(state: State): number {

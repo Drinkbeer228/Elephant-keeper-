@@ -4,7 +4,7 @@ import { LAMPS } from '../art/worldPx';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { MAP } from '../data/map';
-import { dayPart, sawdustAbsorbed, stinkSources, type State } from '../sim';
+import { darkness, groundOf, sawdustAbsorbed, stinkSources, type Cell, type State } from '../sim';
 import { ElephantView } from './elephantView';
 import { KeeperView } from './keeperView';
 import { BarrowView } from './barrowView';
@@ -20,6 +20,24 @@ export interface FrameResult {
 
 const FONT = '"Press Start 2P", monospace';
 
+// Текстура клетки пола: v — вариант, чтобы солома и трава не повторялись узором
+function cellTexture(s: State, c: Cell, cx: number, v: number): string {
+  switch (c.kind) {
+    case 'straw':
+      return `floor-straw-${v}`;
+    case 'grass':
+      return `floor-grass-${v}`;
+    case 'wet':
+      return `floor-wet-${v % 2}`;
+    case 'sawdust':
+      return sawdustAbsorbed(s, c) ? 'floor-sawdustDone' : 'floor-sawdust';
+    case 'dung':
+      return groundOf(cx) === 'grass' ? 'floor-dung-grass' : 'floor-dung';
+    default:
+      return `floor-${c.kind}`;
+  }
+}
+
 export class WorldScene extends Phaser.Scene {
   private ready = false;
   private follow = false;
@@ -27,6 +45,7 @@ export class WorldScene extends Phaser.Scene {
   private cellKeys: string[][] = [];
   private items = new Map<number, Phaser.GameObjects.Image>();
   private dung = new Map<number, Phaser.GameObjects.Image>();
+  private litter = new Map<number, Phaser.GameObjects.Image>();
   private elephants: ElephantView[] = [];
   private keeper!: KeeperView;
   private night!: Phaser.GameObjects.Image;
@@ -46,6 +65,8 @@ export class WorldScene extends Phaser.Scene {
   private boxText!: Phaser.GameObjects.Text;
   private truck!: Phaser.GameObjects.Image;
   private stink!: Phaser.GameObjects.Graphics;
+  private lightSwitch!: Phaser.GameObjects.Image;
+  private lightKey = '';
   private stinkAt: { x: number; y: number }[] = [];
   private stinkCheck = 0;
   private fx: Record<string, Phaser.GameObjects.Particles.ParticleEmitter> = {};
@@ -110,18 +131,19 @@ export class WorldScene extends Phaser.Scene {
     const s = this.getState();
     this.add.image(0, 0, 'bg').setOrigin(0).setScale(PX).setDepth(-1000);
 
-    // Подстилка
-    const b = MAP.bedding;
-    for (let cy = 0; cy < b.rows; cy++) {
+    // Пол вольера: подстилка и луг
+    const f = MAP.floor;
+    for (let cy = 0; cy < f.rows; cy++) {
       this.cells.push([]);
       this.cellKeys.push([]);
-      for (let cx = 0; cx < b.cols; cx++) {
-        const im = this.add.image((b.x + cx) * TILE, (b.y + cy) * TILE, 'floor-straw-0').setOrigin(0).setScale(PX).setDepth(-900);
+      for (let cx = 0; cx < f.cols; cx++) {
+        const im = this.add.image((f.x + cx) * TILE, (f.y + cy) * TILE, 'floor-straw-0').setOrigin(0).setScale(PX).setDepth(-900);
         this.cells[cy].push(im);
         this.cellKeys[cy].push('');
       }
     }
     // Тень от шатра на подстилку: шахматка, как в старых играх
+    const b = MAP.bedding;
     const shade = this.add.graphics().setDepth(-880);
     shade.fillStyle(0x000000, 0.28);
     for (let x = b.x * TILE; x < (b.x + b.cols) * TILE; x += PX * 2) {
@@ -131,14 +153,22 @@ export class WorldScene extends Phaser.Scene {
 
     // Гирлянда по кромке шатра
     const colors = ['r', 'y', 'b', 'g'];
-    for (let i = 0, x = 12; x < MAP.w * TILE; x += 30, i++) {
+    const tentRight = (MAP.bedding.x + MAP.bedding.cols) * TILE;
+    for (let i = 0, x = 12; x < tentRight; x += 30, i++) {
       this.bulbs.push(this.img(x, 0.36 * TILE + (i % 2) * PX, `deco-bulb-${colors[i % 4]}`, -800, 0));
     }
     // Фонари на столбах — только снаружи решётки; в постройках свет потолочный, без столбов
-    for (const l of LAMPS.filter((p) => p.post)) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
+    for (const l of LAMPS) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
+    // Выключатель дежурного света — на стене дежурки у двери
+    const sw = MAP.stations.lightSwitch;
+    this.lightSwitch = this.img(sw.x * TILE, (sw.y + sw.h / 2) * TILE, 'st-switch-off', (sw.y + sw.h / 2) * TILE);
+    this.tag('СВЕТ', sw.x * TILE + 18, (sw.y - 0.3) * TILE);
 
-    // Слоты для тазов
-    for (const p of ELEPHANTS) this.img(p.slot.x * TILE, p.slot.y * TILE + 8, 'st-mat', -850, 0.5);
+    // Места тазов: бетонная площадка у решётки и табличка с именем на прутьях
+    for (const p of ELEPHANTS) {
+      this.img(p.slot.x * TILE, p.slot.y * TILE + 8, 'st-pad', -850, 0.5);
+      this.tag(p.name.toUpperCase(), p.slot.x * TILE, MAP.fenceY * TILE - 9 * PX).setDepth(MAP.fenceY * TILE + 3).setColor('#000000').setBackgroundColor('#fcfcfc');
+    }
 
     // Станции
     const st = MAP.stations;
@@ -146,10 +176,11 @@ export class WorldScene extends Phaser.Scene {
     const label: Partial<Record<keyof typeof st, string>> = {
       sawdust: 'ОПИЛКИ',
       bags: 'МЕШКИ',
+      vegRack: 'ОВОЩИ',
       hay: 'СЕНО',
       straw: 'СОЛОМА',
     };
-    for (const k of ['sawdust', 'bags', 'wash', 'hay', 'straw'] as const) {
+    for (const k of ['sawdust', 'bags', 'wash', 'hay', 'straw', 'vegRack'] as const) {
       const p = at(k);
       const im = this.img(p.x, p.y, `st-${k}`, p.y - 30);
       if (label[k]) this.tag(label[k], p.x, p.y - im.displayHeight - 2);
@@ -158,8 +189,6 @@ export class WorldScene extends Phaser.Scene {
     const rk = at('rack');
     const rack = this.img(rk.x - 2 * PX, rk.y, 'st-rack', -860);
     this.tag('ИНВЕНТАРЬ', rk.x + 40, rk.y - rack.displayHeight - 2);
-    const hs = at('hose');
-    this.img(hs.x, hs.y, 'st-hose', hs.y);
     // Стеллаж тазов в кормовой; сами тазы — предметы на своих местах
     const br = at('basinRack');
     this.img(br.x - 2 * PX, br.y, 'st-basin-rack', -860);
@@ -177,23 +206,14 @@ export class WorldScene extends Phaser.Scene {
     this.kitchenText = this.tag('', k.x, k.y - this.kitchen.displayHeight - 2).setColor('#f8b800');
     this.img(14.2 * TILE, 15.3 * TILE, 'st-grain', 15.3 * TILE);
     this.tag('ЗЕРНО', 14.2 * TILE, 14.4 * TILE);
-    // Навес: столбы по углам и край крыши над входом
+    // Навес — простой: передняя балка крыши на двух столбах
     const sh = rooms.shed;
-    for (const [x, y] of [
-      [sh.x0 + 0.15, sh.y0 + 0.2],
-      [sh.x1 - 0.15, sh.y0 + 0.2],
-      [sh.x0 + 0.15, sh.y1 - 0.1],
-      [sh.x1 - 0.15, sh.y1 - 0.1],
-    ])
-      this.img(x * TILE, y * TILE, 'st-shed-post', y * TILE);
-    const roof = this.add.graphics().setDepth(sh.y0 * TILE + 2);
-    const rx = sh.x0 * TILE;
-    const rw = (sh.x1 - sh.x0) * TILE;
-    const ry = sh.y0 * TILE - 13 * PX;
-    roof.fillStyle(0x000000).fillRect(rx - PX, ry - PX, rw + 2 * PX, 6 * PX);
-    roof.fillStyle(0xd82800).fillRect(rx, ry, rw, 4 * PX);
-    roof.fillStyle(0xf87858).fillRect(rx, ry, rw, PX);
-    for (let x = rx; x < rx + rw; x += 4 * PX) roof.fillStyle(0x881400).fillRect(x, ry + PX, PX, 3 * PX);
+    for (const x of [sh.x0 + 0.15, sh.x1 - 0.15]) this.img(x * TILE, (sh.y0 + 0.2) * TILE, 'st-shed-post', (sh.y0 + 0.2) * TILE);
+    const beam = this.add.graphics().setDepth(sh.y0 * TILE + 2);
+    const by = sh.y0 * TILE - 13 * PX;
+    beam.fillStyle(0x000000).fillRect(sh.x0 * TILE, by - PX, (sh.x1 - sh.x0) * TILE, 5 * PX);
+    beam.fillStyle(0xc84c0c).fillRect(sh.x0 * TILE, by, (sh.x1 - sh.x0) * TILE, 3 * PX);
+    beam.fillStyle(0xfc9838).fillRect(sh.x0 * TILE, by, (sh.x1 - sh.x0) * TILE, PX);
     // Морской контейнер на асфальте, рядом трап; мусоровоз подъезжает по проезду
     const d = at('dump');
     this.box = this.img(d.x, d.y + 4, 'st-container-open', d.y);
@@ -255,6 +275,7 @@ export class WorldScene extends Phaser.Scene {
     this.drawCells(s);
     this.drawItems(s);
     this.drawDung(s);
+    this.drawLitter(s);
     this.drawFence(s);
     this.drawStations(s);
     s.elephants.forEach((e, i) => this.elephants[i].update(e, s, t));
@@ -276,17 +297,7 @@ export class WorldScene extends Phaser.Scene {
   private drawCells(s: State): void {
     s.cells.forEach((row, cy) =>
       row.forEach((c, cx) => {
-        const v = (cx * 7 + cy * 13) % 4;
-        const key =
-          c.kind === 'straw'
-            ? `floor-straw-${v}`
-            : c.kind === 'wet'
-              ? `floor-wet-${v % 2}`
-              : c.kind === 'sawdust'
-                ? sawdustAbsorbed(s, c)
-                  ? 'floor-sawdustDone'
-                  : 'floor-sawdust'
-                : `floor-${c.kind}`;
+        const key = cellTexture(s, c, cx, (cx * 7 + cy * 13) % 4);
         if (this.cellKeys[cy][cx] !== key) {
           this.cellKeys[cy][cx] = key;
           this.cells[cy][cx].setTexture(key);
@@ -328,6 +339,24 @@ export class WorldScene extends Phaser.Scene {
       if (!seen.has(id)) {
         im.destroy();
         this.dung.delete(id);
+      }
+    }
+  }
+
+  // Сор с тачки — мелкие соломинки и опилки на полу, пока не подметут
+  private drawLitter(s: State): void {
+    const seen = new Set<number>();
+    for (const l of s.litter) {
+      seen.add(l.id);
+      if (!this.litter.has(l.id)) {
+        this.litter.set(l.id, this.img(l.x * TILE, l.y * TILE, `litter-${l.kind}`, -800, 0.5));
+        this.fx.dust.explode(3, l.x * TILE, l.y * TILE);
+      }
+    }
+    for (const [id, im] of this.litter) {
+      if (!seen.has(id)) {
+        im.destroy();
+        this.litter.delete(id);
       }
     }
   }
@@ -408,7 +437,7 @@ export class WorldScene extends Phaser.Scene {
     const k = s.kitchen;
     const parts = [
       k.kasha.status === 'cooking' ? 'КАША ПАРИТСЯ' : k.kasha.status === 'ready' ? `КАША x${k.kasha.portions}` : '',
-      k.veg.portions ? `ОВОЩИ x${k.veg.portions}` : k.veg.stage > 0 && k.veg.stage < 5 ? `УЖИН ${k.veg.stage}/5` : '',
+      k.veg.portions ? `УЖИН x${k.veg.portions}` : '',
     ].filter(Boolean);
     this.kitchenText.setText(parts.join(' ')).setVisible(parts.length > 0);
 
@@ -509,15 +538,19 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawLight(s: State, t: number): void {
-    const time = s.t;
-    const part = dayPart(time);
-    let dark = 0;
-    if (part === 'day') dark = time > 600 ? ((time - 600) / 120) * 0.85 : 0;
-    else if (part === 'night') dark = 0.85;
-    else dark = Math.max(0, 0.85 - ((time - BALANCE.time.nightEnd) / 100) * 0.85);
+    const dark = darkness(s.t);
+    // Ночь своя для дежурного света: вольер освещён ровно и тускло
+    const key = s.dutyLight ? 'duty' : 'off';
+    if (this.lightKey !== key) {
+      this.lightKey = key;
+      this.night.setTexture(s.dutyLight ? 'night-duty' : 'night');
+      this.glow.setTexture(s.dutyLight ? 'glow-duty' : 'glow');
+      this.lightSwitch.setTexture(s.dutyLight ? 'st-switch-on' : 'st-switch-off');
+    }
     this.night.setAlpha(dark);
     this.glow.setAlpha(dark);
     // Гирлянда мигает по очереди, когда темно
     this.bulbs.forEach((b, i) => b.setAlpha(dark > 0.2 && Math.floor(t * 2 + i) % 3 === 0 ? 0.5 : 1));
   }
+
 }

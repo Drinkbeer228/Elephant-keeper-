@@ -72,6 +72,35 @@ export function floorTiles(): Record<string, Sprite> {
   for (const [x, y] of [[2, 2], [3, 2], [2, 3], [12, 12], [13, 12], [13, 13], [11, 3], [12, 4]]) dung.set(x, y, '#5c3000');
   for (const [x, y] of [[6, 7], [9, 9]]) dung.set(x, y, '#c88c4c');
   out['floor-dung'] = dung;
+  // Луг: трава с травинками; лужа мочи — тёмная сырая трава; затоптанный навоз на траве
+  for (let v = 0; v < 4; v++) {
+    const g = noise(new Sprite(CELL, CELL), 90 + v, C.green, [[C.greenDark, 10]]);
+    const rg = rng(95 + v);
+    for (let i = 0; i < 6; i++) {
+      const x = Math.floor(rg() * 14);
+      const y = 1 + Math.floor(rg() * 14);
+      g.set(x, y, C.greenLight);
+      g.set(x + 1, y - 1, C.greenLight);
+      g.set(x + 2, y, C.greenLight);
+    }
+    out[`floor-grass-${v}`] = g;
+  }
+  const puddle = noise(new Sprite(CELL, CELL), 101, C.green, [[C.greenDark, 10]]);
+  for (let y = 0; y < CELL; y++)
+    for (let x = 0; x < CELL; x++) {
+      const d = Math.hypot(x - 7.5, (y - 8) * 1.3);
+      if (d < 5 || (d < 6.5 && (x + y) % 2 === 0)) puddle.set(x, y, C.greenDark);
+    }
+  for (const [x, y] of [[5, 7], [6, 7], [9, 9]]) puddle.set(x, y, C.goldLight);
+  out['floor-puddle'] = puddle;
+  const dungGrass = noise(new Sprite(CELL, CELL), 102, C.green, [[C.greenDark, 8]]);
+  const rdg = rng(103);
+  for (let y = 0; y < CELL; y++)
+    for (let x = 0; x < CELL; x++) {
+      const d = Math.hypot(x - 8 + Math.sin(y * 0.9) * 1.5, (y - 8) * 0.9);
+      if (d < 4.5 || (d < 6.5 && (x + y) % 2 === 0)) dungGrass.set(x, y, rdg() < 0.25 ? '#5c3000' : '#8c5418');
+    }
+  out['floor-dung-grass'] = dungGrass;
   const bare = noise(new Sprite(CELL, CELL), 71, C.grey, [[C.greyMid, 16], [C.white, 4]]);
   for (const [x, y] of [[3, 9], [4, 9], [5, 10], [6, 10], [7, 11]]) bare.set(x, y, C.greyDark);
   out['floor-bare'] = bare;
@@ -157,7 +186,11 @@ export function background(cloud: Sprite): Sprite {
     const m = MAP.rooms[k];
     return (x: number, y: number) => x >= px(m.x0) && x < px(m.x1) && y >= px(m.y0) && y < px(m.y1);
   };
-  boards(s, r, room('duty'), ROOM_Y0, ROAD_Y);
+  // Дежурка: серая резиновая плитка — ровная, без цветных пятен
+  const duty = room('duty');
+  s.fill(duty, '#6c6c74');
+  s.fill((x, y) => duty(x, y) && (x % 12 === 0 || y % 12 === 0), '#4c4c54');
+  s.fill((x, y) => duty(x, y) && x % 12 === 1 && y % 12 === 1, '#8c8c94');
   const wash = room('wash');
   s.fill(wash, C.white);
   s.fill((x, y) => wash(x, y) && (x % 8 === 0 || y % 8 === 0), C.grey);
@@ -172,8 +205,15 @@ export function background(cloud: Sprite): Sprite {
   const shed = room('shed');
   s.fill(shed, '#a4a4a8');
   s.fill((x, y) => shed(x, y) && (x % 16 === 0 || y % 16 === 0), C.greyMid);
-  // Тень от крыши навеса: шахматка под передним краем
-  s.fill((x, y) => shed(x, y) && y < ROOM_Y0 + 10 && (x + y) % 2 === 0, '#6c6c70');
+  // Секции навеса: низкие дощатые перегородки — сено сзади, солома и опилки впереди
+  const st = MAP.stations;
+  const plank = (x0: number, y0: number, x1: number, y1: number) => {
+    s.fill((x, y) => x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1, C.k);
+    s.fill((x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1, C.orange);
+    s.fill((x, y) => x >= x0 && x <= x1 && y === y0, C.orangeLight);
+  };
+  plank(px(MAP.rooms.shed.x0) + 2, px(st.hay.y - st.hay.h / 2) - 4, px(MAP.rooms.shed.x1) - 3, px(st.hay.y - st.hay.h / 2) - 3);
+  plank(px((st.straw.x + st.sawdust.x) / 2), px(st.straw.y - st.straw.h / 2), px((st.straw.x + st.sawdust.x) / 2) + 1, px(st.straw.y + st.straw.h / 2));
 
   // Асфальт: площадка с контейнером и хозяйственный проезд вдоль задних стен
   asphalt(s, r, (x, y) => (x >= PAD_X && y >= PAD_Y) || y >= ROAD_Y);
@@ -198,12 +238,27 @@ export function background(cloud: Sprite): Sprite {
     else brick(s, px(w.x0) - 2, px(w.y0) - 3, px(w.x0) + 2, px(w.y1));
   }
 
-  // Левая стенка шатра: полосы
-  const wall = (x: number, y: number) => x < CELL && y >= CELL && y < FENCE_Y;
-  s.fill(wall, C.white);
-  s.fill((x, y) => wall(x, y) && Math.floor(x / 4) % 2 === 0, C.red);
-  s.fill((x, y) => x === CELL - 1 && y >= CELL && y < FENCE_Y, C.k);
-  s.fill((x, y) => x >= CELL - 4 && x < CELL - 1 && y >= CELL && y < FENCE_Y && (x + y) % 2 === 0, C.redDark);
+  // Проезд закрыт для игрока: перила — серая труба на столбиках, задняя дверь кормовой — закрытая дощатая
+  for (const b of MAP.barriers) {
+    const x0 = px(b.x0);
+    const x1 = px(b.x1);
+    const y = px(b.y0);
+    if (b.kind === 'door') {
+      s.fill((x, yy) => x >= x0 && x <= x1 && yy >= y - 3 && yy <= y + 1, C.k);
+      s.fill((x, yy) => x > x0 && x < x1 && yy >= y - 2 && yy <= y, '#8c5418');
+      for (let x = x0 + 4; x < x1; x += 5) s.set(x, y - 1, '#5c3000');
+    } else {
+      for (let x = x0; x <= x1; x++) {
+        s.set(x, y - 3, C.k);
+        s.set(x, y - 2, C.grey);
+        s.set(x, y - 1, C.k);
+      }
+      for (let x = x0 + 2; x <= x1; x += 8) for (let yy = y - 3; yy <= y + 2; yy++) s.set(x, yy, yy === y - 3 ? C.grey : C.greyDark);
+    }
+  }
+
+  // Левая стена вольера — кирпич у края карты
+  brick(s, 0, CELL, 3, FENCE_Y - 2);
 
   // Небо и облака сверху
   s.fill((_x, y) => y < CELL, C.sky);
@@ -229,49 +284,55 @@ export function background(cloud: Sprite): Sprite {
   return s;
 }
 
-// Свет: фонари на столбах — только снаружи решётки, на её линии; в постройках — потолочные лампы без столбов
-export const LAMPS: { x: number; y: number; post: boolean }[] = [
-  { x: 4, y: 0.9, post: false },
-  { x: 9.5, y: 0.9, post: false },
-  ...[1.2, 4.6, 9.6, 13.4, 16.9, 20.4].map((x) => ({ x, y: 9.3, post: true })),
-  { x: 2.2, y: 13.4, post: false },
-  { x: 7.1, y: 13.4, post: false },
-  { x: 12.4, y: 13.4, post: false },
-  { x: 16.8, y: 13.4, post: false },
-];
+// Фонари на столбах — только снаружи решётки, на её линии: светят на дорожку, а не в вольер
+export const LAMPS: { x: number; y: number }[] = [1.2, 4.6, 9.6, 13.4, 16.9, 20.4].map((x) => ({ x, y: 9.3 }));
 
-// Ночь: тёмно-синий с ступенчатыми кругами света, на краях — шахматка, как в старых играх
-export function nightOverlay(): HTMLCanvasElement {
-  return rings('#000028', [0, 0.45, 0.8, 0.9]);
+// Сколько света в точке ночью, 0…1: постройки освещены целиком, у фонарей — пятно на дорожке,
+// дежурный свет — ровный тусклый по всему вольеру
+function lightAt(x: number, y: number, duty: boolean): number {
+  let light = 0;
+  const checker = (x + y) % 2 === 0;
+  for (const r of Object.values(MAP.rooms)) {
+    if (x >= px(r.x0) && x < px(r.x1) && y >= px(r.y0) && y < px(r.y1)) light = r === MAP.rooms.shed ? 0.6 : 0.85;
+  }
+  for (const l of LAMPS) {
+    const d = Math.hypot(x - l.x * CELL, (y - (l.y + 0.7) * CELL) * 1.4);
+    const v = d < 14 ? 0.75 : d < 22 ? (checker ? 0.75 : 0.45) : d < 30 ? (checker ? 0.45 : 0.15) : 0;
+    light = Math.max(light, v);
+  }
+  if (duty) {
+    const p = MAP.paddock;
+    const inside = x >= px(p.x0) && x < px(p.x1) && y >= px(p.y0) && y < px(p.y1);
+    const edge = x < px(p.x0) + 2 || x >= px(p.x1) - 2 || y < px(p.y0) + 2 || y >= px(p.y1) - 2;
+    if (inside) light = Math.max(light, edge && checker ? 0.3 : 0.55);
+  }
+  return light;
 }
 
-export function lampGlow(): HTMLCanvasElement {
-  return rings(C.goldLight, [0.18, 0.08, 0, 0]);
+// Ночь: тёмно-синий почти сплошь; где светло — прозрачнее. На краях пятен — шахматка, как в старых играх
+export function nightOverlay(duty: boolean): HTMLCanvasElement {
+  return paint('#000018', (x, y) => 0.95 * (1 - lightAt(x, y, duty)));
 }
 
-function rings(color: string, levels: number[]): HTMLCanvasElement {
+// Тёплый отсвет ламп поверх ночи
+export function lampGlow(duty: boolean): HTMLCanvasElement {
+  return paint(C.goldLight, (x, y) => 0.16 * lightAt(x, y, duty));
+}
+
+function paint(color: string, alpha: (x: number, y: number) => number): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const g = c.getContext('2d')!;
   const img = g.createImageData(W, H);
   const n = parseInt(color.slice(1), 16);
-  const R = [22, 34, 48];
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      let d = Infinity;
-      for (const l of LAMPS) d = Math.min(d, Math.hypot(x - l.x * CELL, (y - l.y * CELL) * 1.2));
-      const checker = (x + y) % 2 === 0;
-      let a: number;
-      if (d < R[0]) a = levels[0];
-      else if (d < R[1]) a = checker ? levels[0] : levels[1];
-      else if (d < R[2]) a = checker ? levels[1] : levels[2];
-      else a = levels[3];
       const i = (y * W + x) * 4;
       img.data[i] = (n >> 16) & 255;
       img.data[i + 1] = (n >> 8) & 255;
       img.data[i + 2] = n & 255;
-      img.data[i + 3] = Math.round(a * 255);
+      img.data[i + 3] = Math.round(alpha(x, y) * 255);
     }
   g.putImageData(img, 0, 0);
   return c;

@@ -2,7 +2,8 @@ import type { WhyKey } from '../data/why';
 
 export type Phase = 'shift' | 'report';
 
-export type CellKind = 'straw' | 'wet' | 'bareWet' | 'sawdust' | 'bare' | 'dung'; // dung — затоптанный навоз
+// dung — затоптанный навоз; grass и puddle (лужа мочи) — на лугу
+export type CellKind = 'straw' | 'wet' | 'bareWet' | 'sawdust' | 'bare' | 'dung' | 'grass' | 'puddle';
 
 export interface Cell {
   kind: CellKind;
@@ -18,7 +19,8 @@ export type ItemKind =
   | 'bag'
   | 'basin'
   | 'hay'
-  | 'straw';
+  | 'straw'
+  | 'basket';
 
 export interface Item {
   id: number;
@@ -30,6 +32,8 @@ export interface Item {
   dirty?: boolean; // бак, совок, таз после еды
   charges?: number; // опилки, солома
   load?: number; // совок: единиц навоза в накопительном отсеке
+  veg?: 'raw' | 'soaking' | 'washed' | 'peeled'; // корзина: что с овощами
+  soakUntil?: number; // корзина в раковине: до скольки отмокает
   fill?: number; // мешок
   food?: 'kasha' | 'veg' | null; // таз: с едой или пустой грязный
   meal?: MealId;
@@ -89,7 +93,21 @@ export type MealId = 'kasha1' | 'kasha2' | 'dinner';
 
 export interface Kitchen {
   kasha: { status: 'idle' | 'cooking' | 'ready'; readyAt: number; portions: number; meal: MealId | null };
-  veg: { stage: number; nextAt: number; portions: number };
+  veg: { portions: number }; // нарезанный ужин, ждёт тазов
+}
+
+// Чистка овощей: крупный план овоща, на нём дефекты — срезать каждый
+export type VegKind = 'carrot' | 'potato' | 'beet';
+export interface VegSpot {
+  kind: 'top' | 'tail' | 'rot' | 'eye'; // ботва, хвостик, гниль, глазок
+  x: number; // доля ширины рисунка
+  y: number; // доля высоты
+  cut: boolean;
+}
+export interface Prep {
+  pieces: { kind: VegKind; spots: VegSpot[] }[];
+  index: number; // какой овощ сейчас на доске
+  open: boolean; // окно чистки открыто
 }
 
 export interface ShiftEvent {
@@ -113,6 +131,7 @@ export interface Barrow {
   waste: number; // единицы мусора
   balance: number; // -1..1, на краях тюк падает
   parkedAt: number;
+  trail: number; // сколько проехала с грузом с последнего рассыпания
 }
 
 // Большой мусорный бак: заезжать, пока не наполовину; потом дверцу закрыть и ставить трап; полный — вызывать мусоровоз
@@ -134,11 +153,13 @@ export interface State {
   elephants: Elephant[];
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
+  litter: { id: number; x: number; y: number; kind: 'straw' | 'hay' | 'sawdust' }[]; // сор с тачки на твёрдом полу
   items: Item[];
   kitchen: Kitchen;
   feederHay: number;
   trough: number;
   valveOpen: boolean;
+  dutyLight: boolean; // дежурный свет в вольере
   lastOverflow: number;
   gateOpen: boolean;
   barrow: Barrow;
@@ -157,6 +178,7 @@ export interface State {
     hintsShown: string[];
   };
   log: ShiftEvent[];
+  prep: Prep | null;
   report: import('./handover').Report | null;
 }
 
@@ -164,4 +186,6 @@ export type Command =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'balance'; dir: -1 | 1 }
   | { type: 'action'; choice?: number }
-  | { type: 'inspect' };
+  | { type: 'inspect' }
+  | { type: 'prepCut'; spot: number }
+  | { type: 'prepClose' };

@@ -38,6 +38,7 @@ export function act(s: State, pick?: string): string | undefined {
 export function stand(s: State, id: StationId): void {
   const st = MAP.stations[id];
   if (id === 'rack' || id === 'basinRack') at(s, st.x + st.w / 2 + 0.6, st.y);
+  else if (id === 'vegRack') at(s, st.x - st.w / 2 - 0.5, st.y);
   else if (id === 'wash') at(s, st.x, st.y + st.h / 2 + 0.5);
   else at(s, st.x, st.y - st.h / 2 - 0.5);
 }

@@ -68,6 +68,9 @@ export const BALANCE = {
     control: 2.6, // насколько сильно выравнивает игрок (Q / E)
     turnKick: 0.12, // толчок при резком повороте
     tipChance: 0.02, // в минуту: скучающая слониха опрокидывает тачку рядом
+    litterEvery: 0.7, // клеток пути с сыпучим грузом между попытками рассыпать
+    litterChance: 0.6,
+    litterMax: 40,
   },
 
   container: {
@@ -86,12 +89,14 @@ export const BALANCE = {
     bare: 0.1,
     lyingFactor: 1.5,
     straw: 0,
+    puddle: 0.3, // лужа на траве — почти не вредит
     // ≈ минут на мокром за смену, после которых слониха начинает хромать
     limpThreshold: 300,
   },
 
   floor: {
     sawdustAbsorb: 20,
+    puddleDry: 60, // лужа мочи на траве впитывается сама
     spreadEvery: 60,
     spreadChance: 0.15,
     dryCheckEvery: 10,
@@ -121,9 +126,8 @@ export const BALANCE = {
     lateOk: 20,
     kashaLateLimit: 60,
     dinnerLateLimit: 30,
-    vegStartFrom: 360, // 14:00
-    // Ожидание после каждого этапа ужина: замочить, взбить, промыть, нарезать
-    vegWaits: [30, 20, 10, 10],
+    vegStartFrom: 360, // 14:00 — с этого часа берут овощи для ужина
+    vegSoak: 30, // столько минут овощи отмокают в раковине
   },
 
   schedule: {

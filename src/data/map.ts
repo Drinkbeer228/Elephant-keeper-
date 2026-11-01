@@ -13,13 +13,15 @@
 export const MAP = {
   w: 22,
   h: 18,
-  // Подстилка под шатром: клетки пола cx 0..11, cy 0..7
-  bedding: { x: 1, y: 1, cols: 12, rows: 8 },
-  // Вольер: подстилка и трава до правого края
-  paddock: { x0: 1, y0: 1, x1: 21.4, y1: 9 },
-  // Решётка: нижняя линия y=9, правая x=21.4
+  // Подстилка под шатром: клетки соломы cx 0..12, cy 0..7 — от левой стены
+  bedding: { x: 0, y: 1, cols: 13, rows: 8 },
+  // Пол вольера — сетка клеток на весь вольер: колонки подстилки (солома), дальше луг (трава)
+  floor: { x: 0, y: 1, cols: 21, rows: 8 },
+  // Вольер: подстилка и луг до правой решётки
+  paddock: { x0: 0, y0: 1, x1: 21, y1: 9 },
+  // Решётка: нижняя линия y=9, правая x=21
   fenceY: 9,
-  fenceX: 21.4,
+  fenceX: 21,
   door: { x0: 2.2, x1: 3.6 }, // проход для человека: слон не пролезет
   elephantGate: { x0: 5.6, x1: 8.4 }, // ворота для слона, прямо над входом в мойку
   rooms: {
@@ -41,29 +43,40 @@ export const MAP = {
     { x0: 9.8, y0: 11.4, x1: 9.8, y1: 15.6 },
     { x0: 15, y0: 11.4, x1: 15, y1: 15.6 },
     { x0: 0, y0: 15.6, x1: 13.0, y1: 15.6 },
-    { x0: 14.4, y0: 15.6, x1: 15, y1: 15.6 }, // задняя дверь кормовой 13.0–14.4 — на проезд
+    { x0: 14.4, y0: 15.6, x1: 15, y1: 15.6 },
+  ],
+  // Проезд — для машин: игроку туда не выйти. Задняя дверь кормовой закрыта до поставок (этап 2),
+  // за навесом и вдоль площадки контейнера — перила
+  barriers: [
+    { x0: 13.0, y0: 15.6, x1: 14.4, y1: 15.6, kind: 'door' },
+    { x0: 15, y0: 15.6, x1: 18.6, y1: 15.6, kind: 'railing' },
+    { x0: 18.6, y0: 15.6, x1: 22, y1: 15.6, kind: 'railing' },
   ],
   stations: {
     rack: { x: 0.75, y: 13.4, w: 0.5, h: 3.2, label: 'Стойка инвентаря' },
     bags: { x: 2.5, y: 15.0, w: 0.8, h: 0.9, label: 'Мешки 240 л' },
-    sawdust: { x: 3.9, y: 15.0, w: 0.8, h: 0.9, label: 'Опилки' },
-    hose: { x: 5.0, y: 12.0, w: 0.6, h: 0.6, label: 'Шланг' },
     wash: { x: 9.0, y: 12.2, w: 1.4, h: 0.8, label: 'Раковина' },
     drain: { x: 6.2, y: 14.8, w: 1.0, h: 0.6, label: 'Слив' },
     drain2: { x: 8.2, y: 14.8, w: 1.0, h: 0.6, label: 'Слив' },
     basinRack: { x: 10.4, y: 13.4, w: 0.6, h: 3.2, label: 'Стеллаж тазов' },
     kitchen: { x: 12.6, y: 13.8, w: 2.6, h: 1.4, label: 'Кормовая' },
-    hay: { x: 16.0, y: 13.0, w: 1.6, h: 1.4, label: 'Навес: сено' },
-    straw: { x: 17.6, y: 14.4, w: 1.4, h: 1.0, label: 'Навес: солома' },
+    vegRack: { x: 14.6, y: 12.4, w: 0.6, h: 1.6, label: 'Овощной стеллаж' },
+    // Навес: три секции — сено тюками вдоль задней стороны, впереди куча соломы и куча опилок
+    hay: { x: 16.8, y: 15.0, w: 3.0, h: 0.9, label: 'Навес: сено' },
+    straw: { x: 15.8, y: 12.7, w: 1.2, h: 1.0, label: 'Навес: солома' },
+    sawdust: { x: 17.8, y: 12.7, w: 1.2, h: 1.0, label: 'Навес: опилки' },
     dump: { x: 20.4, y: 12.6, w: 2.6, h: 1.4, label: 'Контейнер' },
     valve: { x: 12.2, y: 9.3, w: 0.6, h: 0.6, label: 'Вентиль поилки' },
+    lightSwitch: { x: 0.5, y: 11.2, w: 0.4, h: 0.4, label: 'Выключатель дежурного света' },
     gate: { x: 7.0, y: 9, w: 2.8, h: 1.2, label: 'Ворота' },
   },
   // Внутри вольера
   trough: { x: 12.2, y: 7.2 },
   feeder: { x: 2.2, y: 1.6 },
   playerStart: { x: 2.9, y: 10.2 },
-  barrowStart: { x: 3.4, y: 12.6 }, // место тачки — в дежурке у двери, подальше от стойки, мешков и опилок
+  barrowStart: { x: 3.4, y: 12.6 }, // место тачки — в дежурке у двери, подальше от стойки и мешков
+  pailSpot: { x: 18.2, y: 13.7 }, // ведро для опилок — у кучи под навесом
+  basketSpot: { x: 14.5, y: 13.8 }, // корзина для овощей — под стеллажом, в стороне от стола
   // Где висит инвентарь на стойке
   rackSpots: {
     scoop: { x: 1.25, y: 12.2 },
@@ -99,11 +112,16 @@ export function inReachZone(x: number, y: number): boolean {
   return y >= MAP.fenceY && y < MAP.fenceY + 1.3 && x >= MAP.paddock.x0 && x < MAP.fenceX;
 }
 
-export function nearStation(id: StationId, x: number, y: number, reach: number): boolean {
+// Расстояние до края станции
+export function stationDist(id: StationId, x: number, y: number): number {
   const s = MAP.stations[id];
   const dx = Math.max(Math.abs(x - s.x) - s.w / 2, 0);
   const dy = Math.max(Math.abs(y - s.y) - s.h / 2, 0);
-  return Math.hypot(dx, dy) <= reach;
+  return Math.hypot(dx, dy);
+}
+
+export function nearStation(id: StationId, x: number, y: number, reach: number): boolean {
+  return stationDist(id, x, y) <= reach;
 }
 
 export function inRoom(id: keyof typeof MAP.rooms, x: number, y: number): boolean {

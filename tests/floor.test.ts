@@ -10,7 +10,7 @@ describe('пол', () => {
   it('цепочка: мокрое вилами → опилки → впитали → метла → солома', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    setCell(s, 2, 2, 'wet'); // клетка мира (3..4, 3..4)
+    setCell(s, 3 - MAP.bedding.x, 2, 'wet'); // клетка мира (3..4, 3..4)
     at(s, 3.5, 3.5);
     s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 4.5, y: 3.5 });
 
@@ -43,7 +43,7 @@ describe('пол', () => {
     const m = el(s, 'margo');
     hold(a, 3.5, 3.5);
     hold(m, 8.5, 3.5);
-    setCell(s, 2, 2, 'wet');
+    setCell(s, 3 - MAP.bedding.x, 2, 'wet');
     for (let i = 0; i < 120; i++) {
       advance(s, 1);
       // Чтобы сами не намочили и не испачкали свои клетки
@@ -111,7 +111,7 @@ describe('затоптанный навоз', () => {
   it('затоптанное счищают совком до пола', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    setCell(s, 2, 2, 'dung');
+    setCell(s, 3 - MAP.bedding.x, 2, 'dung');
     s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 4.5, y: 3.5 });
     s.player.held = newItem(s, 'scoop');
     at(s, 3.5, 3.5);

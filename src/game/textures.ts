@@ -5,7 +5,8 @@ import { keeperFrame } from '../art/keeperPx';
 import { register, type Sprite } from '../art/pixel';
 import { stationSprites } from '../art/stationsPx';
 import { background, floorTiles, lampGlow, nightOverlay } from '../art/worldPx';
-import type { Item } from '../sim';
+import type { Item, Prep } from '../sim';
+import { vegSprite } from '../art/vegPx';
 
 // Все пиксельные спрайты собираются в коде при запуске и регистрируются как текстуры Phaser
 
@@ -21,14 +22,20 @@ export function loadTextures(scene: Phaser.Scene): void {
   for (const [k, s] of Object.entries(stations)) register(scene, k, s);
   for (const [k, s] of Object.entries(floorTiles())) register(scene, k, s);
   register(scene, 'bg', background(stations['deco-cloud']));
-  register(scene, 'night', nightOverlay());
-  register(scene, 'glow', lampGlow());
+  register(scene, 'night', nightOverlay(false));
+  register(scene, 'night-duty', nightOverlay(true));
+  register(scene, 'glow', lampGlow(false));
+  register(scene, 'glow-duty', lampGlow(true));
 }
 
 export function itemTexture(item: Item): string {
   switch (item.kind) {
     case 'bucket':
       return (item.liters ?? 0) > 0 ? 'item-bucket-full' : item.dirty ? 'item-bucket-dirty' : 'item-bucket';
+    case 'basket':
+      return !item.veg ? 'item-basket' : item.veg === 'raw' || item.veg === 'soaking' ? 'item-basket-raw' : 'item-basket-clean';
+    case 'sawdust':
+      return item.charges ? 'item-sawdust' : 'item-sawdust-empty';
     case 'scoop':
       return (item.load ?? 0) > 0 ? 'item-scoop-full' : 'item-scoop';
     case 'bag':
@@ -51,6 +58,10 @@ export function itemUrl(item: Item): string {
   const key = itemTexture(item);
   if (!itemUrls.has(key)) itemUrls.set(key, url(items[key]));
   return itemUrls.get(key)!;
+}
+// Овощ для окна чистки: рисунок зависит от срезанного, поэтому без кэша
+export function vegUrl(piece: Prep['pieces'][number]): string {
+  return url(vegSprite(piece));
 }
 let barrowIcon = '';
 export function barrowUrl(): string {

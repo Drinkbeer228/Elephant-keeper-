@@ -7,7 +7,8 @@ import { MAP, inPaddock, inReachZone } from '../data/map';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { profileOf, bucketUnder } from '../sim/elephants';
-import { kashaDue, mealTime, vegStageAvailable } from '../sim/feeding';
+import { allServedDinner, kashaDue, mealTime } from '../sim/feeding';
+import { isDark } from '../sim/clock';
 import { sawdustAbsorbed } from '../sim/floor';
 import { ITEM_NAMES, basinsOnRack } from '../sim/items';
 import type { Elephant, Item } from '../sim/types';
@@ -21,6 +22,7 @@ interface Step {
   done?: () => boolean; // проверка после нажатия; не выполнено — нажать ещё
   wait?: () => boolean; // стоять, пока не станет true
   timeout?: number; // тиков
+  act?: () => Command[]; // на месте — отдать свои команды (чистка овощей), пока не done
 }
 
 // Бак и мешок паркуются на дорожке за полосой, до которой дотягивается хобот
@@ -32,6 +34,8 @@ const st = MAP.stations;
 const AT = {
   rack: { x: st.rack.x + st.rack.w / 2 + 0.6, y: 13.0 },
   basinRack: { x: st.basinRack.x + st.basinRack.w / 2 + 0.6, y: st.basinRack.y },
+  vegRack: { x: st.vegRack.x - st.vegRack.w / 2 - 0.5, y: st.vegRack.y },
+  lightSwitch: { x: st.lightSwitch.x + 0.5, y: st.lightSwitch.y - 0.5 },
   sawdust: { x: st.sawdust.x, y: st.sawdust.y - 0.8 },
   bags: { x: st.bags.x, y: st.bags.y - 0.8 },
   wash: { x: st.wash.x, y: st.wash.y + st.wash.h / 2 + 0.5 },
@@ -132,7 +136,7 @@ export function reachPoint(item: P): P {
 }
 
 function cellCenter(cx: number, cy: number): P {
-  return { x: MAP.bedding.x + cx + 0.5, y: MAP.bedding.y + cy + 0.5 };
+  return { x: MAP.floor.x + cx + 0.5, y: MAP.floor.y + cy + 0.5 };
 }
 
 function insideClamp(p: P): P {
@@ -182,6 +186,8 @@ export class Bot {
 
     // Сигнал важнее всего: бросить текущее дело (кроме таза с едой в руках)
     if (this.job !== 'toilet' && this.signalTarget() && s.player.held?.food == null) this.abort('preempt');
+    // Пора запаривать кашу — уборка подождёт
+    if (this.job && this.job !== 'toilet' && this.job !== 'meal' && this.kashaUrgent()) this.abort('kasha');
     if (!this.plan.length) this.choose();
     if (!this.plan.length) return [];
     this.stats.busyTicks++;
@@ -210,27 +216,42 @@ export class Bot {
     }
 
     // Подсказка уже нужная и цель рядом — жмём, не дожидаясь точного места (как человек)
-    const close = st.expect && !st.wait && d(p, target) < 1.0 && st.expect.test(availableAction(s)?.label ?? '');
+    const close = st.expect && !st.wait && d(p, target) < 1.0 && !!this.press(st.expect);
     if (d(p, target) > 0.25 && !close && !(this.pressed && st.done)) return this.move(target);
 
     if (st.wait) {
       return st.wait() ? this.next() : [];
+    }
+    if (st.act) {
+      if (st.done?.()) return this.next();
+      return st.act();
     }
     if (st.expect) {
       if (this.pressed && st.done) {
         if (st.done()) return this.next();
         this.pressed = false;
       }
-      const label = availableAction(s)?.label ?? '';
-      if (!st.expect.test(label)) return [];
+      const cmd = this.press(st.expect);
+      if (!cmd) return [];
       if (st.done) {
         this.pressed = true;
-        return [{ type: 'action' }];
+        return [cmd];
       }
       this.next();
-      return [{ type: 'action' }];
+      return [cmd];
     }
     return this.next();
+  }
+
+  // Команда «Действие», если подсказка подходит; в меню — нужный пункт
+  private press(expect: RegExp): Command | null {
+    const a = availableAction(this.s);
+    if (!a) return null;
+    if (a.choices) {
+      const i = a.choices.findIndex((c) => expect.test(c.label));
+      return i >= 0 ? { type: 'action', choice: i } : null;
+    }
+    return expect.test(a.label) ? { type: 'action' } : null;
   }
 
   private next(): Command[] {
@@ -314,7 +335,8 @@ export class Bot {
     if (s.feederHay < 35) {
       return this.start('hay', [...this.freeHands(), this.at('сенник', AT.hay, /Взять тюк сена/), this.at('кормушка', AT.feeder, /Заложить сено/)]);
     }
-    if (vegStageAvailable(s)) return this.start('veg', [...this.freeHands(), this.at('кормовая', AT.kitchen, /^(Ужин: |Запарить кашу)/)]);
+    const dinner = this.dinnerJob();
+    if (dinner) return this.start('veg', dinner);
     const c = s.container;
     if (c.truckAt === null && c.fill >= BALANCE.container.capacity * BALANCE.container.callAt) {
       return this.start('truck', [...this.freeHands(), this.at('бак', AT.dump, /Позвонить: вывезти/)]);
@@ -323,8 +345,12 @@ export class Bot {
       const tidy = this.tidy();
       if (tidy) return this.start('tidy', tidy);
     }
+    // Ночью убирать в вольере без дежурного света нельзя — сначала свет; утром — выключить
+    if (s.dutyLight && !isDark(s)) return this.start('light', [...this.freeHands(), this.at('свет', AT.lightSwitch, /Выключить дежурный свет/)]);
     const clean = this.cleaning();
+    if (clean && isDark(s) && !s.dutyLight) return this.start('light', [...this.freeHands(), this.at('свет', AT.lightSwitch, /Включить дежурный свет/)]);
     if (clean) return this.start(clean[0], clean[1]);
+    if (s.litter.length >= 3) return this.start('sweep', this.sweep());
     if (held) return this.start('putAway', this.putAway(() => s.player.held));
   }
 
@@ -385,6 +411,12 @@ export class Bot {
       }
       case 'hay':
         return [this.at('кормушка', AT.feeder, /Заложить сено/, () => !this.s.player.held)];
+      case 'sawdust':
+        // Ведро — на место у кучи: сначала добрать опилок, потом поставить
+        return [
+          { label: 'добрать опилок', to: () => ((it.charges ?? 0) < BALANCE.items.sawdustCharges && this.s.player.held === it ? AT.sawdust : null), expect: /Набрать опилок/ },
+          this.at('ведро на место', { x: MAP.pailSpot.x - 0.5, y: MAP.pailSpot.y }, /Поставить ведро на место/, () => this.s.player.held !== it),
+        ];
       default:
         return [this.dropAt(SAFE)];
     }
@@ -456,6 +488,11 @@ export class Bot {
     return steps;
   }
 
+  private kashaUrgent(): boolean {
+    const due = kashaDue(this.s);
+    return !!due && this.s.kitchen.kasha.status === 'idle' && this.s.t >= mealTime(due) - 26;
+  }
+
   private mealJob(): Step[] | null {
     const s = this.s;
     const k = s.kitchen;
@@ -501,6 +538,48 @@ export class Bot {
       return [...this.freeHands(), this.at('кормовая', AT.kitchen, /Запарить кашу/)];
     }
     return null;
+  }
+
+  // Ужин: корзина → стеллаж → замочить → промыть → почистить → нарезать. Раскладывает по тазам mealJob
+  private dinnerJob(): Step[] | null {
+    const s = this.s;
+    if (s.t < BALANCE.food.vegStartFrom || allServedDinner(s) || s.kitchen.veg.portions > 0) return null;
+    if (s.items.some((i) => i.kind === 'basin' && i.food === 'veg')) return null;
+    const b = s.player.held?.kind === 'basket' ? s.player.held : s.items.find((i) => i.kind === 'basket');
+    if (!b) return null;
+    const table = st.kitchen;
+    const onTable = () => s.items.includes(b) && Math.abs(b.x - table.x) <= table.w / 2 + 0.3 && Math.abs(b.y - table.y) <= table.h / 2 + 0.3;
+    if (b.veg === 'soaking' && s.t < (b.soakUntil ?? 0)) return null;
+    const hold: Step[] = s.player.held === b || b.veg === 'soaking' || onTable() ? [] : [...this.freeHands(), this.take(b, /Взять: корзина/)];
+    const clean: Step[] = [
+      { label: 'чистка', to: () => (s.prep ? AT.kitchen : null), act: () => this.cut(), done: () => !s.prep, timeout: 30 * 30 },
+      this.at('нарезать', AT.kitchen, /Нарезать ужин/, () => s.kitchen.veg.portions > 0),
+    ];
+    switch (b.veg) {
+      case undefined:
+        return [...hold, this.at('стеллаж овощей', AT.vegRack, /Набрать овощей/, () => b.veg === 'raw'), this.at('замочить', AT.wash, /Замочить овощи/, () => b.veg === 'soaking')];
+      case 'raw':
+        return [...hold, this.at('замочить', AT.wash, /Замочить овощи/, () => b.veg === 'soaking')];
+      case 'soaking':
+        return [
+          ...(s.player.held ? this.freeHands() : []),
+          this.at('промыть', AT.wash, /Промыть овощи/, () => b.veg === 'washed'),
+          this.at('на стол', AT.kitchen, /Чистить овощи/, () => !!s.prep),
+          ...clean,
+        ];
+      case 'washed':
+        return [...hold, this.at('на стол', AT.kitchen, /(Чистить овощи|Продолжить чистку)/, () => !!s.prep?.open), ...clean];
+      case 'peeled':
+        return [...(s.player.held ? this.freeHands() : []), clean[1]];
+    }
+  }
+
+  // Срезать первый несрезанный дефект на текущем овоще
+  private cut(): Command[] {
+    const p = this.s.prep;
+    if (!p) return [];
+    const i = p.pieces[p.index].spots.findIndex((x) => !x.cut);
+    return [{ type: 'prepCut', spot: i }];
   }
 
   private tidy(): Step[] | null {
@@ -554,7 +633,6 @@ export class Bot {
     if (s.player.held?.kind === kind) return [];
     const onFloor = s.items.filter((i) => i.kind === kind).sort((a, b) => d(a, s.player) - d(b, s.player))[0];
     if (onFloor) return [this.take(onFloor)];
-    if (kind === 'sawdust') return [this.at('опилки', AT.sawdust, /Взять ведро опилок/, () => s.player.held?.kind === 'sawdust')];
     if (kind === 'straw') return [this.at('солома', AT.straw, /Взять охапку соломы/, () => s.player.held?.kind === 'straw')];
     return [];
   }
@@ -607,7 +685,24 @@ export class Bot {
     for (const p of targets.sort((a, b) => a.x - b.x)) {
       steps.push({ label: 'совок → отсек', to: () => (s.player.held?.kind === 'scoop' && s.dung.some((d) => d.x === p.x && d.y === p.y) ? p : null), expect: /Убрать навоз в (совок|тачку|мешок)/, timeout: 30 * 6 });
     }
-    steps.push(...this.putAway(() => s.player.held));
+    // Совок — домой: высыпать, вымыть, на стойку. Что в руках, смотрим по ходу, а не при составлении плана
+    const scoop = () => (s.player.held?.kind === 'scoop' ? s.player.held : null);
+    steps.push(
+      { label: 'высыпать совок', to: () => ((scoop()?.load ?? 0) > 0 ? AT.dump : null), expect: /Высыпать совок/, done: () => !scoop()?.load },
+      { label: 'мойка совок', to: () => (scoop()?.dirty ? AT.wash : null), expect: /Вымыть совок/, done: () => !scoop()?.dirty },
+      { label: 'стойка', to: () => (scoop() ? AT.rack : null), expect: /Положить на стойку/, done: () => !scoop() },
+    );
+    return steps;
+  }
+
+  // Подмести сор с тачки: метлу со стойки, обойти кучки, метлу на место
+  private sweep(): Step[] {
+    const s = this.s;
+    const steps: Step[] = [...this.freeHands(), ...this.toolSteps('broom')];
+    for (const l of [...s.litter].sort((a, b) => a.x - b.x)) {
+      steps.push({ label: 'подмести', to: () => (s.player.held?.kind === 'broom' && s.litter.includes(l) ? { x: l.x, y: l.y } : null), expect: /Подмести сор/, timeout: 30 * 8 });
+    }
+    steps.push(...this.putAwayLater('broom'));
     return steps;
   }
 
@@ -629,7 +724,8 @@ export class Bot {
     for (const p of targets) {
       steps.push({ label: `${tool} → клетка`, to: () => (s.player.held?.kind === tool ? p : null), expect, timeout: 30 * 6 });
     }
-    steps.push({ label: 'положить', to: () => (s.player.held?.kind === tool ? SAFE : null), expect: /^Положить/, done: () => !s.player.held });
+    if (tool === 'sawdust') steps.push(...this.putAway(() => s.player.held));
+    else steps.push({ label: 'положить', to: () => (s.player.held?.kind === tool ? SAFE : null), expect: /^Положить/, done: () => !s.player.held });
     return steps;
   }
 }

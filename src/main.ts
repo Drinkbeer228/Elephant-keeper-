@@ -17,6 +17,8 @@ const input = new Input();
 
 const hud = new Hud(document.getElementById('hud')!, input, {
   restart: () => location.reload(),
+  prepCut: (spot) => pending.push({ type: 'prepCut', spot }),
+  prepClose: () => pending.push({ type: 'prepClose' }),
   setPaused: (p) => (paused = p),
 });
 if (params.has('bot')) hud.closeIntro();
@@ -24,6 +26,12 @@ if (params.has('bot')) hud.closeIntro();
 function frame(dt: number): FrameResult {
   const before = availableAction(state);
   for (const press of input.takePresses()) {
+    // Окно чистки: Space и кнопка действия режут выбранный дефект, Esc — отойти от стола
+    if (state.prep?.open && !hud.introOpen && !paused) {
+      if (press === 'action') pending.push({ type: 'prepCut', spot: hud.prepSelected });
+      else if (press === 'pause') pending.push({ type: 'prepClose' });
+      continue;
+    }
     if (press === 'pause') {
       if (hud.menuOpen) hud.closeMenu();
       else hud.togglePause();
@@ -44,7 +52,8 @@ function frame(dt: number): FrameResult {
     hud.render(state, availableAction(state));
     return { actionReady: false };
   }
-  const move = input.move();
+  // У стола с овощами кипер стоит на месте: стрелки выбирают дефект
+  const move = state.prep?.open ? { x: 0, y: 0 } : input.move();
   if (move.x || move.y) {
     hud.hideInspect();
     hud.closeMenu();

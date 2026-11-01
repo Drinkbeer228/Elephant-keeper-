@@ -66,6 +66,28 @@ function basin(food: 'empty' | 'kasha' | 'veg' | 'dirty'): Sprite {
   return s;
 }
 
+// Корзина для овощей: плетёная; с грязными овощами — в земле, с чистыми — яркие
+function basket(content: 'empty' | 'raw' | 'clean'): Sprite {
+  const s = new Sprite(16, 16);
+  if (content !== 'empty') {
+    const dirt = content === 'raw';
+    for (const [x, y, c] of [
+      [4, 6, dirt ? '#8c5418' : '#fc7c18'],
+      [5, 5, dirt ? '#8c5418' : '#fc7c18'],
+      [7, 6, dirt ? '#5c3000' : '#c88c4c'],
+      [8, 5, dirt ? '#5c3000' : '#e4c47c'],
+      [10, 6, dirt ? '#5c0030' : '#a80060'],
+      [11, 5, dirt ? '#5c0030' : '#d8487c'],
+      [6, 4, C.green],
+      [11, 4, C.greenLight],
+    ] as [number, number, string][])
+      s.set(x, y, c);
+  }
+  s.shape(union(rect(2, 7, 13, 13), rect(3, 13, 12, 14)), T.wood);
+  for (let x = 3; x <= 12; x += 2) for (let y = 8; y <= 13; y += 2) s.set(x, y, C.redDark);
+  return s;
+}
+
 function bag(full: boolean): Sprite {
   const s = new Sprite(16, 16);
   if (full) {
@@ -103,11 +125,17 @@ function straw(): Sprite {
   return s;
 }
 
-function sawdust(): Sprite {
+// Ведро для опилок: красное; полное — горка опилок, пустое — тёмное дно
+function sawdust(full = true): Sprite {
   const s = new Sprite(16, 16);
   s.shape(union(rect(3, 7, 12, 14)), T.red);
-  s.shape(ellipse(7.5, 6.5, 5.5, 3), T.cream);
-  for (const [x, y] of [[5, 6], [8, 5], [10, 6]]) s.set(x, y, '#e4b878');
+  if (full) {
+    s.shape(ellipse(7.5, 6.5, 5.5, 3), T.cream);
+    for (const [x, y] of [[5, 6], [8, 5], [10, 6]]) s.set(x, y, '#e4b878');
+  } else {
+    s.shape(ellipse(7.5, 7.5, 5, 1.6), T.red);
+    s.fill(ellipse(7.5, 7.5, 3.6, 0.8), '#2c1810');
+  }
   for (let x = 4; x <= 11; x++) s.set(x, 10, C.redDark);
   return s;
 }
@@ -247,7 +275,11 @@ export function itemSprites(): Record<string, Sprite> {
     'item-bag-full': bag(true),
     'item-hay': hay(),
     'item-straw': straw(),
+    'item-basket': basket('empty'),
+    'item-basket-raw': basket('raw'),
+    'item-basket-clean': basket('clean'),
     'item-sawdust': sawdust(),
+    'item-sawdust-empty': sawdust(false),
     'item-scoop': scoop(),
     'item-scoop-full': scoop(true),
     'item-fork': fork(),

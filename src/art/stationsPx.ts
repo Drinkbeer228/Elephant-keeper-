@@ -18,17 +18,6 @@ function rack(): Sprite {
   return s;
 }
 
-function hose(): Sprite {
-  const s = new Sprite(16, 20);
-  s.shape(rect(6, 0, 9, 4), T.steel);
-  s.shape(ellipse(8, 10, 7, 6.5), T.green);
-  s.fill(ellipse(8, 10, 3.6, 3.2), C.greenDark);
-  s.fill(ellipse(8, 10, 1.6, 1.4), C.k);
-  s.shape(line([[3, 15], [2, 19]], 1), T.green);
-  s.shape(rect(1, 18, 4, 19), T.steel);
-  return s;
-}
-
 function grain(): Sprite {
   const s = new Sprite(26, 18);
   const sack = (x: number, y: number) => {
@@ -43,12 +32,14 @@ function grain(): Sprite {
   return s;
 }
 
+// Куча опилок под навесом: светлая насыпь со стружкой
 function sawdustBin(): Sprite {
-  const s = new Sprite(16, 18);
-  s.shape(rect(1, 7, 14, 17), T.wood);
-  for (let x = 2; x <= 13; x++) s.set(x, 12, C.redDark);
-  s.shape(ellipse(7.5, 7, 6.8, 4), T.cream);
-  for (const [x, y] of [[4, 6], [7, 4], [10, 6], [6, 8], [11, 8]]) s.set(x, y, '#e4b878');
+  const s = new Sprite(26, 16);
+  s.shape(union(ellipse(13, 12, 12.5, 6), ellipse(10, 9, 7, 5)), T.cream);
+  for (const [x, y] of [[5, 11], [9, 8], [13, 12], [17, 10], [20, 13], [11, 14], [15, 7], [7, 13]]) {
+    s.set(x, y, '#c49a5c');
+    s.set(x + 1, y, '#e4b878');
+  }
   return s;
 }
 
@@ -70,8 +61,6 @@ function wash(): Sprite {
   // Кран
   s.shape(union(rect(25, 2, 27, 10), rect(25, 2, 31, 4), rect(29, 2, 31, 6)), T.steel);
   s.shape(ellipse(26, 7, 2.2, 2.2), T.red);
-  // Шланг
-  s.shape(line([[10, 17], [5, 21], [10, 25], [17, 24], [16, 20]], 1.2), T.green);
   return s;
 }
 
@@ -108,30 +97,29 @@ function kitchen(cooking: boolean): Sprite {
   return s;
 }
 
+// Сено тюками вдоль задней стороны навеса: два ряда, зеленоватое — не спутать с соломой
 function hayStack(): Sprite {
-  const s = new Sprite(30, 30);
+  const s = new Sprite(48, 20);
+  const HAY = { L: '#d8e878', M: '#a8b840', D: '#6c7c20' };
   const bale = (x: number, y: number) => {
-    s.shape(rect(x, y, x + 13, y + 7), T.straw);
-    for (let yy = y + 1; yy < y + 7; yy++) {
+    s.shape(rect(x, y, x + 14, y + 8), HAY);
+    for (let yy = y + 1; yy < y + 8; yy++) {
       s.set(x + 4, yy, C.redDark);
-      s.set(x + 9, yy, C.redDark);
+      s.set(x + 10, yy, C.redDark);
     }
-    s.set(x + 2, y + 3, C.goldDark);
-    s.set(x + 7, y + 5, C.goldDark);
-    s.set(x + 11, y + 2, C.goldDark);
+    s.set(x + 2, y + 3, '#6c7c20');
+    s.set(x + 7, y + 5, '#6c7c20');
   };
-  bale(0, 22);
-  bale(15, 22);
-  bale(7, 14);
-  bale(0, 6);
-  bale(15, 14);
+  for (const x of [1, 17, 33]) bale(x, 11);
+  for (const x of [9, 25]) bale(x, 2);
   return s;
 }
 
+// Куча соломы: светло-золотая, рыхлая
 function strawPile(): Sprite {
-  const s = new Sprite(30, 20);
-  s.shape(union(ellipse(15, 16, 14.5, 9), ellipse(11, 12, 8, 7)), T.straw);
-  for (const [x, y] of [[6, 14], [10, 10], [14, 13], [19, 12], [22, 15], [12, 16], [17, 17], [8, 17]]) {
+  const s = new Sprite(26, 16);
+  s.shape(union(ellipse(13, 12, 12.5, 6), ellipse(14, 8, 7, 5)), T.straw);
+  for (const [x, y] of [[6, 11], [10, 8], [14, 11], [18, 9], [20, 12], [12, 13], [16, 6], [8, 13]]) {
     s.set(x, y, C.goldDark);
     s.set(x + 1, y - 1, C.goldDark);
   }
@@ -147,6 +135,25 @@ function valve(open: boolean): Sprite {
   s.fill(rect(2, 9, 9, 10), C.red);
   s.set(5, 10, C.k);
   if (open) for (let y = 18; y < 22; y++) s.set(5, y, C.blueLight);
+  return s;
+}
+
+// Выключатель дежурного света: коробка на стене, лампочка горит, когда включён
+function lightSwitch(on: boolean): Sprite {
+  const s = new Sprite(8, 10);
+  s.shape(rect(0, 0, 7, 9), T.metal);
+  s.fill(rect(3, 4, 4, 7), C.greyDark);
+  s.set(3, on ? 4 : 7, C.k);
+  s.fill(rect(2, 1, 5, 2), on ? C.gold : C.greyMid);
+  return s;
+}
+
+// Сор с тачки: пучок соломы, клочок сена или горстка опилок — с контуром, чтобы читался на досках
+function litter(kind: 'straw' | 'hay' | 'sawdust'): Sprite {
+  const s = new Sprite(10, 7);
+  const tone = kind === 'straw' ? T.straw : kind === 'hay' ? { L: '#d8e878', M: '#a8b840', D: '#6c7c20' } : T.cream;
+  if (kind === 'sawdust') s.shape(union(ellipse(4, 4.2, 3.4, 2), ellipse(6.5, 4.6, 2.4, 1.6)), tone);
+  else s.shape(union(line([[1.5, 4.5], [8, 2.5]], 0.8), line([[2, 2.5], [8.5, 5]], 0.8)), tone);
   return s;
 }
 
@@ -169,9 +176,11 @@ function feeder(level: 0 | 1 | 2): Sprite {
   return s;
 }
 
-function mat(): Sprite {
-  const s = new Sprite(18, 10);
-  s.shape(ellipse(9, 5, 8.6, 4.4), { L: '#4c4440', M: '#383230', D: '#282220' });
+// Место таза: бетонная площадка у решётки
+function pad(): Sprite {
+  const s = new Sprite(20, 9);
+  s.shape(rect(0, 0, 19, 8), { L: C.white, M: C.grey, D: C.greyMid });
+  for (const [x, y] of [[4, 3], [11, 5], [15, 2], [7, 6]]) s.set(x, y, C.greyMid);
   return s;
 }
 
@@ -235,6 +244,23 @@ function container(open: boolean): Sprite {
 }
 
 // Стеллаж тазов в кормовой: стальная рама вдоль стены, вид сбоку
+// Овощной стеллаж: три ящика — морковь, картофель, свёкла; вид сбоку вдоль стены
+function vegRack(): Sprite {
+  const s = new Sprite(14, 30);
+  s.shape(rect(0, 0, 2, 29), T.wood);
+  s.shape(rect(11, 0, 13, 29), T.wood);
+  const crate = (y: number, a: string, b: string) => {
+    s.shape(rect(2, y, 11, y + 6), T.wood);
+    for (const [x, c] of [[4, a], [6, b], [8, a], [9, b]] as [number, string][]) s.set(x, y + 1, c);
+    s.set(5, y + 2, a);
+    s.set(7, y + 2, b);
+  };
+  crate(1, '#fc9838', C.greenLight); // морковь
+  crate(11, '#c88c4c', '#8c5418'); // картофель
+  crate(21, '#a80060', '#5c0030'); // свёкла
+  return s;
+}
+
 function basinRack(): Sprite {
   const s = new Sprite(12, 56);
   s.shape(rect(1, 0, 3, 55), T.steel);
@@ -318,7 +344,6 @@ function bulb(color: string): Sprite {
 export function stationSprites(): Record<string, Sprite> {
   return {
     'st-rack': rack(),
-    'st-hose': hose(),
     'st-grain': grain(),
     'st-sawdust': sawdustBin(),
     'st-bags': bagsPile(),
@@ -330,10 +355,15 @@ export function stationSprites(): Record<string, Sprite> {
     'st-valve': valve(false),
     'st-valve-open': valve(true),
     'st-trough': trough(),
+    'litter-straw': litter('straw'),
+    'litter-hay': litter('hay'),
+    'litter-sawdust': litter('sawdust'),
+    'st-switch-on': lightSwitch(true),
+    'st-switch-off': lightSwitch(false),
     'st-feeder-0': feeder(0),
     'st-feeder-1': feeder(1),
     'st-feeder-2': feeder(2),
-    'st-mat': mat(),
+    'st-pad': pad(),
     'barrow-base': barrowBase(),
     'barrow-waste-1': barrowWaste(1),
     'barrow-waste-2': barrowWaste(2),
@@ -344,6 +374,7 @@ export function stationSprites(): Record<string, Sprite> {
     'st-container-open': container(true),
     'st-container-closed': container(false),
     'st-basin-rack': basinRack(),
+    'st-vegRack': vegRack(),
     'st-shed-post': shedPost(),
     'st-ramp': ramp(),
     'st-drain': drain(),

@@ -30,7 +30,7 @@ export function stinkSources(state: State): { x: number; y: number }[] {
   for (const d of state.dung) if (state.t - d.at > 20) out.push(d);
   state.cells.forEach((row, cy) =>
     row.forEach((c, cx) => {
-      if (c.kind === 'dung') out.push({ x: MAP.bedding.x + cx + 0.5, y: MAP.bedding.y + cy + 0.5 });
+      if (c.kind === 'dung') out.push({ x: MAP.floor.x + cx + 0.5, y: MAP.floor.y + cy + 0.5 });
     }),
   );
   for (const i of state.items) {
@@ -112,6 +112,8 @@ export function finishShift(state: State): Report {
   if (stinkSources(state).length >= 5) remarks.push('Мухи и вонь');
   if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
+  if (state.dutyLight) remarks.push('Дежурный свет не выключен');
+  if (state.litter.length >= 6) remarks.push('Сор на дорожке');
 
   const pees = state.elephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
   const inBucket = pees.reduce((s, p) => s + p.inBucket, 0);
