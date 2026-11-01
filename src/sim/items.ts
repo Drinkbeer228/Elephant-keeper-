@@ -78,6 +78,6 @@ function updateBasin(state: State, basin: Item, dt: number): void {
 
 export function openBagNear(state: State, x: number, y: number): Item | undefined {
   return state.items
-    .filter((i) => i.kind === 'bag' && (i.fill ?? 0) < I.bagCapacity && d(i, { x, y }) <= 3)
+    .filter((i) => i.kind === 'bag' && (i.fill ?? 0) < I.bagCapacity && d(i, { x, y }) <= I.bagReach)
     .sort((a, b) => d(a, { x, y }) - d(b, { x, y }))[0];
 }

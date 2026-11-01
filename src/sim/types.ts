@@ -33,6 +33,7 @@ export interface Item {
   food?: 'kasha' | 'veg' | null; // таз: с едой или пустой грязный
   meal?: MealId;
   owner?: string; // таз: чей слот
+  stack?: number; // таз: сколько в стопке в руках
   eatenAt?: number; // таз: когда опустел
 }
 
@@ -71,6 +72,7 @@ export interface Elephant {
   boredom: number;
   trust: number;
   footDebt: number;
+  footDebtStart: number; // с чем приняли (хромота от сменщика)
   limp: boolean;
   lyingInWet: boolean;
   praiseUntil: number;

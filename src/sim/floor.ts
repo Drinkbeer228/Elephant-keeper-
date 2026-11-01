@@ -60,7 +60,8 @@ export function dryFraction(state: State): number {
     const cx = i % MAP.bedding.cols;
     const cy = Math.floor(i / MAP.bedding.cols);
     const key = `${cx + MAP.bedding.x},${cy + MAP.bedding.y}`;
-    if (c.kind === 'straw' && !dungCells.has(key)) dry++;
+    // Голый сухой пол тоже сухой: ногам почти не вредит, солома сверху — бонус
+    if ((c.kind === 'straw' || c.kind === 'bare') && !dungCells.has(key)) dry++;
   });
   return dry / all.length;
 }

@@ -68,7 +68,12 @@ function takeFromFloor(state: State): ActionOption | null {
 }
 
 export function itemLabel(item: Item): string {
-  if (item.kind === 'basin') return item.food === 'kasha' ? 'таз с кашей' : item.food === 'veg' ? 'таз с овощами' : 'пустой таз';
+  if (item.kind === 'basin') {
+    const n = item.stack ?? 1;
+    const what = item.food === 'kasha' ? 'с кашей' : item.food === 'veg' ? 'с овощами' : 'пуст';
+    if (n === 1) return item.food ? `таз ${what}` : 'пустой таз';
+    return item.food ? `тазы ${what} (${n})` : `пустые тазы (${n})`;
+  }
   if (item.kind === 'bucket' && (item.liters ?? 0) > 0) return `бак (${Math.round(item.liters ?? 0)} л)`;
   if (item.kind === 'bag') return `мешок (${item.fill ?? 0}/${BALANCE.items.bagCapacity})`;
   if (item.charges !== undefined) return `${ITEM_NAMES[item.kind]} (${item.charges})`;
@@ -218,25 +223,45 @@ function heldAction(state: State, held: Item): ActionOption {
           .filter(({ e }) => !state.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food))[0];
         if (target) {
           const name = profileOf(target.e).name;
+          const food = held.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
           return {
-            label: `Поставить ${itemLabel(held)} для ${name}`,
+            label: `Поставить ${food} для ${name}`,
             run: (s) => {
-              held.owner = target.e.id;
-              drop(s, held, target.slot.x, target.slot.y);
-              const meal = held.meal!;
+              const n = held.stack ?? 1;
+              const one = n > 1 ? newItem(s, 'basin', { food: held.food, meal: held.meal }) : held;
+              one.stack = undefined;
+              one.owner = target.e.id;
+              if (n > 1) held.stack = n - 1;
+              drop(s, one, target.slot.x, target.slot.y);
+              if (n > 1) s.player.held = held;
+              const meal = one.meal!;
               if (s.meals[meal][target.e.id] === null) s.meals[meal][target.e.id] = s.t;
               emit(s, { kind: 'good', text: `${MEAL_LABELS[meal]}: ${name} получила таз в ${clockText(s.t)}.` });
             },
           };
         }
-      } else if (near(state, 'wash')) {
-        return {
-          label: 'Вымыть таз',
-          run: (s) => {
-            s.player.held = null;
-            s.kitchen.cleanBasins++;
-          },
-        };
+      } else {
+        // Пустые тазы собирают стопкой и моют разом
+        const another = state.items.find((i) => i.kind === 'basin' && !i.food && dist(i, p) <= 1.1);
+        if (another) {
+          return {
+            label: `Взять ещё пустой таз (будет ${(held.stack ?? 1) + 1})`,
+            run: (s) => {
+              s.items = s.items.filter((i) => i !== another);
+              held.stack = (held.stack ?? 1) + 1;
+            },
+          };
+        }
+        if (near(state, 'wash')) {
+          const n = held.stack ?? 1;
+          return {
+            label: n > 1 ? `Вымыть тазы (${n})` : 'Вымыть таз',
+            run: (s) => {
+              s.player.held = null;
+              s.kitchen.cleanBasins += n;
+            },
+          };
+        }
       }
       break;
     case 'hay':
@@ -308,24 +333,26 @@ function kitchenAction(state: State): ActionOption {
   const k = state.kitchen;
   if (k.kasha.status === 'ready' && k.kasha.portions > 0) {
     if (k.cleanBasins <= 0) return blocked('Каша готова, но чистых тазов нет — вымой на мойке', 'basinCrushed');
+    const n = Math.min(k.kasha.portions, k.cleanBasins);
     return {
-      label: 'Взять таз с кашей',
+      label: n > 1 ? `Взять тазы с кашей (${n})` : 'Взять таз с кашей',
       run: (s) => {
-        s.kitchen.kasha.portions--;
-        s.kitchen.cleanBasins--;
-        s.player.held = newItem(s, 'basin', { food: 'kasha', meal: s.kitchen.kasha.meal! });
+        s.kitchen.kasha.portions -= n;
+        s.kitchen.cleanBasins -= n;
+        s.player.held = newItem(s, 'basin', { food: 'kasha', meal: s.kitchen.kasha.meal!, stack: n });
         if (s.kitchen.kasha.portions === 0) s.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
       },
     };
   }
   if (k.veg.portions > 0) {
     if (k.cleanBasins <= 0) return blocked('Ужин готов, но чистых тазов нет — вымой на мойке', 'basinCrushed');
+    const n = Math.min(k.veg.portions, k.cleanBasins);
     return {
-      label: 'Взять таз с овощами',
+      label: n > 1 ? `Взять тазы с овощами (${n})` : 'Взять таз с овощами',
       run: (s) => {
-        s.kitchen.veg.portions--;
-        s.kitchen.cleanBasins--;
-        s.player.held = newItem(s, 'basin', { food: 'veg', meal: 'dinner' });
+        s.kitchen.veg.portions -= n;
+        s.kitchen.cleanBasins -= n;
+        s.player.held = newItem(s, 'basin', { food: 'veg', meal: 'dinner', stack: n });
       },
     };
   }
@@ -384,7 +411,7 @@ function inspectElephant(state: State, e: Elephant): string[] {
   lines.push(`Настроение: ${level(e.boredom, ['спокойная', 'немного скучает', 'скучает', 'тоскует'])}`);
   lines.push(`Доверие к тебе: ${level(e.trust, ['настороженное', 'так себе', 'хорошее', 'полное'])}`);
   lines.push(
-    `Ноги: ${e.limp || e.footDebt >= BALANCE.footDebt.limpThreshold ? 'прихрамывает' : e.footDebt > 25 ? 'подошвы мокнут, следи за полом' : 'в порядке'}`,
+    `Ноги: ${e.limp || e.footDebt >= BALANCE.footDebt.limpThreshold ? 'прихрамывает' : e.footDebt - e.footDebtStart > BALANCE.footDebt.limpThreshold / 3 ? 'подошвы мокнут, следи за полом' : 'в порядке'}`,
   );
   if (e.lyingInWet) lines.push('Лежала в мокром — утром отмывать.');
   void state;

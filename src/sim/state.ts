@@ -96,6 +96,7 @@ function createElephant(p: (typeof ELEPHANTS)[number]): Elephant {
     boredom: 20,
     trust: p.trust,
     footDebt: 0,
+    footDebtStart: 0,
     limp: false,
     lyingInWet: false,
     praiseUntil: -1,
@@ -162,6 +163,7 @@ function applyDefect(state: State, id: ChecklistId): void {
       const e = pick(state, state.elephants);
       e.limp = true;
       e.footDebt = BALANCE.footDebt.limpThreshold + 10;
+      e.footDebtStart = e.footDebt;
       break;
     }
     case 'water':

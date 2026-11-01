@@ -64,7 +64,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     e.boredom = clamp(e.boredom + E.boredomPerMinute * p.boredomFactor * begFactor * dt);
     if (dist(e, state.player) < 2.2) e.boredom = clamp(e.boredom + E.playerNearBoredom * dt);
   }
-  e.footDebt += footHarm(state, e.x, e.y) * (asleep ? 2 : 1) * dt;
+  e.footDebt += footHarm(state, e.x, e.y) * (asleep ? BALANCE.footDebt.lyingFactor : 1) * dt;
 
   if (e.bowel >= 100) {
     e.bowel = 0;
@@ -168,7 +168,7 @@ export function pee(state: State, e: Elephant): void {
     e.praiseUntil = state.t + E.praiseWindow;
     emit(state, { kind: 'good', text: `${p.name} — в бак! Угости её, пока помнит за что.`, elephantId: e.id });
   } else {
-    wetAround(state, e.x, e.y, 1);
+    wetAround(state, e.x, e.y, E.peeWetRadius);
     e.tally.missed++;
     emit(state, {
       kind: 'bad',
@@ -217,6 +217,9 @@ function arrive(state: State, e: Elephant, p: ElephantProfile): void {
       e.state = 'reach';
       e.timer = randomRange(state, 5, 10);
       break;
+    case 'sleep':
+      lieDown(state, e, p);
+      break;
     default:
       e.state = 'idle';
       e.timer = randomRange(state, 3, 8);
@@ -242,6 +245,36 @@ function finishBasin(state: State, e: Elephant, p: ElephantProfile): void {
   decide(state, e);
 }
 
+function lieDown(state: State, e: Elephant, p: ElephantProfile): void {
+  e.state = 'sleep';
+  e.timer = randomRange(state, 90, 130);
+  const ref = cellAt(state, e.x, e.y);
+  if (ref && isWet(ref.cell) && !e.lyingInWet) {
+    e.lyingInWet = true;
+    emit(state, { kind: 'bad', text: `${p.name} легла в мокрое.`, why: 'lieInWet', elephantId: e.id });
+  }
+}
+
+// Сухая солома без навоза в радиусе 3 клеток, ближайшая; занятые соседками места пропускаем
+function bedSpot(state: State, e: Elephant): { x: number; y: number } | null {
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  state.cells.forEach((row, cy) =>
+    row.forEach((c, cx) => {
+      if (c.kind !== 'straw') return;
+      const x = MAP.bedding.x + cx + 0.5;
+      const y = MAP.bedding.y + cy + 0.5;
+      const dd = Math.hypot(x - e.x, y - e.y);
+      if (dd > 3 || dd >= bestD) return;
+      if (state.dung.some((d) => Math.hypot(d.x - x, d.y - y) < 1)) return;
+      if (state.elephants.some((o) => o !== e && Math.hypot(o.x - x, o.y - y) < 1.8)) return;
+      best = { x, y };
+      bestD = dd;
+    }),
+  );
+  return best;
+}
+
 export function decide(state: State, e: Elephant): void {
   const p = profileOf(e);
   const basin = ownBasin(state, e);
@@ -250,14 +283,10 @@ export function decide(state: State, e: Elephant): void {
   const hungry = sleepingAt(state, e) ? 70 : 45;
   if (e.hunger > hungry && state.feederHay > 0) return walkTo(e, MAP.feeder.x + 0.3, MAP.feeder.y + 0.9, 'eatHay');
   if (sleepingAt(state, e)) {
-    e.state = 'sleep';
-    e.timer = randomRange(state, 90, 130);
-    const ref = cellAt(state, e.x, e.y);
-    if (ref && isWet(ref.cell) && !e.lyingInWet) {
-      e.lyingInWet = true;
-      emit(state, { kind: 'bad', text: `${p.name} легла в мокрое.`, why: 'lieInWet', elephantId: e.id });
-    }
-    return;
+    // Ложится на самое сухое место поблизости: сухая подстилка к ночи — забота о ногах
+    const spot = bedSpot(state, e);
+    if (spot && dist(spot, e) > 0.4) return walkTo(e, spot.x, spot.y, 'sleep');
+    return lieDown(state, e, p);
   }
   if (e.boredom >= E.swayBoredom && p.stereotypy) {
     e.state = 'sway';

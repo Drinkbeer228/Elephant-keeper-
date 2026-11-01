@@ -9,7 +9,7 @@ export const BALANCE = {
     // Реальных секунд на игровую минуту
     paceDay: 0.75,
     paceNight: 0.1,
-    paceMorning: 0.4,
+    paceMorning: 0.6,
     // Самый крупный шаг симуляции за один подшаг, игровых минут
     maxStep: 0.5,
   },
@@ -25,11 +25,12 @@ export const BALANCE = {
     radius: 0.75,
     bucketRadius: 1.0, // бак считается «под слонихой» в этом радиусе
     peeLiters: [8, 15] as const,
+    peeWetRadius: 0.8, // сколько подстилки мочит промах
     bucketCapacity: 65,
     praiseWindow: 10, // сколько минут после «в бак» лакомство считается заслуженным
     walkCommandDelay: 1, // «Давай гуляй»: через сколько минут сходит в бак
     walkCommandMinBladder: 50,
-    bowelPerMinute: 1 / 180,
+    bowelPerMinute: 1 / 240,
     hungerPerMinute: 0.12,
     thirstPerMinute: 0.15,
     boredomPerMinute: 0.08,
@@ -54,21 +55,24 @@ export const BALANCE = {
     // В минуту, пока слониха стоит на клетке такого вида; лёжа — вдвое
     wet: 1.0,
     dung: 0.5,
-    sawdust: 0.2,
-    bare: 0.2,
+    sawdust: 0.1,
+    bare: 0.1,
+    lyingFactor: 1.5,
     straw: 0,
-    limpThreshold: 60,
+    // ≈ минут на мокром за смену, после которых слониха начинает хромать
+    limpThreshold: 300,
   },
 
   floor: {
-    sawdustAbsorb: 30,
+    sawdustAbsorb: 20,
     spreadEvery: 60,
-    spreadChance: 0.3,
+    spreadChance: 0.15,
     dryCheckEvery: 10,
   },
 
   items: {
     bagCapacity: 6,
+    bagReach: 4.5, // мешок должен стоять не дальше этого от места уборки
     sawdustCharges: 6,
     strawCharges: 3,
     breakBase: 0.01, // шанс поломки в минуту для забытой вещи
@@ -80,14 +84,14 @@ export const BALANCE = {
   food: {
     kashaCook: 20,
     kashaEarly: 60, // раньше этого до срока запаривать нельзя
-    basins: 4,
-    basinCrushAfter: 30,
-    basinCrushChance: 0.02,
+    basins: 6,
+    basinCrushAfter: 45,
+    basinCrushChance: 0.01,
     hayBale: 40,
     hayStart: 60,
     troughFill: 4,
     troughOverflowEvery: 10,
-    lateOk: 15,
+    lateOk: 20,
     kashaLateLimit: 60,
     dinnerLateLimit: 30,
     vegStartFrom: 360, // 14:00

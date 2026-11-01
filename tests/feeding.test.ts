@@ -5,9 +5,9 @@ import { profileOf } from '../src/sim/elephants';
 import { act, at, cleanShift, hold } from './helpers';
 
 function serveKasha(s: ReturnType<typeof cleanShift>): void {
+  at(s, 16.5, 11);
+  expect(act(s)).toBe('Взять тазы с кашей (3)');
   for (const e of s.elephants) {
-    at(s, 16.5, 11);
-    expect(act(s)).toBe('Взять таз с кашей');
     const slot = profileOf(e).slot;
     at(s, slot.x, slot.y + 0.9);
     expect(act(s)).toMatch(/^Поставить таз с кашей для/);
@@ -35,7 +35,8 @@ describe('корм', () => {
     at(s, 16.5, 11);
     act(s);
     advance(s, 21);
-    serveKasha(s); // 13:21 — ещё в пределах 15 мин? нет, 21 > 15
+    advance(s, 5);
+    serveKasha(s); // 13:26 — позже 20 минут запаса
     for (const e of s.elephants) {
       expect(mealStatus(s, 'kasha1', e.id)).toBe('late');
       expect(mealStatus(s, 'kasha2', e.id)).toBe('missed');
@@ -46,7 +47,7 @@ describe('корм', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 6, 3));
     s.items.push({ id: 500, kind: 'basin', x: 3.5, y: 8.3, droppedAt: 0, food: null, eatenAt: 0, owner: 'audrey' });
-    advance(s, 400);
+    advance(s, 900);
     expect(s.stats.basinsLost).toBe(1);
     expect(s.log.some((l) => l.why === 'basinCrushed')).toBe(true);
   });
@@ -68,10 +69,10 @@ describe('корм', () => {
     expect(labels[4]).toBe('Ужин: Собрать ужин по тазам');
     expect(s.kitchen.veg.portions).toBe(3);
     // Каша к 17:00 тоже готова — её берут первой, овощи следом
-    expect(act(s)).toBe('Взять таз с кашей');
+    expect(act(s)).toBe('Взять тазы с кашей (3)');
     s.player.held = null;
     s.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
-    expect(act(s)).toBe('Взять таз с овощами');
+    expect(act(s)).toBe('Взять тазы с овощами (3)');
   });
 
   it('слониха сама идёт к тазу и съедает', () => {
@@ -90,5 +91,22 @@ describe('корм', () => {
     const basin = s.items.find((i) => i.kind === 'basin' && i.owner === 'audrey')!;
     expect(basin.food).toBeNull();
     expect(audrey.hunger).toBeLessThan(80);
+  });
+});
+
+describe('тазы стопкой', () => {
+  it('пустые тазы собираются в стопку и моются разом', () => {
+    const s = cleanShift();
+    s.elephants.forEach((e) => hold(e, 6, 3));
+    s.items.push({ id: 601, kind: 'basin', x: 3.5, y: 8.3, droppedAt: 0, food: null, eatenAt: 0 });
+    s.items.push({ id: 602, kind: 'basin', x: 4.3, y: 8.3, droppedAt: 0, food: null, eatenAt: 0 });
+    const clean = s.kitchen.cleanBasins;
+    at(s, 3.5, 8.5);
+    expect(act(s)).toBe('Взять: пустой таз');
+    at(s, 4.3, 8.5);
+    expect(act(s)).toBe('Взять ещё пустой таз (будет 2)');
+    at(s, 9.8, 12.5);
+    expect(act(s)).toBe('Вымыть тазы (2)');
+    expect(s.kitchen.cleanBasins).toBe(clean + 2);
   });
 });

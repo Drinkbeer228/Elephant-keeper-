@@ -42,7 +42,7 @@ export function checklistProblems(state: State): ChecklistId[] {
   if (!state.fenceOn) problems.push('fence');
   if (state.gateOpen) problems.push('gate');
   if (state.items.some((i) => inReachZone(i.x, i.y))) problems.push('fenceItems');
-  if (state.elephants.some((e) => e.limp || e.footDebt >= BALANCE.footDebt.limpThreshold)) problems.push('standing');
+  if (state.elephants.some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold)) problems.push('standing');
   if (state.trough < H.troughMin) problems.push('water');
   if (state.feederHay < H.hayMin) problems.push('hay');
   const onRack = (kind: 'bucket' | 'scoop') =>
@@ -75,9 +75,8 @@ export function finishShift(state: State): Report {
   const mealScore = mealPoints.reduce<number>((a, b) => a + b, 0) / mealPoints.length;
 
   const losses = [...state.stats.broken, ...Array(state.stats.basinsLost).fill('таз')];
-  const footDebt = state.elephants.map((e) => ({ name: profileOf(e).name, debt: Math.round(e.footDebt) }));
-  const startDebt = state.elephants.filter((e) => e.limp).length * (BALANCE.footDebt.limpThreshold + 10);
-  const avgDebt = (footDebt.reduce((s, f) => s + f.debt, 0) - startDebt) / footDebt.length;
+  const footDebt = state.elephants.map((e) => ({ name: profileOf(e).name, debt: Math.round(e.footDebt - e.footDebtStart) }));
+  const avgDebt = footDebt.reduce((s, f) => s + f.debt, 0) / footDebt.length;
 
   const defects = state.checklist.filter((c) => c.defect);
   const found = defects.filter((c) => c.mark === false).length;
