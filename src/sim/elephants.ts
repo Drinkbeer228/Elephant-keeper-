@@ -70,7 +70,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     e.bowel = 0;
     e.tally.dung++;
     state.dung.push({ id: state.nextItemId++, x: e.x, y: e.y + 0.5, at: state.t });
-    hint(state, 'dung', 'Навоз убирают сразу: совок, и в открытый мешок рядом. Мешок оставь недалеко, но не у хобота.');
+    hint(state, 'dung', 'Навоз убирают сразу, пока слонихи в нём не стоят. Удобнее всего — с тачкой: в ней совок, вилы и метла.');
   }
 
   if (e.bladder >= 100 && e.signalStarted === undefined) startSignal(state, e, p);
@@ -183,9 +183,14 @@ export function pee(state: State, e: Elephant): void {
   e.timer = 2;
 }
 
-// «Давай гуляй»: бак подставлен, слониха сходит в него, если есть чем
+// Бак подставлен: просится — сходит сразу; не просится — «Давай гуляй», если есть чем
 export function walkCommand(state: State, e: Elephant): boolean {
-  if (e.state === 'signal' || e.state === 'walkCommand') return true;
+  if (e.state === 'walkCommand') return true;
+  if (e.signalStarted !== undefined) {
+    e.state = 'walkCommand';
+    e.timer = E.walkCommandDelay;
+    return true;
+  }
   if (e.bladder < E.walkCommandMinBladder || e.state === 'sleep') return false;
   e.state = 'walkCommand';
   e.timer = E.walkCommandDelay;
@@ -240,7 +245,6 @@ function finishBasin(state: State, e: Elephant, p: ElephantProfile): void {
     basin.food = null;
     basin.eatenAt = state.t;
     basin.droppedAt = state.t;
-    hint(state, 'basin', 'Таз опустел — забери его и вымой, пока не раздавили.');
   }
   decide(state, e);
 }

@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { inReachZone, nearStation } from '../data/map';
+import { inBedding, inReachZone, nearStation } from '../data/map';
 import { WHY } from '../data/why';
 import { emit, hint } from './events';
 import { countWet } from './floor';
@@ -33,7 +33,7 @@ export function acceptShift(state: State): void {
     kind: 'info',
     text: defects ? `Смена принята. Косяков сменщика найдено: ${found} из ${defects}.` : 'Смена принята.',
   });
-  hint(state, 'start', 'С утра — ночная грязь: мокрую солому вилами в мешок, потом опилки, метла, солома. Навоз — совком.');
+  hint(state, 'start', 'С утра — ночная грязь. Тачка во дворе у сенника: прикати её к стойке, сложи инвентарь, и в слоновник.');
 }
 
 // Пункты чек-листа, которые сейчас не в порядке
@@ -41,7 +41,8 @@ export function checklistProblems(state: State): ChecklistId[] {
   const problems: ChecklistId[] = [];
   if (!state.fenceOn) problems.push('fence');
   if (state.gateOpen) problems.push('gate');
-  if (state.items.some((i) => inReachZone(i.x, i.y))) problems.push('fenceItems');
+  const b = state.barrow;
+  if (state.items.some((i) => inReachZone(i.x, i.y)) || inReachZone(b.x, b.y) || inBedding(b.x, b.y)) problems.push('fenceItems');
   if (state.elephants.some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold)) problems.push('standing');
   if (state.trough < H.troughMin) problems.push('water');
   if (state.feederHay < H.hayMin) problems.push('hay');
@@ -59,6 +60,7 @@ export function finishShift(state: State): Report {
   if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
   if (state.items.some((i) => i.kind === 'basin')) remarks.push('Тазы не убраны');
+  if (state.barrow.waste > 0) remarks.push('Тачка с мусором не вывезена');
 
   const pees = state.elephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
   const inBucket = pees.reduce((s, p) => s + p.inBucket, 0);

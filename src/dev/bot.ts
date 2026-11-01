@@ -36,7 +36,8 @@ const AT = {
   kitchen: { x: 16.5, y: 11.2 },
   hay: { x: 18.6, y: 3.5 },
   straw: { x: 18.6, y: 6.2 },
-  dump: { x: 13.8, y: 14.2 },
+  dump: { x: 14.2, y: 13.4 },
+  drain: { x: 5.1, y: 11.0 },
   valve: { x: 14.4, y: 2.4 },
   fencePanel: { x: 14.6, y: 10.6 },
   gate: { x: 7, y: 10.2 },
@@ -251,6 +252,10 @@ export class Bot {
       return this.start('hay', [...this.freeHands(), this.at('сенник', AT.hay, /Взять тюк сена/), this.at('кормушка', AT.feeder, /Заложить сено/)]);
     }
     if (vegStageAvailable(s)) return this.start('veg', [...this.freeHands(), this.at('кормовая', AT.kitchen, /^(Ужин: |Запарить кашу)/)]);
+    const c = s.container;
+    if (c.truckAt === null && c.fill >= BALANCE.container.capacity * BALANCE.container.callAt) {
+      return this.start('truck', [...this.freeHands(), this.at('бак', AT.dump, /Позвонить: вывезти/)]);
+    }
     if (t >= 1370) {
       const tidy = this.tidy();
       if (tidy) return this.start('tidy', tidy);
@@ -290,7 +295,7 @@ export class Bot {
     switch (it.kind) {
       case 'bucket':
         return [
-          { label: 'мойка бак', to: () => ((it.liters ?? 0) > 0 || it.dirty ? AT.wash : null), expect: /Вылить и вымыть бак/, done: () => !it.liters && !it.dirty },
+          { label: 'слив', to: () => ((it.liters ?? 0) > 0 || it.dirty ? AT.drain : null), expect: /Вылить бак в слив/, done: () => !it.liters && !it.dirty },
           this.dropAt(PARK_BUCKET),
         ];
       case 'scoop':
@@ -343,8 +348,8 @@ export class Bot {
     });
     steps.push({
       label: 'вылить полный бак',
-      to: () => ((s.player.held?.liters ?? 0) > 45 ? AT.wash : null),
-      expect: /Вылить и вымыть бак/,
+      to: () => ((s.player.held?.liters ?? 0) > 45 ? AT.drain : null),
+      expect: /Вылить бак в слив/,
       done: () => !s.player.held?.liters,
     });
     steps.push({
@@ -428,7 +433,7 @@ export class Bot {
       return [
         ...this.freeHands(),
         this.take(bucket),
-        { label: 'мойка бак', to: () => ((bucket.liters ?? 0) > 0 || bucket.dirty ? AT.wash : null), expect: /Вылить и вымыть бак/, done: () => !bucket.liters && !bucket.dirty },
+        { label: 'слив', to: () => ((bucket.liters ?? 0) > 0 || bucket.dirty ? AT.drain : null), expect: /Вылить бак в слив/, done: () => !bucket.liters && !bucket.dirty },
         this.at('стойка бак', AT.rack, /Положить на стойку/, () => !s.player.held),
       ];
     }

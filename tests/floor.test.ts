@@ -57,7 +57,7 @@ describe('пол', () => {
     s.dung.push({ id: 999, x: 5.5, y: 5.5, at: 0 });
     at(s, 5.5, 5.8);
     s.player.held = newItem(s, 'scoop');
-    expect(act(s)).toMatch(/нужен открытый мешок/);
+    expect(act(s)).toMatch(/некуда деть/);
     s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 7, y: 5.5 });
     expect(act(s)).toBe('Убрать навоз в мешок');
     expect(s.dung).toHaveLength(0);

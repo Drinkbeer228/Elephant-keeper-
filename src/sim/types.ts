@@ -113,6 +113,31 @@ export interface ShiftEvent {
   elephantId?: string;
 }
 
+export type Tool = 'scoop' | 'fork' | 'broom';
+
+// Тачка: возит инвентарь, опилки, солому, тюки и мусор
+export interface Barrow {
+  x: number;
+  y: number;
+  pushed: boolean;
+  tools: Tool[];
+  sawdust: number; // заряды опилок
+  straw: number; // заряды соломы
+  bales: number;
+  waste: number; // единицы мусора
+  balance: number; // -1..1, на краях тюк падает
+  parkedAt: number;
+}
+
+// Большой мусорный бак: заезжать, пока не наполовину; потом дверцу закрыть и ставить трап; полный — вызывать мусоровоз
+export interface Container {
+  fill: number;
+  doorClosed: boolean;
+  ramp: boolean;
+  truckAt: number | null; // когда приедет мусоровоз
+  truckLeftAt: number | null; // когда уехал (для картинки)
+}
+
 export interface State {
   seed: number;
   rng: number;
@@ -131,6 +156,8 @@ export interface State {
   lastOverflow: number;
   fenceOn: boolean;
   gateOpen: boolean;
+  barrow: Barrow;
+  container: Container;
   spareBucket: boolean;
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
   checklist: ChecklistEntry[];
@@ -151,6 +178,7 @@ export interface State {
 
 export type Command =
   | { type: 'move'; dx: number; dy: number }
+  | { type: 'balance'; dir: -1 | 1 }
   | { type: 'action' }
   | { type: 'inspect' }
   | { type: 'toggleCheck'; id: ChecklistId; value: boolean }

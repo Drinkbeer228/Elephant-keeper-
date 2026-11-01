@@ -17,7 +17,9 @@ export const MAP = {
     kitchen: { x: 16.5, y: 12.2, w: 2.6, h: 1.4, label: 'Кормовая' },
     hay: { x: 19.6, y: 3.5, w: 1.6, h: 1.4, label: 'Сенник: сено' },
     straw: { x: 19.6, y: 6.2, w: 1.6, h: 1.4, label: 'Сенник: солома' },
-    dump: { x: 13.8, y: 15.0, w: 1.6, h: 0.9, label: 'Выход на помойку' },
+    dump: { x: 14.2, y: 14.75, w: 2.8, h: 1.3, label: 'Мусорный бак' },
+    drain: { x: 5.1, y: 10.45, w: 0.9, h: 0.5, label: 'Слив' },
+    drain2: { x: 11.4, y: 10.45, w: 0.9, h: 0.5, label: 'Слив' },
     valve: { x: 14.4, y: 1.6, w: 0.6, h: 0.6, label: 'Вентиль поилки' },
     fencePanel: { x: 14.6, y: 9.8, w: 0.6, h: 0.6, label: 'Электропастух' },
     gate: { x: 7, y: 9, w: 2, h: 1.2, label: 'Задвижка' },
@@ -26,6 +28,7 @@ export const MAP = {
   trough: { x: 11.8, y: 1.6 },
   feeder: { x: 2.2, y: 1.6 },
   playerStart: { x: 7, y: 11 },
+  barrowStart: { x: 16.6, y: 7.6 },
   // Где лежит инвентарь на стойке
   rackSpots: {
     bucket: { x: 1.8, y: 11.6 },

@@ -8,6 +8,7 @@ import { updateFloor } from './floor';
 import { updateKitchen } from './feeding';
 import { acceptShift, finishShift } from './handover';
 import { updateItems } from './items';
+import { barrowOffset, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
 import type { Command, ShiftEvent, State } from './types';
 
 // Один кадр игры: dtReal — реальные секунды с прошлого кадра
@@ -15,10 +16,15 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
   const start = state.log.length;
   if (state.phase === 'report') return [];
 
+  let balanceInput = 0;
+  let moved = { moving: false, turned: false };
   for (const c of commands) {
     switch (c.type) {
       case 'move':
-        movePlayer(state, c.dx, c.dy, dtReal);
+        moved = movePlayer(state, c.dx, c.dy, dtReal);
+        break;
+      case 'balance':
+        balanceInput += c.dir;
         break;
       case 'action': {
         const a = availableAction(state);
@@ -38,6 +44,8 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
         break;
     }
   }
+
+  updateBalance(state, dtReal, moved.moving, Math.sign(balanceInput), moved.turned);
 
   if (state.phase === 'shift') {
     let gameDt = dtReal / pace(state);
@@ -65,6 +73,8 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   state.t += dt;
   updateElephants(state, dt, dtReal);
   updateItems(state, dt);
+  updateBarrowRisk(state, dt);
+  updateContainer(state);
   updateKitchen(state, dt);
   updateFloor(state);
   const after = dayPart(state.t);
@@ -85,14 +95,31 @@ export function walkable(x: number, y: number): boolean {
   return true;
 }
 
-function movePlayer(state: State, dx: number, dy: number, dtReal: number): void {
+// Кипер идёт; если везёт тачку — она катится перед ним и тоже не пролезает сквозь ограждение
+function movePlayer(state: State, dx: number, dy: number, dtReal: number): { moving: boolean; turned: boolean } {
   const len = Math.hypot(dx, dy);
-  if (len < 0.01) return;
+  if (len < 0.01) return { moving: false, turned: false };
   const p = state.player;
+  const b = state.barrow;
   const nx = dx / len;
   const ny = dy / len;
+  const turned = nx * p.facing.x + ny * p.facing.y < 0.3;
   p.facing = { x: nx, y: ny };
-  const step = BALANCE.player.speed * Math.min(len, 1) * dtReal;
-  if (walkable(p.x + nx * step, p.y)) p.x += nx * step;
-  if (walkable(p.x, p.y + ny * step)) p.y += ny * step;
+  const pushed = b.pushed;
+  const step = BALANCE.player.speed * (pushed ? BALANCE.barrow.speedFactor : 1) * Math.min(len, 1) * dtReal;
+  let off = { x: b.x - p.x, y: b.y - p.y };
+  if (pushed) {
+    const want = barrowOffset(p.facing);
+    if (walkable(p.x + want.x, p.y + want.y)) off = want;
+  }
+  const ok = (x: number, y: number) => walkable(x, y) && (!pushed || walkable(x + off.x, y + off.y));
+  const x0 = p.x;
+  const y0 = p.y;
+  if (ok(p.x + nx * step, p.y)) p.x += nx * step;
+  if (ok(p.x, p.y + ny * step)) p.y += ny * step;
+  if (pushed) {
+    b.x = p.x + off.x;
+    b.y = p.y + off.y;
+  }
+  return { moving: Math.hypot(p.x - x0, p.y - y0) > 0.001, turned };
 }

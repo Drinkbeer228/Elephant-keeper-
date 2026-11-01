@@ -1,13 +1,14 @@
 import { BALANCE } from '../data/balance';
-import { MAP, inBedding, inReachZone, nearStation } from '../data/map';
+import { MAP, inBedding, nearStation } from '../data/map';
 import { dist, profileOf, treat, walkCommand, bucketUnder } from './elephants';
-import { emit, hint } from './events';
+import { emit } from './events';
 import { cellAt, sawdustAbsorbed, setCell } from './floor';
 import { MEAL_LABELS, VEG_STAGES, doVegStage, kashaDue, startKasha, vegStageAvailable } from './feeding';
 import { ITEM_NAMES, openBagNear } from './items';
+import { TOOL_NAMES, addToContainer, barrowNear, barrowRoom, callTruck, containerShare, dumpWay, nearContainer } from './barrow';
 import { clockText } from './clock';
 import { newItem } from './state';
-import type { Elephant, Item, State } from './types';
+import type { Elephant, Item, State, Tool } from './types';
 
 export interface ActionOption {
   label: string;
@@ -42,9 +43,27 @@ function drop(state: State, item: Item, x?: number, y?: number): void {
   item.droppedAt = state.t;
   state.items.push(item);
   p.held = null;
-  if (item.kind !== 'basin' && item.kind !== 'bucket' && (inBedding(item.x, item.y) || inReachZone(item.x, item.y))) {
-    hint(state, 'reach', 'Вещь в зоне хобота. Скучающая слониха дотянется и сломает — не оставляй надолго.');
+}
+
+function nearDrain(state: State): boolean {
+  return near(state, 'drain') || near(state, 'drain2');
+}
+
+// Куда сбросить убранное: в тачку рядом или в открытый мешок
+interface Sink {
+  label: string;
+  put: (s: State) => void;
+}
+
+function sinkNear(state: State): Sink | null | 'full' {
+  const p = state.player;
+  if (barrowNear(state)) {
+    if (barrowRoom(state) <= 0) return 'full';
+    return { label: 'в тачку', put: (s) => (s.barrow.waste += 1) };
   }
+  const bag = openBagNear(state, p.x, p.y);
+  if (bag) return { label: 'в мешок', put: () => (bag.fill = (bag.fill ?? 0) + 1) };
+  return null;
 }
 
 function putOnRack(item: Item): { x: number; y: number } | null {
@@ -90,6 +109,7 @@ export function availableAction(state: State): ActionOption | null {
     return { label: `Угостить ${profileOf(praised).name} (за бак)`, run: (s) => treat(s, praised) };
   }
 
+  if (state.barrow.pushed) return pushAction(state);
   return held ? heldAction(state, held) : emptyHandAction(state);
 }
 
@@ -108,18 +128,13 @@ function heldAction(state: State, held: Item): ActionOption {
           label: signaling ? `Подставить бак под ${name}` : `Бак под ${name}: «Давай гуляй»`,
           run: (s) => {
             drop(s, held, e.x, e.y);
-            if (signaling && e.state === 'walk') {
-              // Марго шла к ограждению: бак у ног — стоит и ждёт тут
-              e.state = 'signal';
-              e.timer = profileOf(e).signalLead;
-            }
             if (!walkCommand(s, e)) emit(s, { kind: 'info', text: `${name} не хочет: пузырь почти пустой. Проверь осмотром (F).` });
           },
         };
       }
-      if (near(state, 'wash') && ((held.liters ?? 0) > 0 || held.dirty)) {
+      if (nearDrain(state) && ((held.liters ?? 0) > 0 || held.dirty)) {
         return {
-          label: 'Вылить и вымыть бак',
+          label: 'Вылить бак в слив',
           run: () => {
             held.liters = 0;
             held.dirty = false;
@@ -131,15 +146,15 @@ function heldAction(state: State, held: Item): ActionOption {
     case 'scoop': {
       const pile = state.dung.filter((d) => dist(d, p) <= 1.2).sort((a, b) => dist(a, p) - dist(b, p))[0];
       if (pile) {
-        const bag = openBagNear(state, p.x, p.y);
-        if (!bag) return blocked('Навоз: нужен открытый мешок рядом (возьми на стойке и поставь)', 'dung');
+        const sink = sinkNear(state);
+        if (sink === 'full') return blocked('Тачка полна — вези к мусорному баку');
+        if (!sink) return blocked('Навоз некуда деть: подкати тачку или поставь мешок');
         return {
-          label: 'Убрать навоз в мешок',
+          label: `Убрать навоз ${sink.label}`,
           run: (s) => {
             s.dung = s.dung.filter((d) => d !== pile);
-            bag.fill = (bag.fill ?? 0) + 1;
+            sink.put(s);
             held.dirty = true;
-            if (bag.fill >= BALANCE.items.bagCapacity) emit(s, { kind: 'info', text: 'Мешок полон — вынеси на помойку.' });
           },
         };
       }
@@ -150,13 +165,14 @@ function heldAction(state: State, held: Item): ActionOption {
     }
     case 'fork':
       if (cell?.cell.kind === 'wet') {
-        const bag = openBagNear(state, p.x, p.y);
-        if (!bag) return blocked('Мокрая солома: нужен открытый мешок рядом', 'wetFloor');
+        const sink = sinkNear(state);
+        if (sink === 'full') return blocked('Тачка полна — вези к мусорному баку');
+        if (!sink) return blocked('Мокрую солому некуда деть: подкати тачку или поставь мешок', 'wetFloor');
         return {
-          label: 'Убрать мокрую солому в мешок',
+          label: `Убрать мокрую солому ${sink.label}`,
           run: (s) => {
             setCell(s, cell.cx, cell.cy, 'bareWet');
-            bag.fill = (bag.fill ?? 0) + 1;
+            sink.put(s);
           },
         };
       }
@@ -180,13 +196,14 @@ function heldAction(state: State, held: Item): ActionOption {
     case 'broom':
       if (cell?.cell.kind === 'sawdust') {
         if (!sawdustAbsorbed(state, cell.cell)) return blocked('Опилки ещё впитывают');
-        const bag = openBagNear(state, p.x, p.y);
-        if (!bag) return blocked('Вымести: нужен открытый мешок рядом');
+        const sink = sinkNear(state);
+        if (sink === 'full') return blocked('Тачка полна — вези к мусорному баку');
+        if (!sink) return blocked('Опилки некуда вымести: подкати тачку или поставь мешок');
         return {
-          label: 'Вымести опилки в мешок',
+          label: `Вымести опилки ${sink.label}`,
           run: (s) => {
             setCell(s, cell.cx, cell.cy, 'bare');
-            bag.fill = (bag.fill ?? 0) + 1;
+            sink.put(s);
           },
         };
       }
@@ -205,12 +222,14 @@ function heldAction(state: State, held: Item): ActionOption {
       }
       break;
     case 'bag':
-      if (near(state, 'dump')) {
+      if (nearContainer(state)) {
+        if (dumpWay(state) === 'full') return blocked('Мусорный бак полон — вызови мусоровоз');
         return {
           label: 'Выбросить мешок',
           run: (s) => {
             s.player.held = null;
             if ((held.fill ?? 0) > 0) s.stats.bagsOut++;
+            addToContainer(s, Math.max(1, held.fill ?? 0));
           },
         };
       }
@@ -290,6 +309,8 @@ function heldAction(state: State, held: Item): ActionOption {
       break;
   }
 
+  const intoBarrow = putIntoBarrow(state, held);
+  if (intoBarrow) return intoBarrow;
   const rack = putOnRack(held);
   if (rack && near(state, 'rack')) {
     return { label: `Положить на стойку: ${itemLabel(held)}`, run: (s) => drop(s, held, rack.x, rack.y) };
@@ -297,9 +318,224 @@ function heldAction(state: State, held: Item): ActionOption {
   return dropOption;
 }
 
+function putIntoBarrow(state: State, held: Item): ActionOption | null {
+  if (!barrowNear(state, 1.4)) return null;
+  const b = state.barrow;
+  const tool = held.kind === 'scoop' || held.kind === 'fork' || held.kind === 'broom' ? (held.kind as Tool) : null;
+  if (tool && !b.tools.includes(tool)) {
+    return {
+      label: `Положить в тачку: ${ITEM_NAMES[tool]}`,
+      run: (s) => {
+        s.barrow.tools.push(tool);
+        s.player.held = null;
+      },
+    };
+  }
+  if (held.kind === 'hay' && b.bales < BALANCE.barrow.maxBales) {
+    return {
+      label: `Положить тюк в тачку (${b.bales + 1})`,
+      run: (s) => {
+        s.barrow.bales++;
+        s.player.held = null;
+      },
+    };
+  }
+  if (held.kind === 'sawdust' || held.kind === 'straw') {
+    const key = held.kind;
+    return {
+      label: `Высыпать в тачку: ${ITEM_NAMES[key]}`,
+      run: (s) => {
+        s.barrow[key] += held.charges ?? 0;
+        s.player.held = null;
+      },
+    };
+  }
+  return null;
+}
+
+// Тачка стоит рядом: инструмент берётся из неё, убранное летит в неё же
+function barrowCleaning(state: State): ActionOption | null {
+  if (!barrowNear(state)) return null;
+  const p = state.player;
+  const b = state.barrow;
+  const cell = cellAt(state, p.x, p.y);
+  const need = (tool: Tool): ActionOption | null => (b.tools.includes(tool) ? null : blocked(`В тачке нет ${TOOL_NAMES[tool]}`));
+  const full = barrowRoom(state) <= 0 ? blocked('Тачка полна — вези к мусорному баку') : null;
+  const pile = state.dung.filter((d) => dist(d, p) <= 1.2).sort((a, c) => dist(a, p) - dist(c, p))[0];
+  if (pile) {
+    return (
+      need('scoop') ??
+      full ?? {
+        label: 'Совком — навоз в тачку',
+        run: (s) => {
+          s.dung = s.dung.filter((d) => d !== pile);
+          s.barrow.waste++;
+        },
+      }
+    );
+  }
+  if (!cell) return null;
+  const c = cell.cell;
+  if (c.kind === 'wet') {
+    return (
+      need('fork') ??
+      full ?? {
+        label: 'Вилами — мокрую солому в тачку',
+        run: (s) => {
+          setCell(s, cell.cx, cell.cy, 'bareWet');
+          s.barrow.waste++;
+        },
+      }
+    );
+  }
+  if (c.kind === 'bareWet') {
+    if (b.sawdust <= 0) return blocked('В тачке нет опилок — насыпь у ларя с опилками');
+    return {
+      label: 'Засыпать опилками из тачки',
+      run: (s) => {
+        setCell(s, cell.cx, cell.cy, 'sawdust');
+        s.barrow.sawdust--;
+      },
+    };
+  }
+  if (c.kind === 'sawdust') {
+    if (!sawdustAbsorbed(state, c)) return blocked('Опилки ещё впитывают');
+    return (
+      need('broom') ??
+      full ?? {
+        label: 'Метлой — опилки в тачку',
+        run: (s) => {
+          setCell(s, cell.cx, cell.cy, 'bare');
+          s.barrow.waste++;
+        },
+      }
+    );
+  }
+  if (c.kind === 'bare' && b.straw > 0) {
+    return {
+      label: 'Постелить солому из тачки',
+      run: (s) => {
+        setCell(s, cell.cx, cell.cy, 'straw');
+        s.barrow.straw--;
+      },
+    };
+  }
+  return null;
+}
+
+export function barrowSummary(state: State): string {
+  const b = state.barrow;
+  const parts = [
+    ...b.tools.map((t) => ITEM_NAMES[t]),
+    b.sawdust ? `опилки ${b.sawdust}` : '',
+    b.straw ? `солома ${b.straw}` : '',
+    b.bales ? `тюки ${b.bales}` : '',
+    b.waste ? `мусор ${b.waste}/${BALANCE.barrow.wasteCapacity}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'пустая';
+}
+
+// Везёшь тачку: что можно сделать там, где стоишь (до станции можно дотянуться и тачкой)
+function pushAction(state: State): ActionOption {
+  const b = state.barrow;
+  const p = state.player;
+  const near = (id: Parameters<typeof nearStation>[0]) =>
+    nearStation(id, p.x, p.y, BALANCE.player.stationReach) || nearStation(id, b.x, b.y, BALANCE.player.stationReach);
+  const park: ActionOption = {
+    label: 'Поставить тачку',
+    run: (s) => {
+      s.barrow.pushed = false;
+      s.barrow.balance = 0;
+      s.barrow.parkedAt = s.t;
+    },
+  };
+  if (nearContainer(state) && b.waste > 0) {
+    const way = dumpWay(state);
+    if (way === 'full') return blocked('Мусорный бак полон — вызови мусоровоз');
+    if (way === 'needDoor') return blocked('Бак наполовину полон: закрой дверцу и ставь трап');
+    if (way === 'needRamp') return blocked('Дверца закрыта: поставь трап, чтобы высыпать сверху');
+    return {
+      label: way === 'driveIn' ? 'Заехать в бак и высыпать тачку' : 'Поднять по трапу и высыпать тачку',
+      run: (s) => {
+        const put = addToContainer(s, s.barrow.waste);
+        s.barrow.waste -= put;
+      },
+    };
+  }
+  if (near('rack')) {
+    const onRack = state.items.filter(
+      (i) => (i.kind === 'scoop' || i.kind === 'fork' || i.kind === 'broom') && nearStation('rack', i.x, i.y, 0.6) && !b.tools.includes(i.kind as Tool),
+    );
+    if (onRack.length) {
+      return {
+        label: 'Сложить инвентарь в тачку',
+        run: (s) => {
+          for (const it of onRack) s.barrow.tools.push(it.kind as Tool);
+          s.items = s.items.filter((i) => !onRack.includes(i));
+        },
+      };
+    }
+    if (b.tools.length) {
+      return {
+        label: 'Вернуть инвентарь на стойку',
+        run: (s) => {
+          for (const tool of s.barrow.tools) {
+            const spot = MAP.rackSpots[tool];
+            s.items.push({ ...newItem(s, tool, { dirty: false }), x: spot.x, y: spot.y });
+          }
+          s.barrow.tools = [];
+        },
+      };
+    }
+  }
+  if (near('sawdust') && b.sawdust < BALANCE.barrow.sawdustLoad) {
+    return { label: 'Насыпать опилок в тачку', run: (s) => (s.barrow.sawdust = BALANCE.barrow.sawdustLoad) };
+  }
+  if (near('straw') && b.straw < BALANCE.barrow.strawLoad) {
+    return { label: 'Нагрузить соломы в тачку', run: (s) => (s.barrow.straw = BALANCE.barrow.strawLoad) };
+  }
+  if (near('hay') && b.bales < BALANCE.barrow.maxBales) {
+    return { label: `Положить тюк в тачку (${b.bales + 1}/${BALANCE.barrow.maxBales})`, run: (s) => s.barrow.bales++ };
+  }
+  if (b.bales > 0 && Math.min(dist(MAP.feeder, p), dist(MAP.feeder, b)) <= 2.2) {
+    return {
+      label: 'Выгрузить тюк в кормушку',
+      run: (s) => {
+        s.barrow.bales--;
+        s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale);
+      },
+    };
+  }
+  return park;
+}
+
+// Мусорный бак: дверца, трап, вызов мусоровоза
+function containerAction(state: State): ActionOption | null {
+  if (!nearContainer(state)) return null;
+  const c = state.container;
+  const share = containerShare(state);
+  if (c.truckAt !== null) return blocked(`Мусоровоз едет, будет к ${clockText(c.truckAt)}`);
+  if (share >= BALANCE.container.callAt) return { label: 'Позвонить: вывезти мусорный бак', run: (s) => callTruck(s) };
+  if (!c.doorClosed && share >= BALANCE.container.doorAt) return { label: 'Закрыть дверцу бака', run: (s) => (s.container.doorClosed = true) };
+  if (c.doorClosed && !c.ramp) return { label: 'Поставить трап к баку', run: (s) => (s.container.ramp = true) };
+  return null;
+}
+
 function emptyHandAction(state: State): ActionOption | null {
   const take = takeFromFloor(state);
   if (take) return take;
+  const clean = barrowCleaning(state);
+  if (clean) return clean;
+  if (barrowNear(state, 1.4)) {
+    return {
+      label: `Взять тачку (${barrowSummary(state)})`,
+      run: (s) => {
+        s.barrow.pushed = true;
+      },
+    };
+  }
+  const box = containerAction(state);
+  if (box) return box;
 
   if (near(state, 'kitchen')) return kitchenAction(state);
   if (near(state, 'sawdust')) {
@@ -376,12 +612,12 @@ export function inspect(state: State): string[] {
       k === 'straw'
         ? 'Сухая солома. Так и надо.'
         : k === 'wet'
-          ? 'Мокрая солома. Вилами в мешок.'
+          ? 'Мокрая солома. Вилами — в тачку или мешок.'
           : k === 'bareWet'
             ? 'Голый мокрый пол. Засыпать опилками.'
             : k === 'sawdust'
               ? sawdustAbsorbed(state, cell.cell)
-                ? 'Опилки впитали. Вымести метлой в мешок.'
+                ? 'Опилки впитали. Метлой — в тачку или мешок.'
                 : 'Опилки впитывают.'
               : 'Голый сухой пол. Постелить солому.';
     return [text];
