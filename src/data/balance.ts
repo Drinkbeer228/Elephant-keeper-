@@ -1,0 +1,114 @@
+// Все числа баланса в одном месте, чтобы крутить их на плейтесте.
+// Время — в игровых минутах, если не сказано иное. 0 игровых минут = 08:00 дня приёма.
+
+export const BALANCE = {
+  time: {
+    dayEnd: 720, // 20:00
+    nightEnd: 1320, // 06:00
+    shiftEnd: 1440, // 08:00 следующего дня
+    // Реальных секунд на игровую минуту
+    paceDay: 0.75,
+    paceNight: 0.1,
+    paceMorning: 0.4,
+    // Самый крупный шаг симуляции за один подшаг, игровых минут
+    maxStep: 0.5,
+  },
+
+  player: {
+    speed: 3.4, // клеток в реальную секунду
+    reach: 1.3, // радиус взаимодействия, клеток
+  },
+
+  elephant: {
+    speed: 0.9, // клеток в реальную секунду
+    radius: 0.75,
+    bucketRadius: 1.0, // бак считается «под слонихой» в этом радиусе
+    peeLiters: [8, 15] as const,
+    bucketCapacity: 65,
+    praiseWindow: 10, // сколько минут после «в бак» лакомство считается заслуженным
+    walkCommandDelay: 1, // «Давай гуляй»: через сколько минут сходит в бак
+    walkCommandMinBladder: 50,
+    bowelPerMinute: 1 / 180,
+    hungerPerMinute: 0.12,
+    thirstPerMinute: 0.15,
+    boredomPerMinute: 0.08,
+    nightNeedsFactor: 0.5,
+    nightBladderFactor: 0.7,
+    hayEatPerMinute: 1.0, // насколько падает голод, пока ест сено
+    hayFeederPerMinute: 0.25, // сколько сена уходит из кормушки
+    drinkPerMinute: 5,
+    troughPerMinute: 1.5,
+    mealHunger: 40, // каша или овощи сбивают голод на столько
+    basinEatMinutes: 12,
+    playerNearBoredom: -0.3, // в минуту, если кипер рядом
+    treatBoredom: -10,
+    treatTrust: 5,
+    begTreatBoredomRate: 0.5, // насколько ускоряется скука от каждого лакомства «за выпрашивание»
+    hayTossBoredom: -30,
+    swayBoredom: 75,
+    reachBoredom: 60,
+  },
+
+  footDebt: {
+    // В минуту, пока слониха стоит на клетке такого вида; лёжа — вдвое
+    wet: 1.0,
+    dung: 0.5,
+    sawdust: 0.2,
+    bare: 0.2,
+    straw: 0,
+    limpThreshold: 60,
+  },
+
+  floor: {
+    sawdustAbsorb: 30,
+    spreadEvery: 60,
+    spreadChance: 0.3,
+    dryCheckEvery: 10,
+  },
+
+  items: {
+    bagCapacity: 6,
+    sawdustCharges: 6,
+    strawCharges: 3,
+    breakBase: 0.01, // шанс поломки в минуту для забытой вещи
+    breakGrace: 5, // столько минут вещь лежит безопасно
+    reachDistance: 2.2, // насколько далеко дотягивается хобот от центра слонихи
+    fenceOffReachFactor: 2,
+  },
+
+  food: {
+    kashaCook: 20,
+    kashaEarly: 60, // раньше этого до срока запаривать нельзя
+    basins: 4,
+    basinCrushAfter: 30,
+    basinCrushChance: 0.02,
+    hayBale: 40,
+    hayStart: 60,
+    troughFill: 4,
+    troughOverflowEvery: 10,
+    lateOk: 15,
+    kashaLateLimit: 60,
+    dinnerLateLimit: 30,
+    vegStartFrom: 360, // 14:00
+    // Ожидание после каждого этапа ужина: замочить, взбить, промыть, нарезать
+    vegWaits: [30, 20, 10, 10],
+  },
+
+  schedule: {
+    kasha1: 300, // 13:00
+    kasha2: 540, // 17:00
+    dinner: 660, // 19:00
+  },
+
+  handover: {
+    maxDefects: 3,
+    wetCellsRemark: 3,
+    troughMin: 30,
+    hayMin: 20,
+  },
+
+  score: {
+    threeStars: 80,
+    twoStars: 55,
+  },
+} as const;
