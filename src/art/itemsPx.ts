@@ -1,0 +1,242 @@
+import { C, T } from './palette';
+import { Sprite, ellipse, grid, rect, union } from './pixel';
+
+// Предметы 16×16 и эффекты. Предмет стоит на нижней части кадра.
+
+function bucket(content: 'empty' | 'full' | 'dirty'): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(union(rect(3, 5, 12, 13), rect(4, 13, 11, 14)), T.blue);
+  s.shape(ellipse(7.5, 5, 5.8, 2.2), T.blue);
+  s.fill(ellipse(7.5, 5.2, 4.2, 1.1), content === 'full' ? C.gold : '#002878');
+  if (content === 'full') s.set(6, 5, C.goldLight);
+  // Ручки и обручи
+  s.set(2, 7, C.k);
+  s.set(13, 7, C.k);
+  for (let x = 4; x <= 11; x++) s.set(x, 9, C.blueDark);
+  if (content !== 'empty') for (const [x, y] of [[5, 10], [5, 11], [9, 8], [10, 11], [10, 12]]) s.set(x, y, C.goldDark);
+  return s;
+}
+
+function basin(food: 'empty' | 'kasha' | 'veg'): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(ellipse(8, 11.5, 7.5, 3.6), T.black);
+  s.shape(ellipse(8, 9, 7.5, 2.6), { L: '#7c7c84', M: '#4c4c54', D: '#2c2c30' });
+  if (food === 'kasha') {
+    s.fill(ellipse(8, 9, 5.6, 1.5), C.goldLight);
+    for (const [x, y] of [[5, 9], [8, 8], [10, 9], [7, 10]]) s.set(x, y, '#c49a5c');
+  } else if (food === 'veg') {
+    s.fill(ellipse(8, 9, 5.6, 1.5), '#5c3000');
+    for (const [x, y, c] of [
+      [4, 9, '#f87858'],
+      [5, 9, '#f87858'],
+      [6, 8, '#f87858'],
+      [8, 9, '#a80020'],
+      [9, 9, '#a80020'],
+      [9, 8, '#a80020'],
+      [11, 9, '#e4c47c'],
+      [12, 9, '#e4c47c'],
+      [7, 8, C.greenLight],
+      [11, 8, C.greenLight],
+    ] as [number, number, string][])
+      s.set(x, y, c);
+  } else {
+    s.fill(ellipse(8, 9, 5.6, 1.5), '#1c1c20');
+    s.set(6, 9, '#8c5418');
+    s.set(9, 9, '#8c5418');
+  }
+  return s;
+}
+
+function bag(full: boolean): Sprite {
+  const s = new Sprite(16, 16);
+  if (full) {
+    s.shape(union(ellipse(8, 10, 6, 5.5), rect(6, 3, 9, 5)), T.black);
+    s.set(6, 2, C.k);
+    s.set(9, 2, C.k);
+    s.set(5, 8, '#8c8c94');
+    s.set(5, 9, '#8c8c94');
+  } else {
+    s.shape(union(rect(3, 6, 12, 14), ellipse(7.5, 14, 5, 1.5)), T.black);
+    s.fill(ellipse(7.5, 6, 4.4, 1.2), '#000000');
+    s.set(4, 9, '#8c8c94');
+    s.set(4, 10, '#8c8c94');
+  }
+  return s;
+}
+
+function hay(): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(rect(1, 5, 14, 14), T.straw);
+  for (let y = 6; y <= 13; y++) {
+    s.set(4, y, C.redDark);
+    s.set(11, y, C.redDark);
+  }
+  for (const [x, y] of [[2, 8], [7, 7], [8, 11], [13, 9], [6, 12], [9, 8]]) s.set(x, y, C.goldDark);
+  return s;
+}
+
+function straw(): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(ellipse(8, 11, 7, 4), T.straw);
+  for (const [x, y] of [[3, 10], [5, 9], [7, 12], [9, 10], [11, 11], [12, 9], [6, 11]]) s.set(x, y, C.goldDark);
+  s.set(2, 7, C.gold);
+  s.set(13, 8, C.gold);
+  return s;
+}
+
+function sawdust(): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(union(rect(3, 7, 12, 14)), T.red);
+  s.shape(ellipse(7.5, 6.5, 5.5, 3), T.cream);
+  for (const [x, y] of [[5, 6], [8, 5], [10, 6]]) s.set(x, y, '#e4b878');
+  for (let x = 4; x <= 11; x++) s.set(x, 10, C.redDark);
+  return s;
+}
+
+const TOOL_PAL = { k: C.k, w: C.orangeLight, W: C.orange, m: C.white, M: C.grey, D: C.greyMid, y: C.gold, Y: C.goldDark };
+
+function scoop(): Sprite {
+  return grid(
+    [
+      '..........kkkk..',
+      '.........kmMMDk.',
+      '........kmMMMDk.',
+      '........kMMMDDk.',
+      '.......kwkkkkk..',
+      '......kwk.......',
+      '.....kwk........',
+      '....kwk.........',
+      '...kwk......k...',
+      '..kwk......kMk..',
+      '..kk......kmMDk.',
+      '.........kmMMDk.',
+      '........kWkkkk..',
+      '.......kWk......',
+      '......kWk.......',
+      '......kk........',
+    ],
+    TOOL_PAL,
+  );
+}
+
+function fork(): Sprite {
+  return grid(
+    [
+      '..........k.k.k.',
+      '..........M.M.M.',
+      '..........M.M.M.',
+      '..........MkMkM.',
+      '..........kMMMk.',
+      '...........kWk..',
+      '..........kwk...',
+      '.........kwk....',
+      '........kwk.....',
+      '.......kwk......',
+      '......kwk.......',
+      '.....kwk........',
+      '....kwk.........',
+      '...kwk..........',
+      '...kk...........',
+      '................',
+    ],
+    TOOL_PAL,
+  );
+}
+
+function broom(): Sprite {
+  return grid(
+    [
+      '..........kkkk..',
+      '.........kyyyyk.',
+      '........kyyYyYk.',
+      '........kyYyYyk.',
+      '.......kyyYyYk..',
+      '.......kkkkkk...',
+      '......kwk.......',
+      '.....kwk........',
+      '....kwk.........',
+      '...kwk..........',
+      '..kwk...........',
+      '..kk............',
+      '................',
+      '................',
+      '................',
+      '................',
+    ],
+    TOOL_PAL,
+  );
+}
+
+function dung(): Sprite {
+  const s = new Sprite(12, 10);
+  s.shape(ellipse(3.5, 6.5, 3.5, 3), T.dung);
+  s.shape(ellipse(8.5, 6.8, 3.5, 3), T.dung);
+  s.shape(ellipse(6, 3.6, 3, 2.8), T.dung);
+  s.set(5, 2, '#e4b878');
+  return s;
+}
+
+function bubble(): Sprite {
+  return grid(
+    [
+      '.kkkkkkkkk.',
+      'kyyyyyyyyyk',
+      'kyyyykyyyyk',
+      'kyyyykyyyyk',
+      'kyyyykyyyyk',
+      'kyyyykyyyyk',
+      'kyyyyyyyyyk',
+      'kyyyykyyyyk',
+      'kyyyyyyyyyk',
+      '.kkkyyykkk.',
+      '....kyk....',
+      '.....k.....',
+    ],
+    { k: C.k, y: C.gold },
+  );
+}
+
+function heart(): Sprite {
+  return grid(['.kk.kk.', 'krrkrrk', 'krwrrrk', 'krrrrrk', '.krrrk.', '..krk..', '...k...'], { k: C.k, r: C.red, w: C.white });
+}
+
+function zzz(): Sprite {
+  return grid(['kkkkkk', 'kwwwwk', 'kkkwk.', '.kwkk.', 'kwwwwk', 'kkkkkk'], { k: C.k, w: C.white });
+}
+
+function dot(c: string, n = 2): Sprite {
+  return new Sprite(n, n).fill(() => true, c);
+}
+
+export function itemSprites(): Record<string, Sprite> {
+  return {
+    'item-bucket': bucket('empty'),
+    'item-bucket-full': bucket('full'),
+    'item-bucket-dirty': bucket('dirty'),
+    'item-basin': basin('empty'),
+    'item-basin-kasha': basin('kasha'),
+    'item-basin-veg': basin('veg'),
+    'item-bag': bag(false),
+    'item-bag-full': bag(true),
+    'item-hay': hay(),
+    'item-straw': straw(),
+    'item-sawdust': sawdust(),
+    'item-scoop': scoop(),
+    'item-fork': fork(),
+    'item-broom': broom(),
+    dung: dung(),
+    'fx-bubble': bubble(),
+    'fx-heart': heart(),
+    'fx-z': zzz(),
+    'fx-pee': dot(C.gold),
+    'fx-water': dot(C.blueLight),
+    'fx-dust': dot(C.goldLight),
+    'fx-steam': dot(C.white, 3),
+    'fx-arrow': grid(['kkkkkkk', 'kyyyyyk', 'kyyyyyk', '.kyyyk.', '..kyk..', '...k...'], { k: C.k, y: C.gold }),
+    'shadow-el': new Sprite(34, 5).fill(ellipse(17, 2.5, 17, 2.5), C.k),
+    'shadow-lying': new Sprite(44, 6).fill(ellipse(22, 3, 22, 3), C.k),
+    'shadow-keeper': new Sprite(12, 4).fill(ellipse(6, 2, 6, 2), C.k),
+    'fx-star': grid(['..k..', '.kyk.', 'kyyyk', '.kyk.', '..k..'], { k: C.k, y: C.goldLight }),
+  };
+}
+

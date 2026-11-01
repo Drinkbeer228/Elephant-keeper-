@@ -2,14 +2,14 @@
 // Ходит с той же скоростью, держит одну вещь, жмёт «Действие» только когда подсказка совпала.
 // Видит то же, что игрок с осмотром (пузырь, сено, вода), — то есть играет как опытный кипер.
 
-import { availableAction, tick, walkable, type Command, type State } from '../src/sim';
-import { MAP, inBedding, inReachZone } from '../src/data/map';
-import { BALANCE } from '../src/data/balance';
-import { ELEPHANTS } from '../src/data/elephants';
-import { profileOf, bucketUnder } from '../src/sim/elephants';
-import { kashaDue, mealTime, vegStageAvailable } from '../src/sim/feeding';
-import { sawdustAbsorbed } from '../src/sim/floor';
-import type { Elephant, Item, MealId } from '../src/sim/types';
+import { availableAction, tick, walkable, type Command, type State } from '../sim';
+import { MAP, inBedding, inReachZone } from '../data/map';
+import { BALANCE } from '../data/balance';
+import { ELEPHANTS } from '../data/elephants';
+import { profileOf, bucketUnder } from '../sim/elephants';
+import { kashaDue, mealTime, vegStageAvailable } from '../sim/feeding';
+import { sawdustAbsorbed } from '../sim/floor';
+import type { Elephant, Item, MealId } from '../sim/types';
 
 type P = { x: number; y: number };
 

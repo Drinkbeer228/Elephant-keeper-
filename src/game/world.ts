@@ -1,74 +1,64 @@
 import Phaser from 'phaser';
-import { MAP } from '../data/map';
-import { ELEPHANTS } from '../data/elephants';
+import { PX } from '../art/pixel';
+import { LAMPS } from '../art/worldPx';
 import { BALANCE } from '../data/balance';
-import { dayPart, sawdustAbsorbed, type Item, type State } from '../sim';
+import { ELEPHANTS } from '../data/elephants';
+import { MAP } from '../data/map';
+import { dayPart, sawdustAbsorbed, type State } from '../sim';
+import { ElephantView } from './elephantView';
+import { KeeperView } from './keeperView';
+import { itemTexture, loadTextures } from './textures';
 
-// Мир рисуется заглушками: фигуры и подписи. Ассеты потом заменят только этот файл.
+// Мир в пиксель-арте: шатёр, подстилка по клеткам, станции, ограждение, слонихи, кипер, свет и эффекты.
 
 export const TILE = 48;
 
-const COLORS = {
-  ground: 0x2e2a26,
-  groundLine: 0x38332e,
-  straw: 0xcaa54c,
-  wet: 0x7a6a3a,
-  wetTint: 0x3f6b8c,
-  bareWet: 0x45505a,
-  sawdust: 0xe0c896,
-  sawdustDone: 0xa88f63,
-  bare: 0x6e675d,
-  fenceOn: 0xf2c94c,
-  fenceOff: 0x777777,
-  station: 0x4a423a,
-  stationEdge: 0x6b6156,
-  player: 0x4caf7a,
-  dung: 0x5a3b1e,
-  water: 0x4aa3df,
-  hay: 0xd8b75a,
-};
+export interface FrameResult {
+  actionReady: boolean;
+}
 
-const ITEM_COLORS: Record<Item['kind'], number> = {
-  bucket: 0x9fb4c4,
-  scoop: 0xb0703a,
-  fork: 0xc8c8c8,
-  broom: 0xa8743c,
-  sawdust: 0xe0c896,
-  bag: 0x1b1b1b,
-  basin: 0x2b2b2b,
-  hay: 0xd8b75a,
-  straw: 0xe8cf7a,
-};
+const FONT = '"Press Start 2P", monospace';
 
 export class WorldScene extends Phaser.Scene {
-  private g!: Phaser.GameObjects.Graphics;
-  private night!: Phaser.GameObjects.Graphics;
-  private labels: Phaser.GameObjects.Text[] = [];
-  private labelUsed = 0;
-  private getState: () => State;
-  private onFrame: (dt: number) => void;
+  private ready = false;
   private follow = false;
+  private cells: Phaser.GameObjects.Image[][] = [];
+  private cellKeys: string[][] = [];
+  private items = new Map<number, Phaser.GameObjects.Image>();
+  private dung = new Map<number, Phaser.GameObjects.Image>();
+  private elephants: ElephantView[] = [];
+  private keeper!: KeeperView;
+  private night!: Phaser.GameObjects.Image;
+  private glow!: Phaser.GameObjects.Image;
+  private bulbs: Phaser.GameObjects.Image[] = [];
+  private fence!: Phaser.GameObjects.Graphics;
+  private fenceRight: Phaser.GameObjects.Graphics[] = [];
+  private fenceKey = '';
+  private water!: Phaser.GameObjects.Graphics;
+  private feeder!: Phaser.GameObjects.Image;
+  private kitchen!: Phaser.GameObjects.Image;
+  private kitchenText!: Phaser.GameObjects.Text;
+  private valve!: Phaser.GameObjects.Image;
+  private panel!: Phaser.GameObjects.Image;
+  private fx: Record<string, Phaser.GameObjects.Particles.ParticleEmitter> = {};
+  private prev = { tallies: '', trust: [] as number[], dung: new Set<number>() };
 
-  constructor(getState: () => State, onFrame: (dt: number) => void) {
+  constructor(
+    private getState: () => State,
+    private onFrame: (dt: number) => FrameResult,
+  ) {
     super('world');
-    this.getState = getState;
-    this.onFrame = onFrame;
   }
 
   create(): void {
-    this.g = this.add.graphics();
-    this.night = this.add.graphics().setDepth(5);
-    for (const s of Object.values(MAP.stations)) {
-      if (s.label === 'Задвижка') continue;
-      this.add
-        .text((s.x) * TILE, (s.y - s.h / 2) * TILE - 4, s.label, { fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#d8cfc2' })
-        .setOrigin(0.5, 1)
-        .setDepth(4);
-    }
-    this.cameras.main.setBounds(0, 0, MAP.w * TILE, MAP.h * TILE);
-    this.cameras.main.setBackgroundColor('#1c1916');
+    this.cameras.main.setBackgroundColor('#000000');
     this.scale.on('resize', () => this.fitCamera());
     this.fitCamera();
+    void document.fonts.load('8px "Press Start 2P"').finally(() => {
+      loadTextures(this);
+      this.build();
+      this.ready = true;
+    });
   }
 
   private fitCamera(): void {
@@ -76,236 +66,361 @@ export class WorldScene extends Phaser.Scene {
     const { width, height } = this.scale.gameSize;
     cam.setSize(width, height);
     const fit = Math.min(width / (MAP.w * TILE), height / (MAP.h * TILE));
-    if (fit * TILE >= 30) {
+    const cover = Math.max(width / (MAP.w * TILE), height / (MAP.h * TILE));
+    if (fit * TILE >= 32 && cover / fit < 1.15) {
+      // Экран почти как карта: заполняем без полос, камера чуть доезжает за кипером
+      this.follow = cover / fit > 1.02;
+      cam.setBounds(0, 0, MAP.w * TILE, MAP.h * TILE);
+      cam.setZoom(cover);
+      if (!this.follow) cam.centerOn((MAP.w * TILE) / 2, (MAP.h * TILE) / 2);
+    } else if (fit * TILE >= 32) {
+      // Карта целиком по центру; границы камеры сняты, иначе она прижмётся к краю
       this.follow = false;
+      cam.removeBounds();
       cam.setZoom(fit);
       cam.centerOn((MAP.w * TILE) / 2, (MAP.h * TILE) / 2);
     } else {
-      // Узкий экран: крупнее и камера за кипером
       this.follow = true;
-      cam.setZoom(Math.max(width / (9 * TILE), height / (14 * TILE)));
+      cam.setBounds(0, 0, MAP.w * TILE, MAP.h * TILE);
+      cam.setZoom(Math.max(width / (9.5 * TILE), height / (13 * TILE)));
     }
   }
 
-  update(_time: number, deltaMs: number): void {
-    this.onFrame(Math.min(deltaMs / 1000, 0.1));
+  // Картинка стоит нижним краем на точке
+  private img(x: number, y: number, key: string, depth: number, originY = 1): Phaser.GameObjects.Image {
+    return this.add.image(Math.round(x), Math.round(y), key).setScale(PX).setOrigin(0.5, originY).setDepth(depth);
+  }
+
+  private tag(text: string, x: number, y: number): Phaser.GameObjects.Text {
+    return this.add
+      .text(Math.round(x), Math.round(y), text, { fontFamily: FONT, fontSize: '8px', color: '#fcfcfc', backgroundColor: '#000000', padding: { x: 3, y: 2 } })
+      .setOrigin(0.5, 1)
+      .setDepth(19000);
+  }
+
+  private build(): void {
     const s = this.getState();
-    this.labelUsed = 0;
-    this.draw(s);
-    for (let i = this.labelUsed; i < this.labels.length; i++) this.labels[i].setVisible(false);
-    if (this.follow) this.cameras.main.centerOn(s.player.x * TILE, s.player.y * TILE);
-  }
+    this.add.image(0, 0, 'bg').setOrigin(0).setScale(PX).setDepth(-1000);
 
-  private label(text: string, x: number, y: number, color = '#ffffff', size = 12, bg?: string): void {
-    let t = this.labels[this.labelUsed];
-    if (!t) {
-      t = this.add.text(0, 0, '', { fontFamily: 'system-ui, sans-serif' }).setOrigin(0.5, 1).setDepth(6);
-      this.labels.push(t);
-    }
-    this.labelUsed++;
-    t.setText(text)
-      .setPosition(x * TILE, y * TILE)
-      .setColor(color)
-      .setFontSize(size)
-      .setBackgroundColor(bg ?? '')
-      .setPadding(bg ? 3 : 0, bg ? 1 : 0)
-      .setVisible(true);
-  }
-
-  private draw(s: State): void {
-    const g = this.g;
-    g.clear();
-    g.fillStyle(COLORS.ground).fillRect(0, 0, MAP.w * TILE, MAP.h * TILE);
-    g.lineStyle(1, COLORS.groundLine);
-    for (let x = 0; x <= MAP.w; x++) g.lineBetween(x * TILE, 0, x * TILE, MAP.h * TILE);
-    for (let y = 0; y <= MAP.h; y++) g.lineBetween(0, y * TILE, MAP.w * TILE, y * TILE);
-
-    this.drawBedding(s);
-    this.drawStations(s);
-    this.drawFence(s);
-    for (const d of s.dung) {
-      g.fillStyle(COLORS.dung).fillCircle(d.x * TILE, d.y * TILE, 9).fillCircle(d.x * TILE + 7, d.y * TILE - 4, 7);
-    }
-    for (const item of s.items) this.drawItem(item, item.x, item.y);
-    for (const e of s.elephants) this.drawElephant(s, e);
-    this.drawPlayer(s);
-    this.drawNight(s);
-  }
-
-  private drawBedding(s: State): void {
-    const g = this.g;
+    // Подстилка
     const b = MAP.bedding;
+    for (let cy = 0; cy < b.rows; cy++) {
+      this.cells.push([]);
+      this.cellKeys.push([]);
+      for (let cx = 0; cx < b.cols; cx++) {
+        const im = this.add.image((b.x + cx) * TILE, (b.y + cy) * TILE, 'floor-straw-0').setOrigin(0).setScale(PX).setDepth(-900);
+        this.cells[cy].push(im);
+        this.cellKeys[cy].push('');
+      }
+    }
+    // Тень от шатра на подстилку: шахматка, как в старых играх
+    const shade = this.add.graphics().setDepth(-880);
+    shade.fillStyle(0x000000, 0.28);
+    for (let x = b.x * TILE; x < (b.x + b.cols) * TILE; x += PX * 2) {
+      shade.fillRect(x, b.y * TILE, PX * 2, PX);
+      shade.fillRect(x + PX, b.y * TILE + PX, PX, PX);
+    }
+
+    // Гирлянда по кромке шатра
+    const colors = ['r', 'y', 'b', 'g'];
+    for (let i = 0, x = 12; x < MAP.w * TILE; x += 30, i++) {
+      this.bulbs.push(this.img(x, 0.36 * TILE + (i % 2) * PX, `deco-bulb-${colors[i % 4]}`, -800, 0));
+    }
+    // Фонари вдоль прохода
+    for (const l of LAMPS.filter((p) => p.y > 2)) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
+
+    // Слоты для тазов
+    for (const p of ELEPHANTS) this.img(p.slot.x * TILE, p.slot.y * TILE + 8, 'st-mat', -850, 0.5);
+
+    // Станции
+    const st = MAP.stations;
+    const at = (k: keyof typeof st) => ({ x: st[k].x * TILE, y: (st[k].y + st[k].h / 2) * TILE });
+    const label: Partial<Record<keyof typeof st, string>> = {
+      rack: 'ИНВЕНТАРЬ',
+      sawdust: 'ОПИЛКИ',
+      bags: 'МЕШКИ',
+      wash: 'МОЙКА',
+      hay: 'СЕНО',
+      straw: 'СОЛОМА',
+    };
+    for (const k of ['rack', 'sawdust', 'bags', 'wash', 'hay', 'straw'] as const) {
+      const p = at(k);
+      const im = this.img(p.x, p.y, `st-${k}`, p.y - 30);
+      this.tag(label[k]!, p.x, p.y - im.displayHeight - 2);
+    }
+    const k = at('kitchen');
+    this.kitchen = this.img(k.x, k.y, 'st-kitchen', k.y);
+    this.tag('КОРМОВАЯ', k.x, k.y - this.kitchen.displayHeight - 2);
+    this.kitchenText = this.tag('', k.x, k.y - this.kitchen.displayHeight - 18).setColor('#f8b800');
+    const d = at('dump');
+    this.img(d.x, MAP.h * TILE - 6, 'st-dump', -700);
+    this.tag('ПОМОЙКА', d.x, MAP.h * TILE - 6 - 62);
+    const v = at('valve');
+    this.valve = this.img(v.x, v.y + 6, 'st-valve', v.y);
+    this.tag('ВЕНТИЛЬ', v.x + 30, v.y - 40);
+    const pn = at('fencePanel');
+    this.panel = this.img(pn.x, pn.y + 4, 'st-panel-on', pn.y);
+    this.tag('ПАСТУХ', pn.x + 4, pn.y - 58);
+
+    // Обстановка двора
+    for (const [key, x, y] of [
+      ['deco-sacks', 16.3, 2.7],
+      ['deco-barrow', 16.6, 7.8],
+      ['deco-ladder', 21.3, 2.6],
+      ['deco-bale', 18.3, 8.7],
+      ['deco-bale', 21, 8.3],
+      ['deco-sacks', 21, 12.8],
+    ] as const)
+      this.img(x * TILE, y * TILE, key, y * TILE);
+
+    // Поилка и кормушка внутри
+    const tr = MAP.trough;
+    this.img(tr.x * TILE, (tr.y + 0.5) * TILE, 'st-trough', (tr.y + 0.5) * TILE);
+    this.water = this.add.graphics().setDepth((tr.y + 0.5) * TILE + 1);
+    const fd = MAP.feeder;
+    this.feeder = this.img(fd.x * TILE, (fd.y + 0.6) * TILE, 'st-feeder-2', (fd.y + 0.6) * TILE);
+
+    // Ограждение
+    this.fence = this.add.graphics().setDepth(MAP.fenceY * TILE + 2);
+    for (let row = 0; row < MAP.fenceY; row++) this.fenceRight.push(this.add.graphics().setDepth((row + 1) * TILE + 2));
+
+    // Живые
+    this.elephants = ELEPHANTS.map((p) => new ElephantView(this, p, (x, y) => this.fx.dust.explode(6, x, y)));
+    this.keeper = new KeeperView(this);
+
+    // Свет
+    this.glow = this.add.image(0, 0, 'glow').setOrigin(0).setScale(PX).setDepth(30000).setBlendMode(Phaser.BlendModes.ADD);
+    this.night = this.add.image(0, 0, 'night').setOrigin(0).setScale(PX).setDepth(30001);
+
+    // Эффекты: квадратные «пиксели», как частицы в старых играх
+    const emitter = (key: string, cfg: Phaser.Types.GameObjects.Particles.ParticleEmitterConfig) => {
+      this.fx[key] = this.add.particles(0, 0, `fx-${key}`, { emitting: false, scale: PX, ...cfg }).setDepth(25000);
+    };
+    emitter('pee', { speed: { min: 50, max: 120 }, angle: { min: 200, max: 340 }, gravityY: 360, lifespan: 600 });
+    emitter('water', { speed: { min: 30, max: 90 }, angle: { min: 200, max: 340 }, gravityY: 300, lifespan: 500 });
+    emitter('dust', { speed: { min: 30, max: 70 }, angle: { min: 190, max: 350 }, gravityY: 80, lifespan: 450, alpha: { start: 1, end: 0 } });
+    emitter('heart', { speed: { min: 20, max: 40 }, angle: { min: 250, max: 290 }, lifespan: 1200, alpha: { start: 1, end: 0 } });
+    emitter('z', { speed: { min: 10, max: 22 }, angle: { min: 260, max: 300 }, lifespan: 1800, alpha: { start: 1, end: 0 }, scale: 2 });
+    emitter('steam', { speed: { min: 8, max: 20 }, angle: { min: 250, max: 290 }, lifespan: 1200, alpha: { start: 0.8, end: 0 } });
+    emitter('star', { speed: { min: 40, max: 90 }, angle: { min: 200, max: 340 }, gravityY: 120, lifespan: 700, alpha: { start: 1, end: 0 } });
+
+    this.prev.dung = new Set(s.dung.map((x) => x.id));
+    this.prev.trust = s.elephants.map((e) => e.trust);
+    this.prev.tallies = JSON.stringify(s.elephants.map((e) => e.tally));
+  }
+
+  update(time: number, deltaMs: number): void {
+    const dt = Math.min(deltaMs / 1000, 0.1);
+    const frame = this.onFrame(dt);
+    if (!this.ready) return;
+    const s = this.getState();
+    const t = time / 1000;
+    this.drawCells(s);
+    this.drawItems(s);
+    this.drawDung(s);
+    this.drawFence(s);
+    this.drawStations(s);
+    s.elephants.forEach((e, i) => this.elephants[i].update(e, s, t));
+    this.keeper.update(s, t, frame.actionReady);
+    this.effects(s);
+    this.drawLight(s, t);
+    if (this.follow) {
+      const cam = this.cameras.main;
+      const tx = s.player.x * TILE - cam.width / 2;
+      const ty = s.player.y * TILE - cam.height / 2;
+      cam.scrollX += (tx - cam.scrollX) * Math.min(1, dt * 6);
+      cam.scrollY += (ty - cam.scrollY) * Math.min(1, dt * 6);
+    }
+  }
+
+  private drawCells(s: State): void {
     s.cells.forEach((row, cy) =>
       row.forEach((c, cx) => {
-        const x = (b.x + cx) * TILE;
-        const y = (b.y + cy) * TILE;
-        const color =
+        const v = (cx * 7 + cy * 13) % 4;
+        const key =
           c.kind === 'straw'
-            ? COLORS.straw
+            ? `floor-straw-${v}`
             : c.kind === 'wet'
-              ? COLORS.wet
-              : c.kind === 'bareWet'
-                ? COLORS.bareWet
-                : c.kind === 'sawdust'
-                  ? sawdustAbsorbed(s, c)
-                    ? COLORS.sawdustDone
-                    : COLORS.sawdust
-                  : COLORS.bare;
-        g.fillStyle(color).fillRect(x, y, TILE, TILE);
-        if (c.kind === 'wet' || c.kind === 'bareWet') g.fillStyle(COLORS.wetTint, 0.35).fillRect(x, y, TILE, TILE);
-        if (c.kind === 'straw') {
-          g.lineStyle(1, 0xb08f3a, 0.6);
-          g.lineBetween(x + 8, y + 12, x + 22, y + 18).lineBetween(x + 26, y + 30, x + 40, y + 26).lineBetween(x + 12, y + 36, x + 20, y + 42);
+              ? `floor-wet-${v % 2}`
+              : c.kind === 'sawdust'
+                ? sawdustAbsorbed(s, c)
+                  ? 'floor-sawdustDone'
+                  : 'floor-sawdust'
+                : `floor-${c.kind}`;
+        if (this.cellKeys[cy][cx] !== key) {
+          this.cellKeys[cy][cx] = key;
+          this.cells[cy][cx].setTexture(key);
         }
-        g.lineStyle(1, 0x000000, 0.12).strokeRect(x, y, TILE, TILE);
       }),
     );
-    // Поилка и кормушка
-    const t = MAP.trough;
-    g.fillStyle(0x555b61).fillRect((t.x - 0.8) * TILE, (t.y - 0.4) * TILE, 1.6 * TILE, 0.8 * TILE);
-    g.fillStyle(COLORS.water).fillRect((t.x - 0.75) * TILE, (t.y - 0.35) * TILE, 1.5 * TILE * (s.trough / 100), 0.7 * TILE);
-    const f = MAP.feeder;
-    g.fillStyle(0x5a4a33).fillRect((f.x - 0.9) * TILE, (f.y - 0.4) * TILE, 1.8 * TILE, 0.8 * TILE);
-    g.fillStyle(COLORS.hay).fillRect((f.x - 0.85) * TILE, (f.y - 0.35) * TILE, 1.7 * TILE * (s.feederHay / 100), 0.7 * TILE);
-    this.label(`вода ${Math.round(s.trough)}%`, t.x, t.y - 0.45, '#cfe7f7', 11);
-    this.label(`сено ${Math.round(s.feederHay)}%`, f.x, f.y - 0.45, '#f3e2b0', 11);
-    // Слоты для тазов
-    for (const p of ELEPHANTS) {
-      g.lineStyle(2, 0xffffff, 0.35).strokeCircle(p.slot.x * TILE, p.slot.y * TILE, 15);
-      this.label(p.name, p.slot.x, p.slot.y + 0.55, '#ffffffaa', 10);
+  }
+
+  private drawItems(s: State): void {
+    const seen = new Set<number>();
+    for (const item of s.items) {
+      seen.add(item.id);
+      let im = this.items.get(item.id);
+      if (!im) {
+        im = this.add.image(0, 0, itemTexture(item)).setScale(PX).setOrigin(0.5, 0.9);
+        this.items.set(item.id, im);
+      }
+      const y = Math.round(item.y * TILE + 10);
+      im.setTexture(itemTexture(item)).setPosition(Math.round(item.x * TILE), y).setDepth(y - 1);
+    }
+    for (const [id, im] of this.items) {
+      if (!seen.has(id)) {
+        im.destroy();
+        this.items.delete(id);
+      }
     }
   }
 
+  private drawDung(s: State): void {
+    const seen = new Set<number>();
+    for (const d of s.dung) {
+      seen.add(d.id);
+      if (!this.dung.has(d.id)) {
+        const y = d.y * TILE + 8;
+        this.dung.set(d.id, this.img(d.x * TILE, y, 'dung', y - 2, 0.8));
+      }
+    }
+    for (const [id, im] of this.dung) {
+      if (!seen.has(id)) {
+        im.destroy();
+        this.dung.delete(id);
+      }
+    }
+  }
+
+  // Ограждение: трубы с чёрным контуром, провод пастуха — жёлтый, когда включён
   private drawFence(s: State): void {
-    const g = this.g;
-    const color = s.fenceOn ? COLORS.fenceOn : COLORS.fenceOff;
+    const key = `${s.fenceOn}-${s.gateOpen}`;
+    if (key === this.fenceKey) return;
+    this.fenceKey = key;
+    const wire = s.fenceOn ? 0xf8b800 : 0x7c7c7c;
+    const P = PX;
+    const post = (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
+      g.fillStyle(0x000000).fillRect(x - 2 * P, y - 15 * P, 4 * P, 16 * P);
+      g.fillStyle(0x7c7c7c).fillRect(x - P, y - 14 * P, 2 * P, 14 * P);
+      g.fillStyle(0xbcbcbc).fillRect(x - P, y - 14 * P, P, 14 * P);
+      g.fillStyle(0xfcfcfc).fillRect(x - P, y - 9 * P, 2 * P, P);
+    };
+    const rail = (g: Phaser.GameObjects.Graphics, x0: number, x1: number, y: number) => {
+      g.fillStyle(0x000000).fillRect(x0, y - P, x1 - x0, 3 * P);
+      g.fillStyle(0xbcbcbc).fillRect(x0, y, x1 - x0, P);
+    };
     const y = MAP.fenceY * TILE;
+    const g = this.fence;
+    g.clear();
+    for (const [x0, x1] of [
+      [MAP.bedding.x * TILE, MAP.gate.x0 * TILE],
+      [MAP.gate.x1 * TILE, MAP.fenceX * TILE],
+    ]) {
+      rail(g, x0, x1, y - 4 * P);
+      rail(g, x0, x1, y - 12 * P);
+      g.fillStyle(wire).fillRect(x0, y - 8 * P, x1 - x0, P);
+    }
+    for (let x = MAP.bedding.x; x <= MAP.fenceX; x += 1.5) {
+      if (x > MAP.gate.x0 && x < MAP.gate.x1) continue;
+      post(g, Math.round(x * TILE), y);
+    }
+    post(g, MAP.gate.x0 * TILE, y);
+    post(g, MAP.gate.x1 * TILE, y);
+    // Задвижка: решётка-створка; открытая — распахнута, на ней красный флажок
+    const gx = MAP.gate.x0 * TILE + 2 * P;
+    if (s.gateOpen) {
+      g.fillStyle(0x000000).fillRect(gx, y - 12 * P, 3 * P, 22 * P);
+      g.fillStyle(0xfc9838).fillRect(gx + P, y - 11 * P, P, 20 * P);
+      g.fillStyle(0xd82800).fillRect(gx + 3 * P, y - 12 * P, 5 * P, 4 * P);
+    } else {
+      const w = (MAP.gate.x1 - MAP.gate.x0) * TILE - 4 * P;
+      for (const yy of [y - 4 * P, y - 12 * P]) {
+        g.fillStyle(0x000000).fillRect(gx, yy - P, w, 3 * P);
+        g.fillStyle(0xfc9838).fillRect(gx, yy, w, P);
+      }
+      for (let x = gx + 4 * P; x < gx + w; x += 6 * P) g.fillStyle(0x000000).fillRect(x, y - 12 * P, P, 9 * P);
+      g.fillStyle(0xd82800).fillRect(gx + w - 4 * P, y - 9 * P, 3 * P, 3 * P);
+    }
+    // Правая линия по сегменту на ряд — слонихи правильно заходят за неё
     const x = MAP.fenceX * TILE;
-    g.lineStyle(4, 0x8a8178);
-    g.lineBetween(MAP.bedding.x * TILE, y, MAP.gate.x0 * TILE, y);
-    g.lineBetween(MAP.gate.x1 * TILE, y, x, y);
-    g.lineBetween(x, MAP.bedding.y * TILE, x, y);
-    g.lineStyle(2, color, s.fenceOn ? 0.9 : 0.5);
-    g.lineBetween(MAP.bedding.x * TILE, y - 6, MAP.gate.x0 * TILE, y - 6);
-    g.lineBetween(MAP.gate.x1 * TILE, y - 6, x - 6, y - 6);
-    g.lineBetween(x - 6, MAP.bedding.y * TILE, x - 6, y - 6);
-    // Стены слоновника
-    g.lineStyle(6, 0x15120f);
-    g.lineBetween(MAP.bedding.x * TILE, MAP.bedding.y * TILE, x, MAP.bedding.y * TILE);
-    g.lineBetween(MAP.bedding.x * TILE, MAP.bedding.y * TILE, MAP.bedding.x * TILE, y);
-    // Задвижка
-    g.lineStyle(3, s.gateOpen ? 0xe5534b : 0x8a8178);
-    if (s.gateOpen) g.lineBetween(MAP.gate.x0 * TILE, y, MAP.gate.x0 * TILE + 10, y + 40);
-    else g.lineBetween(MAP.gate.x0 * TILE, y, MAP.gate.x1 * TILE, y);
-    if (s.gateOpen) this.label('задвижка открыта', 7, MAP.fenceY + 1.2, '#ffb4ae', 11);
+    this.fenceRight.forEach((rg, row) => {
+      rg.clear();
+      if (row === 0) return;
+      const y1 = (row + 1) * TILE;
+      rg.fillStyle(0x000000).fillRect(x - P, y1 - TILE, 3 * P, TILE);
+      rg.fillStyle(0xbcbcbc).fillRect(x, y1 - TILE, P, TILE);
+      rg.fillStyle(wire).fillRect(x - 3 * P, y1 - TILE, P, TILE);
+      if (row % 2 === 0) post(rg, x, y1);
+    });
   }
 
   private drawStations(s: State): void {
-    const g = this.g;
-    for (const [id, st] of Object.entries(MAP.stations)) {
-      if (id === 'gate') continue;
-      let fill = COLORS.station;
-      if (id === 'fencePanel') fill = s.fenceOn ? 0x3f7d4f : 0x8c3b36;
-      if (id === 'valve') fill = s.valveOpen ? 0x2f7fb8 : COLORS.station;
-      if (id === 'dump') fill = 0x3c5a3a;
-      g.fillStyle(fill).fillRect((st.x - st.w / 2) * TILE, (st.y - st.h / 2) * TILE, st.w * TILE, st.h * TILE);
-      g.lineStyle(2, COLORS.stationEdge).strokeRect((st.x - st.w / 2) * TILE, (st.y - st.h / 2) * TILE, st.w * TILE, st.h * TILE);
-    }
+    const cooking = s.kitchen.kasha.status === 'cooking';
+    this.kitchen.setTexture(cooking ? 'st-kitchen-cooking' : 'st-kitchen');
+    if (cooking && Math.random() < 0.08) this.fx.steam.explode(1, MAP.stations.kitchen.x * TILE - 22, (MAP.stations.kitchen.y - 1.2) * TILE);
     const k = s.kitchen;
-    const ks = MAP.stations.kitchen;
-    const status = k.kasha.status === 'cooking' ? 'каша парится' : k.kasha.status === 'ready' ? `каша ×${k.kasha.portions}` : '';
-    const veg = k.veg.portions ? `овощи ×${k.veg.portions}` : k.veg.stage > 0 && k.veg.stage < 5 ? `ужин ${k.veg.stage}/5` : '';
-    this.label([status, veg, `тазы ${k.cleanBasins}`].filter(Boolean).join(' · '), ks.x, ks.y + 0.3, '#f5e6c8', 11);
-    if (s.valveOpen) this.label('вода идёт', MAP.stations.valve.x, MAP.stations.valve.y + 0.8, '#9fd3f7', 11);
-  }
+    const parts = [
+      k.kasha.status === 'cooking' ? 'КАША ПАРИТСЯ' : k.kasha.status === 'ready' ? `КАША x${k.kasha.portions}` : '',
+      k.veg.portions ? `ОВОЩИ x${k.veg.portions}` : k.veg.stage > 0 && k.veg.stage < 5 ? `УЖИН ${k.veg.stage}/5` : '',
+    ].filter(Boolean);
+    this.kitchenText.setText(parts.join(' ')).setVisible(parts.length > 0);
 
-  private drawItem(item: Item, x: number, y: number, scale = 1): void {
-    const g = this.g;
-    const px = x * TILE;
-    const py = y * TILE;
-    const c = ITEM_COLORS[item.kind];
-    switch (item.kind) {
-      case 'bucket': {
-        g.fillStyle(c).fillCircle(px, py, 13 * scale);
-        const fill = (item.liters ?? 0) / BALANCE.elephant.bucketCapacity;
-        if (fill > 0) g.fillStyle(0xe8d44d).fillCircle(px, py, 11 * scale * Math.sqrt(fill));
-        g.lineStyle(2, item.dirty ? 0x7a5c2e : 0xdfe8ee).strokeCircle(px, py, 13 * scale);
-        break;
-      }
-      case 'basin':
-        g.fillStyle(c).fillCircle(px, py, 14 * scale);
-        if (item.food) g.fillStyle(item.food === 'kasha' ? 0xcaa877 : 0xd2693a).fillCircle(px, py, 10 * scale);
-        break;
-      case 'bag':
-        g.fillStyle(c).fillRect(px - 12 * scale, py - 14 * scale, 24 * scale, 28 * scale);
-        g.fillStyle(0x6b4a2a).fillRect(px - 10 * scale, py + 12 * scale - 24 * scale * ((item.fill ?? 0) / 6), 20 * scale, 24 * scale * ((item.fill ?? 0) / 6));
-        break;
-      case 'hay':
-      case 'straw':
-      case 'sawdust':
-        g.fillStyle(c).fillRect(px - 12 * scale, py - 9 * scale, 24 * scale, 18 * scale);
-        break;
-      default:
-        g.lineStyle(4 * scale, c).lineBetween(px - 12 * scale, py + 12 * scale, px + 12 * scale, py - 12 * scale);
-        g.fillStyle(c).fillCircle(px + 12 * scale, py - 12 * scale, 5 * scale);
+    this.valve.setTexture(s.valveOpen ? 'st-valve-open' : 'st-valve');
+    if (s.valveOpen && Math.random() < 0.3) this.fx.water.explode(2, MAP.trough.x * TILE + 20, (MAP.trough.y + 0.1) * TILE);
+    this.panel.setTexture(s.fenceOn ? 'st-panel-on' : 'st-panel-off');
+    this.feeder.setTexture(`st-feeder-${s.feederHay < 5 ? 0 : s.feederHay < 50 ? 1 : 2}`);
+
+    // Вода в поилке: синяя полоса с бликом, по уровню
+    const tr = MAP.trough;
+    const w = this.water;
+    w.clear();
+    if (s.trough > 2) {
+      const left = tr.x * TILE - 13 * PX;
+      const top = (tr.y + 0.5) * TILE - 10 * PX;
+      const h = Math.max(1, Math.round((s.trough / 100) * 5)) * PX;
+      w.fillStyle(0x0078f8).fillRect(left, top + 5 * PX - h, 26 * PX, h + PX);
+      w.fillStyle(0x3cbcfc).fillRect(left, top + 5 * PX - h, 26 * PX, PX);
+      w.fillStyle(0xfcfcfc).fillRect(left + 4 * PX, top + 5 * PX - h, 3 * PX, PX);
     }
   }
 
-  private drawElephant(s: State, e: State['elephants'][number]): void {
-    const g = this.g;
-    const p = ELEPHANTS.find((x) => x.id === e.id)!;
-    const px = e.x * TILE;
-    const py = e.y * TILE;
-    const lying = e.state === 'sleep';
-    const dir = e.tx < e.x - 0.05 ? -1 : 1;
-    g.fillStyle(0x000000, 0.25).fillEllipse(px, py + 18, 80, 26);
-    if (lying) {
-      g.fillStyle(p.color).fillEllipse(px, py + 6, 84, 44);
-      g.fillStyle(p.color).fillCircle(px + dir * 40, py, 20);
-    } else {
-      const bob = e.state === 'walk' || e.state === 'sway' ? Math.sin(s.t * 6 + px) * 3 : 0;
-      g.fillStyle(p.color).fillEllipse(px + (e.state === 'sway' ? bob * 2 : 0), py, 76, 52);
-      g.fillStyle(p.color).fillCircle(px + dir * 36, py - 14 + bob, 22);
-      g.fillStyle(0xd6a29f).fillEllipse(px + dir * 26, py - 16 + bob, 12, 22);
-      g.lineStyle(7, p.color).lineBetween(px + dir * 50, py - 8 + bob, px + dir * 54, py + 18);
+  private effects(s: State): void {
+    // Новая куча — пыль, мимо или в бак — брызги, лакомство — сердечки, сон — «z»
+    const ids = new Set(s.dung.map((d) => d.id));
+    for (const d of s.dung) if (!this.prev.dung.has(d.id)) this.fx.dust.explode(6, d.x * TILE, d.y * TILE);
+    this.prev.dung = ids;
+    const tallies = JSON.stringify(s.elephants.map((e) => e.tally));
+    if (tallies !== this.prev.tallies) {
+      const before = JSON.parse(this.prev.tallies || '[]') as State['elephants'][number]['tally'][];
+      s.elephants.forEach((e, i) => {
+        const was = before[i];
+        if (!was) return;
+        const back = e.x * TILE - this.elephants[i].facing * 30;
+        if (e.tally.inBucket > was.inBucket) {
+          this.fx.pee.explode(20, back, e.y * TILE);
+          this.fx.star.explode(8, e.x * TILE, e.y * TILE - 40);
+        }
+        if (e.tally.missed > was.missed) this.fx.pee.explode(30, back, e.y * TILE);
+      });
+      this.prev.tallies = tallies;
     }
-    let status = '';
-    let color = '#ffffff';
-    let bg: string | undefined;
-    if (e.signalStarted !== undefined) {
-      status = p.signalText ? `! ${p.signalText}` : '! писает';
-      color = '#1a1a1a';
-      bg = '#ffd23f';
-    } else if (lying) status = 'z z z';
-    else if (e.state === 'sway') {
-      status = '~ качается ~';
-      color = '#ffb4ae';
-    } else if (e.state === 'eatBasin' || e.state === 'eatHay') status = 'ест';
-    else if (e.state === 'drink') status = 'пьёт';
-    else if (s.t <= e.praiseUntil) {
-      status = 'в бак! угости';
-      color = '#7ee2a8';
-    }
-    this.label(p.name, e.x, e.y - 0.75, '#ffffff', 13);
-    if (status) this.label(status, e.x, e.y - 1.1, color, 12, bg);
+    s.elephants.forEach((e, i) => {
+      if (e.trust > (this.prev.trust[i] ?? e.trust)) this.fx.heart.explode(4, e.x * TILE, e.y * TILE - 90);
+      this.prev.trust[i] = e.trust;
+      if (e.state === 'sleep' && Math.random() < 0.012) this.fx.z.explode(1, e.x * TILE + 30, e.y * TILE - 20);
+    });
   }
 
-  private drawPlayer(s: State): void {
-    const g = this.g;
-    const p = s.player;
-    const px = p.x * TILE;
-    const py = p.y * TILE;
-    g.fillStyle(0x000000, 0.3).fillEllipse(px, py + 12, 28, 10);
-    g.fillStyle(COLORS.player).fillCircle(px, py, 13);
-    g.fillStyle(0xf1d2b0).fillCircle(px + p.facing.x * 5, py - 4 + p.facing.y * 5, 7);
-    if (p.held) this.drawItem(p.held, p.x + 0.35, p.y - 0.5, 0.7);
-  }
-
-  private drawNight(s: State): void {
-    const n = this.night;
-    n.clear();
-    const part = dayPart(s.t);
-    const alpha = part === 'night' ? 0.45 : part === 'morning' ? 0.2 : s.t > 660 ? ((s.t - 660) / 60) * 0.45 : 0;
-    if (alpha > 0) n.fillStyle(0x0b1030, alpha).fillRect(0, 0, MAP.w * TILE, MAP.h * TILE);
+  private drawLight(s: State, t: number): void {
+    const time = s.t;
+    const part = dayPart(time);
+    let dark = 0;
+    if (part === 'day') dark = time > 600 ? ((time - 600) / 120) * 0.85 : 0;
+    else if (part === 'night') dark = 0.85;
+    else dark = Math.max(0, 0.85 - ((time - BALANCE.time.nightEnd) / 100) * 0.85);
+    this.night.setAlpha(dark);
+    this.glow.setAlpha(dark);
+    // Гирлянда мигает по очереди, когда темно
+    this.bulbs.forEach((b, i) => b.setAlpha(dark > 0.2 && Math.floor(t * 2 + i) % 3 === 0 ? 0.5 : 1));
   }
 }

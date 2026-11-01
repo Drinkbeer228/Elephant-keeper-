@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createShift } from '../src/sim';
-import { playShift } from './bot';
+import { playShift } from '../src/dev/bot';
 
 // Опытный кипер (бот) проходит смену. Если он не справляется — смена слишком тяжёлая,
 // если скучает больше половины времени — слишком лёгкая.
