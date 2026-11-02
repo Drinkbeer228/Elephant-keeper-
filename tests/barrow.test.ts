@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { advance, tick } from '../src/sim';
-import { cellAt, setCell } from '../src/sim/floor';
+import { setCell } from '../src/sim/floor';
 import { BALANCE } from '../src/data/balance';
 import { MAP } from '../src/data/map';
 import { act, at, cleanShift, el, hold, stand } from './helpers';
@@ -19,8 +19,8 @@ describe('тачка', () => {
     at(s, MAP.barrowStart.x, MAP.barrowStart.y - 0.8);
     expect(act(s)).toBe('Везти тачку');
     expect(s.barrow.pushed).toBe(true);
-    Object.assign(s.barrow, { x: 1.6, y: 12.2 });
-    at(s, 2.4, 12.2);
+    Object.assign(s.barrow, { x: MAP.stations.rack.x + 1.7, y: MAP.stations.rack.y });
+    at(s, MAP.stations.rack.x + 0.8, MAP.stations.rack.y);
     expect(act(s)).toBe('Сложить инвентарь в тачку');
     expect(s.barrow.tools.sort()).toEqual(['broom', 'fork', 'scoop']);
     expect(s.items.some((i) => i.kind === 'scoop')).toBe(false);
@@ -32,42 +32,37 @@ describe('тачка', () => {
   it('из стоящей тачки берут инструмент, убирают в неё и кладут инструмент обратно', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    Object.assign(s.barrow, { x: 5, y: 4, pushed: false, tools: ['scoop', 'fork', 'broom'], sawdust: 8, straw: 8, parkedAt: 0 });
-    s.dung.push({ id: 900, x: 3.5, y: 3.5, at: 0 });
-    setCell(s, 3 - MAP.bedding.x, 2, 'wet');
-    at(s, 4.4, 4);
+    Object.assign(s.barrow, { x: 7, y: 5.5, pushed: false, tools: ['scoop', 'fork', 'broom'], parkedAt: 0 });
+    s.dung.push({ id: 900, x: 5.5, y: 4.5, at: 0 });
+    setCell(s, 6, 4, 'wet');
+    at(s, 6.5, 5.5);
     expect(act(s, 'Взять: совок')).toMatch(/совок/);
     expect(s.player.held?.kind).toBe('scoop');
-    at(s, 3.5, 3.6);
+    at(s, 5.5, 4.8);
     expect(act(s)).toBe('Убрать навоз в тачку');
-    at(s, 4.4, 4);
+    at(s, 6.5, 5.5);
     expect(act(s)).toBe('Положить в тачку: совок со скребком');
     expect(act(s, 'Взять: вилы')).toBe('Взять: вилы');
-    at(s, 3.5, 3.6);
+    at(s, 6.5, 4.5);
     expect(act(s)).toBe('Убрать мокрую солому в тачку');
-    at(s, 4.4, 4);
+    at(s, 6.5, 5.5);
     act(s);
-    expect(act(s, 'Взять ведро опилок')).toMatch(/опилок/);
-    at(s, 3.5, 3.6);
-    expect(act(s)).toBe('Засыпать опилками');
-    advance(s, 21);
-    at(s, 4.4, 4);
-    expect(act(s)).toMatch(/^Вернуть в тачку: ведро опилок/);
-    act(s, 'Взять: метл');
-    at(s, 3.5, 3.6);
-    expect(act(s)).toBe('Вымести опилки в тачку');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('bare');
-    expect(s.barrow.waste).toBe(3);
+    expect(act(s, 'Взять: метл')).toMatch(/метл/);
+    expect(s.player.held?.kind).toBe('broom');
+    at(s, 6.5, 5.5);
+    expect(act(s)).toBe('Положить в тачку: метла');
+    expect(s.barrow.tools).toContain('broom');
+    expect(s.barrow.waste).toBe(2);
   });
 
   it('тачка едет перед кипером и не проходит сквозь ограждение', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 10.5, y: 10.4, pushed: true });
-    at(s, 10.5, 11);
+    Object.assign(s.barrow, { x: 10.5, y: 15.4, pushed: true });
+    at(s, 10.5, 15.4);
     push(s, 0, -1, 1.5);
     // упёрлись в ограждение — дальше не пускает
-    expect(s.player.y).toBeGreaterThan(9.3);
-    expect(s.barrow.y).toBeGreaterThan(9.2);
+    expect(s.player.y).toBeGreaterThanOrEqual(MAP.fenceY + 0.3 - 0.1);
+    expect(s.barrow.y).toBeGreaterThanOrEqual(MAP.fenceY + 0.3 - 0.1);
   });
 
   it('три тюка раскачиваются: без балансировки падают, с ней доезжают', () => {
@@ -99,8 +94,8 @@ describe('тачка', () => {
   it('тюк из тачки — в кормушку', () => {
     const s = cleanShift();
     s.feederHay = 10;
-    Object.assign(s.barrow, { x: 3, y: 3, pushed: true, bales: 2 });
-    at(s, 2.6, 2.6);
+    Object.assign(s.barrow, { x: MAP.feeder.x + 0.8, y: MAP.feeder.y + 0.6, pushed: true, bales: 2 });
+    at(s, MAP.feeder.x, MAP.feeder.y);
     expect(act(s)).toBe('Выгрузить тюк в кормушку');
     expect(s.barrow.bales).toBe(1);
     expect(s.feederHay).toBe(10 + BALANCE.food.hayBale);

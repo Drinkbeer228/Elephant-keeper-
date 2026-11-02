@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Start keeper sim
+Name[ru]=Запустить симуляцию кипера
+GenericName=Keeper sim
+Comment=Дежурный кипер: поднять dev-сервер и открыть игру в браузере
+Exec="/home/drinkbeer228/Загрузки/keeper-sim/start-keeper-sim.sh"
+Path=/home/drinkbeer228/Загрузки/keeper-sim
+Icon=/home/drinkbeer228/Загрузки/keeper-sim/icon.png
+Terminal=true
+Categories=Game;
+Keywords=keeper;elephant;sim;game;

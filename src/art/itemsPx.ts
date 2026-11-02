@@ -218,6 +218,56 @@ function broom(): Sprite {
   );
 }
 
+// Совковая лопата: деревянный черенок и стальной совок — набирает опилки из ларя
+function shovel(): Sprite {
+  return grid(
+    [
+      '.........kkk....',
+      '.........kwk....',
+      '........kwk.....',
+      '........kwk.....',
+      '.......kwk......',
+      '.......kwk......',
+      '......kwk.......',
+      '.....kMMk.......',
+      '....kMMMMk......',
+      '....kMMMMk......',
+      '...kMMMMMk......',
+      '...kMMMMMk......',
+      '..kMMMMMMk......',
+      '..kMMMMMDk......',
+      '..kkkkkkkk......',
+      '................',
+    ],
+    TOOL_PAL,
+  );
+}
+
+// Длинный сачок: обруч на черенке, сетка провисает
+function net(): Sprite {
+  return grid(
+    [
+      '....kkkk........',
+      '...kyyyyk.......',
+      '..kk....kk......',
+      '..k......k......',
+      '..k......k......',
+      '..k......k......',
+      '...k....k.......',
+      '...k....k.......',
+      '....kkkk........',
+      '.....kwk........',
+      '.....kwk........',
+      '....kwk.........',
+      '....kwk.........',
+      '...kwk..........',
+      '...kk...........',
+      '................',
+    ],
+    { k: C.k, w: C.orangeLight, y: C.grey },
+  );
+}
+
 function dung(): Sprite {
   const s = new Sprite(12, 10);
   s.shape(ellipse(3.5, 6.5, 3.5, 3), T.dung);
@@ -284,6 +334,8 @@ export function itemSprites(): Record<string, Sprite> {
     'item-scoop-full': scoop(true),
     'item-fork': fork(),
     'item-broom': broom(),
+    'item-shovel': shovel(),
+    'item-net': net(),
     dung: dung(),
     'fx-bubble': bubble(),
     'fx-heart': heart(),

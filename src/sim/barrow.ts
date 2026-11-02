@@ -84,17 +84,56 @@ export function updateBarrowRisk(state: State, dt: number): void {
   emit(state, { kind: 'bad', text: 'Слониха опрокинула тачку — всё вывалилось!', why: 'barrowTipped' });
 }
 
-// Тачка с соломой, опилками или тюками рассыпает понемногу по пути. В вольере это не учитывается —
-// там подстилка и трава; на дорожке, в постройках и на асфальте остаётся сор для метлы
-export function spillFromBarrow(state: State, moved: number): void {
+// Наполненность тачки сыпучим: доля от максимума (опилки и солома, тюки — свой механик равновесия)
+export function barrowFill(state: State): number {
   const b = state.barrow;
-  const kind = b.sawdust > 0 ? 'sawdust' : b.straw > 0 ? 'straw' : b.bales > 0 ? 'hay' : null;
-  if (!b.pushed || !kind || moved <= 0) return;
+  return Math.max(b.sawdust / B.sawdustLoad, b.straw / B.strawLoad, 0);
+}
+
+// Встряска тачки: то, от чего «с горкой» просыпается заряд сыпучего
+export interface Jolt {
+  turn: boolean; // резкий поворот на ходу
+  zone: boolean; // стык покрытий: граница вольера, трап, порог двери
+  bump: boolean; // упёрлась в стену или препятствие
+  sprint?: boolean; // спринт: тачка дребезжит, сыплет и без резких манёвров
+}
+
+// Тачка с опилками или соломой выше «горки» (overfill) сыплет заряд от встряски:
+// резкий поворот, стык зон, упор в стену. Спокойным шагом по прямой — не сыплется вовсе.
+// Спринт (Shift) трясёт тачку постоянно: «горка» снижается вдвое, и сыпучее сыплется само.
+// Кучка (сор для метлы) — не чаще одной на litterEvery клеток пути; в вольере не считается
+export function spillFromBarrow(state: State, moved: number, jolt: Jolt): void {
+  const b = state.barrow;
+  if (b.spoiled) {
+    b.trail = 0;
+    return;
+  }
+  const kind = b.sawdust > 0 ? 'sawdust' : b.straw > 0 ? 'straw' : null;
+  if (!b.pushed || !kind) {
+    b.trail = 0;
+    return;
+  }
   b.trail += moved;
-  if (b.trail < B.litterEvery) return;
+  const limit = jolt.sprint ? B.overfill * 0.5 : B.overfill;
+  if (barrowFill(state) <= limit) return; // ниже «горки» сыпучее держится
+  const shake = jolt.turn || jolt.zone || jolt.bump;
+  if (!shake && !jolt.sprint) return;
+  // Кучки не чаще одной на пару тайлов пути; спринт трясёт постоянно, но реже манёвров
+  if (b.trail < (shake ? B.litterEvery : B.litterEvery * 2.5)) return;
   b.trail = 0;
-  if (inPaddock(b.x, b.y) || state.litter.length >= B.litterMax || !chance(state, B.litterChance)) return;
+  if (inPaddock(b.x, b.y) || state.litter.length >= B.litterMax) return; // на подстилке и траве не считается
+  b[kind]--;
   state.litter.push({ id: state.nextItemId++, x: b.x + randomRange(state, -0.3, 0.3), y: b.y + randomRange(state, 0, 0.3), kind });
+}
+
+// Мусор, закинутый в тачку с опилками или соломой: груз испорчен,
+// на пол больше не сыплется — только вывоз в мусорный бак
+export function spoilBarrow(state: State): void {
+  const b = state.barrow;
+  if (b.sawdust > 0 || b.straw > 0) {
+    if (!b.spoiled) emit(state, { kind: 'info', text: 'В тачке теперь смесь с навозом — на пол нельзя, только в мусорный бак.' });
+    b.spoiled = true;
+  }
 }
 
 // ——— мусорный бак ———
@@ -143,4 +182,3 @@ export function updateContainer(state: State): void {
     emit(state, { kind: 'good', text: 'Мусоровоз забрал полный бак и поставил пустой.' });
   }
 }
-

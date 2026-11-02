@@ -8,24 +8,26 @@ const heap = MAP.stations.sawdust;
 const pail = (s: ReturnType<typeof cleanShift>) => s.items.find((i) => i.kind === 'sawdust')!;
 
 describe('навес: опилки', () => {
-  it('ведро для опилок стоит у кучи, пустое', () => {
+  it('ведро для опилок стоит в дежурке, пустое', () => {
     const s = cleanShift();
     const p = pail(s);
     expect(Math.hypot(p.x - MAP.pailSpot.x, p.y - MAP.pailSpot.y)).toBeLessThan(0.01);
     expect(p.charges).toBe(0);
   });
 
-  it('без ведра у кучи опилки не взять, с ведром — набрать и поставить ведро на место', () => {
+  it('лопата наполняет ведро у ларя, ведро возвращается в дежурку', () => {
     const s = cleanShift();
     const p = pail(s);
-    p.x = 7;
-    p.y = 10.6;
-    at(s, heap.x, heap.y + heap.h / 2 + 0.4);
-    expect(availableAction(s)?.label).toBe('Опилки набирают ведром — оно стоит у кучи');
-    s.items = s.items.filter((i) => i !== p);
-    s.player.held = p;
-    expect(act(s)).toBe('Набрать опилок');
+    p.x = heap.x;
+    p.y = heap.y - 1;
+    const shovel = s.items.find((i) => i.kind === 'shovel')!;
+    s.items = s.items.filter((i) => i !== shovel);
+    s.player.held = shovel;
+    at(s, heap.x, heap.y - heap.h / 2 - 0.4);
+    expect(act(s)).toBe('Насыпать опилок в ведро');
     expect(p.charges).toBe(BALANCE.items.sawdustCharges);
+    expect(s.stock.sawdust).toBe(BALANCE.stockStart.sawdust - BALANCE.items.sawdustCharges);
+    s.player.held = p;
     at(s, MAP.pailSpot.x - 0.5, MAP.pailSpot.y);
     expect(act(s)).toBe('Поставить ведро на место');
     expect(s.player.held).toBeNull();
@@ -37,6 +39,25 @@ describe('навес: опилки', () => {
     const straw = MAP.stations.straw;
     at(s, straw.x + straw.w / 2 + 0.2, straw.y + straw.h / 2 + 0.2);
     expect(availableAction(s)?.label).toBe('Взять охапку соломы');
+  });
+
+  it('испорченную подстилку можно сдать целиком только в уличный бак', () => {
+    const s = cleanShift();
+    Object.assign(s.barrow, {
+      x: MAP.stations.dump.x - 1.7,
+      y: MAP.stations.dump.y,
+      pushed: true,
+      sawdust: 8,
+      waste: 2,
+      spoiled: true,
+    });
+    at(s, s.barrow.x - 0.9, s.barrow.y);
+    expect(availableAction(s)?.label).toBe('Заехать в бак и высыпать тачку');
+    expect(act(s)).toBe('Заехать в бак и высыпать тачку');
+    expect(s.container.fill).toBe(10);
+    expect(s.barrow.sawdust).toBe(0);
+    expect(s.barrow.waste).toBe(0);
+    expect(s.barrow.spoiled).toBe(false);
   });
 });
 

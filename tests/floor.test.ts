@@ -10,30 +10,30 @@ describe('пол', () => {
   it('цепочка: мокрое вилами → опилки → впитали → метла → солома', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    setCell(s, 3 - MAP.bedding.x, 2, 'wet'); // клетка мира (3..4, 3..4)
-    at(s, 3.5, 3.5);
-    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 4.5, y: 3.5 });
+    setCell(s, 7, 2, 'wet'); // клетка мира (7..8, 2..3) — в песке верхнего загона
+    at(s, 7.5, 2.5);
+    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 8.5, y: 2.5 });
 
-    s.player.held = newItem(s, 'sawdust', { charges: 6 });
+    s.player.held = newItem(s, 'sawdust', { charges: 8 });
     expect(act(s)).toBe('Сначала убери мокрую солому вилами');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('wet');
+    expect(cellAt(s, 7.5, 2.5)!.cell.kind).toBe('wet');
 
     s.player.held = newItem(s, 'fork');
     expect(act(s)).toBe('Убрать мокрую солому в мешок');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('bareWet');
+    expect(cellAt(s, 7.5, 2.5)!.cell.kind).toBe('bareWet');
 
-    s.player.held = newItem(s, 'sawdust', { charges: 6 });
+    s.player.held = newItem(s, 'sawdust', { charges: 8 });
     expect(act(s)).toBe('Засыпать опилками');
 
     s.player.held = newItem(s, 'broom');
     expect(act(s)).toBe('Опилки ещё впитывают');
     advance(s, 31);
     expect(act(s)).toBe('Вымести опилки в мешок');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('bare');
+    expect(cellAt(s, 7.5, 2.5)!.cell.kind).toBe('bare');
 
     s.player.held = newItem(s, 'straw', { charges: 3 });
     expect(act(s)).toBe('Постелить солому');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('straw');
+    expect(cellAt(s, 7.5, 2.5)!.cell.kind).toBe('straw');
     expect(s.items.find((i) => i.kind === 'bag')!.fill).toBe(2);
   });
 
@@ -41,9 +41,9 @@ describe('пол', () => {
     const s = cleanShift();
     const a = el(s, 'audrey');
     const m = el(s, 'margo');
-    hold(a, 3.5, 3.5);
-    hold(m, 8.5, 3.5);
-    setCell(s, 3 - MAP.bedding.x, 2, 'wet');
+    hold(a, 7.5, 2.5);
+    hold(m, 12.5, 2.5);
+    setCell(s, 7, 2, 'wet');
     for (let i = 0; i < 120; i++) {
       advance(s, 1);
       // Чтобы сами не намочили и не испачкали свои клетки
@@ -73,7 +73,7 @@ describe('пол', () => {
     s.valveOpen = true;
     advance(s, 20);
     expect(s.log.some((l) => l.why === 'troughOverflow')).toBe(true);
-    expect(cellAt(s, MAP.trough.x - 0.4, MAP.trough.y + 0.8)!.cell.kind).toBe('wet');
+    expect(cellAt(s, MAP.trough.x - 0.4, MAP.trough.y + 0.2)!.cell.kind).toBe('puddle');
   });
 });
 
@@ -81,7 +81,7 @@ describe('подсказки', () => {
   it('опилки впитались — подсказка про метлу', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 18, 3));
-    s.cells[2][2] = { kind: 'sawdust', since: 0 };
+    s.cells[3][6] = { kind: 'sawdust', since: 0 };
     advance(s, BALANCE.floor.sawdustAbsorb + 1);
     expect(s.log.some((l) => l.kind === 'hint' && l.text.includes('метлой'))).toBe(true);
   });
@@ -111,12 +111,12 @@ describe('затоптанный навоз', () => {
   it('затоптанное счищают совком до пола', () => {
     const s = cleanShift();
     s.elephants.forEach((e) => hold(e, 11, 7));
-    setCell(s, 3 - MAP.bedding.x, 2, 'dung');
-    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 4.5, y: 3.5 });
+    setCell(s, 7, 2, 'dung');
+    s.items.push({ ...newItem(s, 'bag', { fill: 0 }), x: 8.5, y: 2.5 });
     s.player.held = newItem(s, 'scoop');
-    at(s, 3.5, 3.5);
+    at(s, 7.5, 2.5);
     expect(act(s)).toBe('Счистить затоптанный навоз в мешок');
-    expect(cellAt(s, 3.5, 3.5)!.cell.kind).toBe('bare');
+    expect(cellAt(s, 7.5, 2.5)!.cell.kind).toBe('bare');
   });
 });
 

@@ -29,8 +29,12 @@ export class BarrowView {
     const fx = s.player.facing.x;
     // Ручки — к киперу: едем вправо — ручки слева
     if (b.pushed && Math.abs(fx) > 0.2) this.flip = fx > 0;
-    const x = Math.round(b.x * TILE);
-    const y = Math.round(b.y * TILE + 16);
+    // Спринт с гружёной тачкой: микро-шейк — дребезжит и сыплет
+    const shaking = b.pushed && s.player.sprinting === true && (b.sawdust > 0 || b.straw > 0);
+    const shx = shaking ? Math.round((Math.random() - 0.5) * 3) : 0;
+    const shy = shaking ? Math.round((Math.random() - 0.5) * 2) : 0;
+    const x = Math.round(b.x * TILE) + shx;
+    const y = Math.round(b.y * TILE + 16) + shy;
     const depth = y;
     for (const im of [this.base, this.heap, this.waste, this.tools]) im.setPosition(x, y).setFlipX(this.flip).setDepth(depth);
     this.shadow.setPosition(x, y - 2).setDepth(depth - 1);

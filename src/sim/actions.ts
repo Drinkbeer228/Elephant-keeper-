@@ -1,14 +1,16 @@
 import { BALANCE } from '../data/balance';
-import { MAP, inPaddock, nearStation, stationDist, type StationId } from '../data/map';
-import { dist, profileOf, treat, walkCommand, bucketUnder } from './elephants';
+import { MAP, inPaddock, nearStation, poolEdgeDist, stationDist, type StationId } from '../data/map';
+import { dist, pocketTreat, profileOf, treat, walkCommand, bucketUnder } from './elephants';
 import { emit } from './events';
 import { cellAt, cleared, sawdustAbsorbed, setCell } from './floor';
 import { MEAL_LABELS, allServedDinner, kashaDue, startKasha, startPrep } from './feeding';
 import { ITEM_NAMES, basinsOnRack, freeBasinSpot, openBagNear } from './items';
-import { addToContainer, barrowNear, barrowRoom, callTruck, containerShare, dumpWay, nearContainer } from './barrow';
+import { addToContainer, barrowNear, barrowRoom, callTruck, containerShare, dumpWay, nearContainer, spoilBarrow } from './barrow';
 import { clockText, isDark } from './clock';
 import { newItem } from './state';
-import type { Elephant, Item, State, Tool } from './types';
+import { giveStock, STOCK_LABELS, takeStock, takeStockUpTo } from './stock';
+import { supplyOpen } from './truck';
+import type { CargoKind, Elephant, Item, State, Tool } from './types';
 
 export interface ActionOption {
   label: string;
@@ -68,7 +70,14 @@ function sinkNear(state: State): Sink | null | 'full' {
   const p = state.player;
   if (barrowNear(state)) {
     if (barrowRoom(state) <= 0) return 'full';
-    return { label: 'в тачку', put: (s) => (s.barrow.waste += 1) };
+    return {
+      label: 'в тачку',
+      put: (s) => {
+        s.barrow.waste += 1;
+        // Мусор к опилкам/соломе — груз испорчен, на пол уже не сыплется
+        spoilBarrow(s);
+      },
+    };
   }
   const bag = openBagNear(state, p.x, p.y);
   if (bag) return { label: 'в мешок', put: () => (bag.fill = (bag.fill ?? 0) + 1) };
@@ -119,11 +128,13 @@ export function availableAction(state: State): ActionOption | null {
   const held = p.held;
 
   const praised = state.elephants.find((e) => dist(e, p) <= 2.6 && state.t <= e.praiseUntil);
-  if (praised) {
+  // Фруктов нет — угощать нечем, пункта не показываем
+  if (praised && state.stock.fruit > 0) {
     return { label: `Угостить ${profileOf(praised).name} (за бак)`, run: (s) => treat(s, praised) };
   }
 
   if (state.barrow.pushed) return pushAction(state);
+  if (state.jack.pushed) return jackPushAction(state);
   return held ? heldAction(state, held) : emptyHandAction(state);
 }
 
@@ -140,6 +151,7 @@ function scoopDump(state: State, load: number): ActionOption | null {
         const put = Math.min(load, barrowRoom(s));
         s.barrow.waste += put;
         held.load = load - put;
+        spoilBarrow(s);
       },
     };
   }
@@ -179,6 +191,9 @@ function heldAction(state: State, held: Item): ActionOption {
       if (e && e.state !== 'sleep' && !bucketUnder(state, e)) {
         const name = profileOf(e).name;
         const signaling = e.signalStarted !== undefined;
+        // Скучает, а пузырь почти пуст: «Давай гуляй» бесполезно — предложи лакомство из кармана
+        const pocket = signaling || e.bladder >= BALANCE.elephant.walkCommandMinBladder ? null : pocketTreatAction(state);
+        if (pocket) return pocket;
         return {
           label: signaling ? `Подставить бак под ${name}` : `Бак под ${name}: «Давай гуляй»`,
           run: (s) => {
@@ -231,7 +246,7 @@ function heldAction(state: State, held: Item): ActionOption {
       const pile = state.dung.filter((d) => dist(d, p) <= 1.2).sort((a, b) => dist(a, p) - dist(b, p))[0];
       if (dark && (pile || cell?.cell.kind === 'dung')) return blocked(DARK);
       if (pile) return collect(1, 'Убрать навоз', (s) => (s.dung = s.dung.filter((d) => d !== pile)));
-      if (cell?.cell.kind === 'dung') return collect(2, 'Счистить затоптанный навоз', (s) => setCell(s, cell.cx, cell.cy, cleared(cell.cx)));
+      if (cell?.cell.kind === 'dung') return collect(2, 'Счистить затоптанный навоз', (s) => setCell(s, cell.cx, cell.cy, cleared(cell.cx, cell.cy)));
       if (load > 0) {
         const dump = scoopDump(state, load);
         if (dump) return dump;
@@ -258,16 +273,14 @@ function heldAction(state: State, held: Item): ActionOption {
       }
       break;
     case 'sawdust':
-      if (near(state, 'sawdust') && (held.charges ?? 0) < BALANCE.items.sawdustCharges) {
-        return { label: 'Набрать опилок', run: () => (held.charges = BALANCE.items.sawdustCharges) };
-      }
+      // Опилки набирает лопата (она лежит в Опилочнике) — ведро просто засыпает и ставится
       if (dist(MAP.pailSpot, p) <= 1.0) {
         return { label: 'Поставить ведро на место', run: (s) => drop(s, held, MAP.pailSpot.x, MAP.pailSpot.y) };
       }
       if (cell?.cell.kind === 'wet') return blocked('Сначала убери мокрую солому вилами', 'wetFloor');
       if (cell?.cell.kind === 'bareWet') {
         if (dark) return blocked(DARK);
-        if ((held.charges ?? 0) <= 0) return blocked('Ведро пустое — набери опилок');
+        if ((held.charges ?? 0) <= 0) return blocked('Ведро пустое — набери опилок лопатой в Опилочнике');
         return {
           label: 'Засыпать опилками',
           run: (s) => {
@@ -277,6 +290,62 @@ function heldAction(state: State, held: Item): ActionOption {
         };
       }
       break;
+    case 'shovel': {
+      // Лопата набирает опилки из ларя: в ведро рядом или прямо в тачку
+      if (near(state, 'sawdust')) {
+        const empty = state.stock.sawdust <= 0;
+        const bucket = state.items.find((i) => i.kind === 'sawdust' && dist(i, p) <= 1.4 && (i.charges ?? 0) < BALANCE.items.sawdustCharges);
+        const barrow = barrowNear(state, 1.4) && barrowRoom(state) > 0;
+        if (!bucket && !barrow) return blocked('Поставь рядом ведро для опилок или подкати тачку');
+        const fillBucket: ActionOption = {
+          label: empty ? 'Опилки кончились — прими поставку' : 'Насыпать опилок в ведро',
+          disabled: empty,
+          run: (s) => {
+            const b = s.items.find((i) => i.kind === 'sawdust' && dist(i, s.player) <= 1.4 && (i.charges ?? 0) < BALANCE.items.sawdustCharges);
+            if (b) b.charges = (b.charges ?? 0) + takeStockUpTo(s, 'sawdust', BALANCE.items.sawdustCharges - (b.charges ?? 0));
+          },
+        };
+        const fillBarrow: ActionOption = {
+          label: empty ? 'Опилки кончились — прими поставку' : 'Насыпать опилок в тачку',
+          disabled: empty,
+          run: (s) => (s.barrow.sawdust += takeStockUpTo(s, 'sawdust', BALANCE.barrow.sawdustLoad - s.barrow.sawdust)),
+        };
+        if (bucket && barrow) {
+          return { label: 'Насыпать опилок…', choices: [fillBucket, fillBarrow], run: () => undefined };
+        }
+        return bucket ? fillBucket : fillBarrow;
+      }
+      break;
+    }
+    case 'net': {
+      // Длинный сачок достаёт до кромки бассейна: вылавливает плавающий навоз
+      const pool = poolWithFloats(state, p);
+      if (pool >= 0) {
+        if (barrowNear(state, 1.4)) {
+          if (barrowRoom(state) <= 0) return blocked('Тачка полна — вези к мусорному баку');
+          return {
+            label: 'Выловить навоз из бассейна (в тачку)',
+            run: (s) => {
+              removePoolWaste(s, pool);
+              s.barrow.waste += 1;
+              spoilBarrow(s);
+            },
+          };
+        }
+        const bag = state.items.find((i) => i.kind === 'bag' && (i.fill ?? 0) < BALANCE.items.bagCapacity && dist(i, p) <= BALANCE.items.bagReach);
+        if (bag) {
+          return {
+            label: 'Выловить навоз из бассейна (в мешок)',
+            run: (s) => {
+              removePoolWaste(s, pool);
+              bag.fill = (bag.fill ?? 0) + 1;
+            },
+          };
+        }
+        return blocked('Некуда вылавливать: подкати тачку или поставь открытый мешок');
+      }
+      break;
+    }
     case 'broom': {
       // Сор с тачки на твёрдом полу — подмести всё в радиусе
       const litter = state.litter.filter((l) => dist(l, p) <= 1.2);
@@ -399,7 +468,13 @@ function heldAction(state: State, held: Item): ActionOption {
       if (!held.veg && near(state, 'vegRack')) {
         if (allServedDinner(state)) return { label: 'Поставить корзину на место', run: (s) => drop(s, held, MAP.basketSpot.x, MAP.basketSpot.y) };
         if (state.t < BALANCE.food.vegStartFrom) return blocked('Овощи для ужина берут с 14:00');
-        return { label: 'Набрать овощей: морковь, картофель, свёкла', run: () => (held.veg = 'raw') };
+        if (state.stock.veg < BALANCE.consumption.dinnerVeg) return blocked('Овощи кончились — прими поставку');
+        return {
+          label: 'Набрать овощей: морковь, картофель, свёкла',
+          run: (s) => {
+            if (takeStock(s, 'veg', BALANCE.consumption.dinnerVeg)) held.veg = 'raw';
+          },
+        };
       }
       if (held.veg === 'raw' && near(state, 'wash')) {
         const w = MAP.stations.wash;
@@ -424,11 +499,14 @@ function heldAction(state: State, held: Item): ActionOption {
       }
       break;
     case 'hay':
-      if (dist(MAP.feeder, p) <= 1.8) {
+      // Кормушки обоих загонов: у слоних — верхняя, у самцов — нижняя
+      if (dist(MAP.feeder, p) <= 1.8 || dist(MAP.feeder2, p) <= 1.8) {
         return {
           label: 'Заложить сено в кормушку',
           run: (s) => {
-            s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale);
+            const lower = dist(MAP.feeder, p) > 1.8;
+            if (lower) s.feederHay2 = Math.min(100, s.feederHay2 + BALANCE.food.hayBale);
+            else s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale);
             s.player.held = null;
           },
         };
@@ -449,13 +527,40 @@ function heldAction(state: State, held: Item): ActionOption {
       break;
   }
 
+  // Лакомство из кармана: слониха тоскует или качается — руки заняты не помеха
+  const pocket = pocketTreatAction(state);
+  if (pocket) return pocket;
+
   const intoBarrow = putIntoBarrow(state, held);
   if (intoBarrow) return intoBarrow;
   const rack = putOnRack(held);
   if (rack && near(state, 'rack')) {
     return { label: `Положить на стойку: ${itemLabel(held)}`, run: (s) => drop(s, held, rack.x, rack.y) };
   }
+  // Рохля рядом, руки заняты — сказать прямо, а не молчать (причина «почему нельзя»)
+  if (jackNear(state) && !barrowNear(state, 1.4)) return blocked('Освободите руки, чтобы везти рохлю');
   return dropOption;
+}
+
+// Бассейн рядом с кипером, в котором плавает навоз; -1 — рядом такого нет
+function poolWithFloats(state: State, p: { x: number; y: number }): number {
+  return MAP.pools.findIndex((_, i) => poolEdgeDist(i, p.x, p.y) <= BALANCE.pool.netReach && state.pools[i].floats.length > 0);
+}
+
+function removePoolWaste(state: State, pool: number): void {
+  const water = state.pools[pool];
+  if (water.floats.length) water.floats.shift();
+  water.dirty = Math.max(0, water.dirty - BALANCE.pool.poopDirt);
+}
+
+// Лакомство из поясной сумки: слониха рядом, тоскует или уже качается.
+// Не перекрывает похвалу «за бак», подстановку бака и другие конкретные дела
+function pocketTreatAction(state: State): ActionOption | null {
+  if (state.player.pocketTreats <= 0) return null;
+  const e = nearestElephant(state);
+  if (!e || e.state === 'sleep' || e.signalStarted !== undefined || e.state === 'walkCommand') return null;
+  if (e.boredom < 50 && e.state !== 'sway') return null;
+  return { label: `Дать лакомство ${profileOf(e).name} (из кармана)`, run: (s) => void pocketTreat(s, e) };
 }
 
 function putIntoBarrow(state: State, held: Item): ActionOption | null {
@@ -472,6 +577,7 @@ function putIntoBarrow(state: State, held: Item): ActionOption | null {
         s.barrow.waste += load;
         s.barrow.tools.push(tool);
         s.player.held = null;
+        spoilBarrow(s);
       },
     };
   }
@@ -485,6 +591,7 @@ function putIntoBarrow(state: State, held: Item): ActionOption | null {
     };
   }
   if (held.kind === 'sawdust' || held.kind === 'straw') {
+    if (b.spoiled) return blocked('В тачке смесь с навозом — на пол нельзя, только вывозить в бак');
     const key = held.kind;
     return {
       label: `Вернуть в тачку: ${itemLabel(held)}`,
@@ -518,24 +625,34 @@ function barrowMenu(state: State): ActionOption {
     });
   }
   if (b.sawdust > 0) {
-    choices.push({
-      label: `Взять ведро опилок (${b.sawdust})`,
-      run: (s) => {
-        const n = Math.min(BALANCE.items.sawdustCharges, s.barrow.sawdust);
-        s.barrow.sawdust -= n;
-        s.player.held = newItem(s, 'sawdust', { charges: n });
-      },
-    });
+    choices.push(
+      b.spoiled
+        ? blocked('Смесь с навозом — на пол нельзя, только вывалить в бак')
+        : {
+            label: `Взять ведро опилок (${b.sawdust})`,
+            run: (s) => {
+              const n = Math.min(BALANCE.items.sawdustCharges, s.barrow.sawdust);
+              s.barrow.sawdust -= n;
+              s.player.held = newItem(s, 'sawdust', { charges: n });
+              unspoilIfEmpty(s);
+            },
+          },
+    );
   }
   if (b.straw > 0) {
-    choices.push({
-      label: `Взять охапку соломы (${b.straw})`,
-      run: (s) => {
-        const n = Math.min(BALANCE.items.strawCharges, s.barrow.straw);
-        s.barrow.straw -= n;
-        s.player.held = newItem(s, 'straw', { charges: n });
-      },
-    });
+    choices.push(
+      b.spoiled
+        ? blocked('Смесь с навозом — на пол нельзя, только вывалить в бак')
+        : {
+            label: `Взять охапку соломы (${b.straw})`,
+            run: (s) => {
+              const n = Math.min(BALANCE.items.strawCharges, s.barrow.straw);
+              s.barrow.straw -= n;
+              s.player.held = newItem(s, 'straw', { charges: n });
+              unspoilIfEmpty(s);
+            },
+          },
+    );
   }
   if (b.bales > 0) {
     choices.push({
@@ -550,12 +667,19 @@ function barrowMenu(state: State): ActionOption {
   return { label: `Тачка: ${barrowSummary(state)}`, choices, run: () => undefined };
 }
 
+// Тачка снова пуста — смесь с навозом больше не портит груз
+function unspoilIfEmpty(s: State): void {
+  const b = s.barrow;
+  if (!b.waste && !b.sawdust && !b.straw) b.spoiled = false;
+}
+
 export function barrowSummary(state: State): string {
   const b = state.barrow;
   const parts = [
     ...b.tools.map((t) => ITEM_NAMES[t]),
-    b.sawdust ? `опилки ${b.sawdust}` : '',
-    b.straw ? `солома ${b.straw}` : '',
+    b.spoiled && (b.sawdust || b.straw) ? 'Использованная подстилка / мусор' : '',
+    !b.spoiled && b.sawdust ? `опилки ${b.sawdust}` : '',
+    !b.spoiled && b.straw ? `солома ${b.straw}` : '',
     b.bales ? `тюки ${b.bales}` : '',
     b.waste ? `мусор ${b.waste}/${BALANCE.barrow.wasteCapacity}` : '',
   ].filter(Boolean);
@@ -576,7 +700,9 @@ function pushAction(state: State): ActionOption {
       s.barrow.parkedAt = s.t;
     },
   };
-  if (nearContainer(state) && b.waste > 0) {
+  const spoiledBedding = b.spoiled ? b.sawdust + b.straw : 0;
+  const discardable = b.waste + spoiledBedding;
+  if (nearContainer(state) && discardable > 0) {
     const way = dumpWay(state);
     if (way === 'full') return blocked('Мусорный бак полон — вызови мусоровоз');
     if (way === 'needDoor') return blocked('Бак наполовину полон: закрой дверцу и ставь трап');
@@ -584,8 +710,15 @@ function pushAction(state: State): ActionOption {
     return {
       label: way === 'driveIn' ? 'Заехать в бак и высыпать тачку' : 'Поднять по трапу и высыпать тачку',
       run: (s) => {
-        const put = addToContainer(s, s.barrow.waste);
-        s.barrow.waste -= put;
+        const put = addToContainer(s, s.barrow.waste + (s.barrow.spoiled ? s.barrow.sawdust + s.barrow.straw : 0));
+        const wastePut = Math.min(s.barrow.waste, put);
+        s.barrow.waste -= wastePut;
+        let beddingPut = put - wastePut;
+        const sawdustPut = Math.min(s.barrow.sawdust, beddingPut);
+        s.barrow.sawdust -= sawdustPut;
+        beddingPut -= sawdustPut;
+        s.barrow.straw -= Math.min(s.barrow.straw, beddingPut);
+        unspoilIfEmpty(s);
       },
     };
   }
@@ -615,14 +748,27 @@ function pushAction(state: State): ActionOption {
       };
     }
   }
-  if (near('sawdust') && b.sawdust < BALANCE.barrow.sawdustLoad) {
-    return { label: 'Насыпать опилок в тачку', run: (s) => (s.barrow.sawdust = BALANCE.barrow.sawdustLoad) };
-  }
   if (near('straw') && b.straw < BALANCE.barrow.strawLoad) {
-    return { label: 'Нагрузить соломы в тачку', run: (s) => (s.barrow.straw = BALANCE.barrow.strawLoad) };
+    const empty = state.stock.straw <= 0;
+    return {
+      label: empty ? 'Солома кончилась — прими поставку' : 'Нагрузить соломы в тачку',
+      disabled: empty,
+      run: (s) => {
+        // Тачка вмещает strawLoad зарядов; охапка = strawCharges зарядов = 1 единица запаса
+        const need = Math.ceil((BALANCE.barrow.strawLoad - s.barrow.straw) / BALANCE.items.strawCharges);
+        if (takeStockUpTo(s, 'straw', need) > 0) s.barrow.straw = BALANCE.barrow.strawLoad;
+      },
+    };
   }
   if (near('hay') && b.bales < BALANCE.barrow.maxBales) {
-    return { label: `Положить тюк в тачку (${b.bales + 1}/${BALANCE.barrow.maxBales})`, run: (s) => s.barrow.bales++ };
+    const empty = state.stock.hay <= 0;
+    return {
+      label: empty ? 'Сено кончилось — прими поставку' : `Положить тюк в тачку (${b.bales + 1}/${BALANCE.barrow.maxBales})`,
+      disabled: empty,
+      run: (s) => {
+        if (takeStock(s, 'hay')) s.barrow.bales++;
+      },
+    };
   }
   if (b.bales > 0 && Math.min(dist(MAP.feeder, p), dist(MAP.feeder, b)) <= 2.2) {
     return {
@@ -634,6 +780,83 @@ function pushAction(state: State): ActionOption {
     };
   }
   return park;
+}
+
+// Рохля: тележка под поддон (этап 2). Стоит рядом — можно взять; у борта — снять груз
+function jackNear(state: State): boolean {
+  return !state.jack.pushed && dist(state.jack, state.player) <= BALANCE.jack.reach;
+}
+
+function jackMenu(): ActionOption {
+  return { label: 'Везти рохлю', run: (s) => (s.jack.pushed = true) };
+}
+
+// Куда сдаётся каждый вид груза
+const DROP: Record<CargoKind, StationId> = {
+  grain: 'stove', // мешки зерна — к котлу каши
+  veg: 'vegRack',
+  fruit: 'vegRack', // фрукты — на овощной стеллаж
+  hay: 'hay',
+  straw: 'straw',
+  sawdust: 'sawdust',
+};
+
+// Везёшь рохлю: у точки сдачи очередного вида — сдать, у борта — снять поддон, иначе просто поставить
+function jackPushAction(state: State): ActionOption {
+  const cargo = state.jack.cargo;
+  // Смешанный поддон сдаётся по частям: у точки каждого вида своя сдача
+  if (cargo?.length) {
+    const next = cargo.find((u) => near(state, DROP[u.kind]));
+    if (next) {
+      return {
+        label: `Сдать груз: ${STOCK_LABELS[next.kind]} (${next.qty})`,
+        run: (s) => {
+          s.jack.cargo = (s.jack.cargo ?? []).filter((u) => u !== next);
+          if (!s.jack.cargo.length) s.jack.cargo = null;
+          giveStock(s, next.kind, next.qty);
+          emit(s, { kind: 'good', text: `Груз на складе: ${STOCK_LABELS[next.kind].toLowerCase()} теперь ${s.stock[next.kind]}.` });
+        },
+      };
+    }
+  } else {
+    // Толкаешь пустую рохлю у борта: снять поддон или оставить рохлю — одним меню
+    const unload = unloadMenu(state);
+    if (unload?.choices) {
+      return {
+        label: 'Рохля у борта…',
+        choices: [...unload.choices, { label: 'Поставить рохлю', run: (s) => (s.jack.pushed = false) }],
+        run: () => undefined,
+      };
+    }
+  }
+  return {
+    label: cargo?.length ? `Поставить рохлю (${cargo.map((u) => STOCK_LABELS[u.kind]).join(' + ')})` : 'Поставить рохлю',
+    run: (s) => {
+      s.jack.pushed = false;
+    },
+  };
+}
+
+// У борта грузовика: снять поддон на пустую рохлю, стоящую рядом
+function unloadMenu(state: State): ActionOption | null {
+  if (!supplyOpen(state) || !near(state, 'unload')) return null;
+  const j = state.jack;
+  if (j.cargo?.length) return blocked('Сначала сдай этот груз — рохля одна');
+  if (dist(j, state.player) > BALANCE.jack.reach) return null;
+  if (!state.supply.bays.length) return blocked('Борт пуст — всё принято');
+  return {
+    label: 'Снять на рохлю…',
+    choices: state.supply.bays.map((bay) => ({
+      label: bay.map((u) => `${STOCK_LABELS[u.kind]} ${u.qty}`).join(' + '),
+      run: (s) => {
+        s.supply.bays = s.supply.bays.filter((b) => b !== bay);
+        s.jack.cargo = bay.map((u) => ({ ...u }));
+        const names = bay.map((u) => STOCK_LABELS[u.kind].toLowerCase()).join(' и ');
+        emit(s, { kind: 'info', text: `Поддон на рохле: ${names}.` });
+      },
+    })),
+    run: () => undefined,
+  };
 }
 
 // Мусорный бак: дверца, трап, вызов мусоровоза
@@ -649,21 +872,57 @@ function containerAction(state: State): ActionOption | null {
 }
 
 function emptyHandAction(state: State): ActionOption | null {
+  const pocket = pocketTreatAction(state);
+  if (pocket) return pocket;
   const basket = basketAction(state);
   if (basket) return basket;
   const take = takeFromFloor(state);
   if (take) return take;
   if (barrowNear(state, 1.4)) return barrowMenu(state);
+  // У борта пустая рохля рядом: и взять её, и снять поддон — одним меню.
+  // Блокировки («борт пуст», «сначала сдай») не перекрывают действия с рохлей
+  const jack = jackNear(state);
+  const unload = unloadMenu(state);
+  if (jack && unload?.choices) {
+    return { label: 'Рохля у борта…', choices: [jackMenu(), ...unload.choices], run: () => undefined };
+  }
+  if (!jack && unload) return unload;
+  if (jack) return jackMenu();
   const box = containerAction(state);
   if (box) return box;
 
-  // Станции рядом: действует ближайшая — на навесе и в кормовой они стоят тесно
+  // Станции рядом: действует ближайшая; комнаты просторные, но котёл и стол раздельные
   const stations: [StationId, () => ActionOption | null][] = [
-    ['kitchen', () => kitchenAction(state)],
-    ['sawdust', () => blocked('Опилки набирают ведром — оно стоит у кучи')],
+    ['stove', () => stoveAction(state)],
+    ['kitchen', () => tableAction(state)],
+    ['vegRack', () => pocketRefill(state)],
+    ['sawdust', () => blocked('Опилки набирают лопатой — она здесь же, в Опилочнике')],
     ['bags', () => ({ label: 'Взять новый мешок 240 л', run: (s) => (s.player.held = newItem(s, 'bag', { fill: 0 })) })],
-    ['hay', () => ({ label: 'Взять тюк сена', run: (s) => (s.player.held = newItem(s, 'hay')) })],
-    ['straw', () => ({ label: 'Взять охапку соломы', run: (s) => (s.player.held = newItem(s, 'straw', { charges: BALANCE.items.strawCharges })) })],
+    [
+      'hay',
+      () =>
+        state.stock.hay > 0
+          ? {
+              label: 'Взять тюк сена',
+              run: (s) => {
+                if (takeStock(s, 'hay')) s.player.held = newItem(s, 'hay');
+              },
+            }
+          : blocked('Сено кончилось — прими поставку'),
+    ],
+    [
+      'straw',
+      () =>
+        state.stock.straw > 0
+          ? {
+              label: 'Взять охапку соломы',
+              run: (s) => {
+                // Охапка — одна единица запаса, в ней strawCharges зарядов постелить
+                if (takeStock(s, 'straw')) s.player.held = newItem(s, 'straw', { charges: BALANCE.items.strawCharges });
+              },
+            }
+          : blocked('Солома кончилась — прими поставку'),
+    ],
     [
       'valve',
       () => ({ label: state.valveOpen ? 'Закрыть вентиль поилки' : 'Открыть вентиль поилки', run: (s) => (s.valveOpen = !s.valveOpen) }),
@@ -705,11 +964,22 @@ function fillBasins(state: State, food: 'kasha' | 'veg'): ActionOption {
   };
 }
 
-function kitchenAction(state: State): ActionOption {
+// Котёл каши: запаривание и разложение по тазам
+function stoveAction(state: State): ActionOption {
   const k = state.kitchen;
   if (k.kasha.status === 'ready' && k.kasha.portions > 0) return fillBasins(state, 'kasha');
+  if (k.kasha.status === 'idle' && kashaDue(state)) {
+    if (state.stock.grain < BALANCE.consumption.kashaGrain) return blocked('Зерна не хватает на кашу — прими поставку');
+    return { label: 'Запарить кашу (20 мин)', run: (s) => void startKasha(s) };
+  }
+  if (k.kasha.status === 'cooking') return blocked(`Каша запаривается, готова к ${clockText(k.kasha.readyAt)}`);
+  return blocked('Котёл: каша в 13:00 и 17:00 (запаривать с 12:00 и 16:00)');
+}
+
+// Стол нарезки: ужин из овощей — промытые чистят, почищенные нарезают
+function tableAction(state: State): ActionOption {
+  const k = state.kitchen;
   if (k.veg.portions > 0) return fillBasins(state, 'veg');
-  if (k.kasha.status === 'idle' && kashaDue(state)) return { label: 'Запарить кашу (20 мин)', run: (s) => void startKasha(s) };
   const table = tableBasket(state);
   if (table?.veg === 'washed') {
     const prep = state.prep;
@@ -725,8 +995,19 @@ function kitchenAction(state: State): ActionOption {
       },
     };
   }
-  if (k.kasha.status === 'cooking') return blocked(`Каша запаривается, готова к ${clockText(k.kasha.readyAt)}`);
-  return blocked('Кормовая: каша в 13:00 и 17:00 (запаривать с 12:00 и 16:00), ужин — с 14:00, овощи на стеллаже');
+  return blocked('Стол нарезки: ужин с 14:00 — овощи со стеллажа, на мойке отмочить, здесь почистить');
+}
+
+// Поясная сумка: пополнить лакомства про запас у овощного стеллажа — руки не занимает
+function pocketRefill(state: State): ActionOption | null {
+  if (state.player.pocketTreats >= BALANCE.player.pocketMax || state.stock.fruit <= 0) return null;
+  const room = BALANCE.player.pocketMax - state.player.pocketTreats;
+  return {
+    label: `Набрать фруктов в карман (${state.player.pocketTreats}→${Math.min(BALANCE.player.pocketMax, state.player.pocketTreats + state.stock.fruit)})`,
+    run: (s) => {
+      s.player.pocketTreats += takeStockUpTo(s, 'fruit', room);
+    },
+  };
 }
 
 // Корзина с овощами на столе кормовой
@@ -751,7 +1032,7 @@ function basketAction(state: State): ActionOption | null {
     };
   }
   const table = tableBasket(state);
-  if (table && (table.veg === 'washed' || table.veg === 'peeled') && near(state, 'kitchen')) return kitchenAction(state);
+  if (table && (table.veg === 'washed' || table.veg === 'peeled') && near(state, 'kitchen')) return tableAction(state);
   return null;
 }
 
@@ -778,12 +1059,19 @@ export function inspect(state: State): string[] {
               : 'Голый сухой пол. Постелить солому.';
     return [text];
   }
-  if (near(state, 'kitchen')) {
+  if (near(state, 'stove')) {
     const k = state.kitchen;
     return [
       `Чистых тазов на стеллаже: ${basinsOnRack(state).filter((b) => !b.dirty && !b.food).length}`,
       k.kasha.status === 'cooking' ? `Каша будет готова к ${clockText(k.kasha.readyAt)}` : k.kasha.status === 'ready' ? `Каша готова: ${k.kasha.portions} порции` : 'Каша не запарена',
+      `Вода: верхняя поилка ${Math.round(state.trough)}%, нижняя ${Math.round(state.trough2)}%.`,
+    ];
+  }
+  if (near(state, 'kitchen')) {
+    const k = state.kitchen;
+    return [
       k.veg.portions ? `Ужин нарезан: ${k.veg.portions} порции` : allServedDinner(state) ? 'Ужин роздан' : 'Ужин — с 14:00: овощи со стеллажа',
+      `Сено: верхняя кормушка ${Math.round(state.feederHay)}%, нижняя ${Math.round(state.feederHay2)}%.`,
     ];
   }
   return [`Сено в кормушке: ${Math.round(state.feederHay)}%. Поилка: ${Math.round(state.trough)}%.`];

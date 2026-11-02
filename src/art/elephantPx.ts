@@ -18,6 +18,10 @@ export const LOOKS: Record<string, ElephantLook> = {
   pretty: { tone: { L: '#ccc4bc', M: '#9a918a', D: '#686059' }, size: 0.95 },
   margo: { tone: { L: '#b2aca8', M: '#807a76', D: '#524c48' }, size: 1, spots: true },
   audrey: { tone: { L: '#e2dad2', M: '#b6aea6', D: '#847c74' }, size: 0.84, hair: true },
+  // Самцы нижнего загона: Раджа — крупный вожак, Барон — тяжеловес, Цезарь — молодой задира
+  radja: { tone: { L: '#a49a8c', M: '#6c645a', D: '#403a32' }, size: 1.1 },
+  baron: { tone: { L: '#948c84', M: '#5c5650', D: '#34302a' }, size: 1.06 },
+  caesar: { tone: { L: '#c2b8a4', M: '#8a8272', D: '#585044' }, size: 0.8, hair: true },
 };
 
 interface Pose {

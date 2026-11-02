@@ -70,7 +70,7 @@ export function kashaReady(seed = 1): State {
   const s = cleanShift(seed);
   s.elephants.forEach((e) => hold(e, 6, 3));
   advance(s, 280);
-  stand(s, 'kitchen');
+  stand(s, 'stove');
   act(s);
   advance(s, 21);
   return s;

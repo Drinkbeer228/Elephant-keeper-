@@ -19,24 +19,26 @@ function withScoop(load = 0) {
 describe('совок с отсеком', () => {
   it('без тачки и мешка навоз — в отсек, до 6 единиц', () => {
     const s = withScoop();
-    for (let i = 0; i < 7; i++) s.dung.push({ id: 900 + i, x: 2 + i * 1.5, y: 5.5, at: 0 });
+    for (let i = 0; i < 7; i++) s.dung.push({ id: 900 + i, x: 5 + i * 2, y: 5.5, at: 0 });
     for (let i = 0; i < 6; i++) {
-      at(s, 2 + i * 1.5, 5.8);
+      at(s, 5 + i * 2, 5.8);
       expect(act(s)).toBe(`Убрать навоз в совок (${i + 1}/6)`);
     }
     expect(s.player.held!.load).toBe(6);
-    at(s, 2 + 6 * 1.5, 5.8);
+    at(s, 5 + 6 * 2, 5.8);
     expect(availableAction(s)?.label).toBe('Совок полон — высыпи в тачку, мешок или контейнер');
     expect(s.dung).toHaveLength(1);
   });
 
   it('затоптанная клетка — 2 единицы', () => {
     const s = withScoop();
-    s.cells[3][3] = { kind: 'dung', since: 0 };
-    at(s, MAP.bedding.x + 3.5, MAP.bedding.y + 3.5);
+    const cx = MAP.bedding.x + 3;
+    const cy = MAP.bedding.y + 3;
+    s.cells[cy][cx] = { kind: 'dung', since: 0 };
+    at(s, cx + 0.5, cy + 0.5);
     expect(act(s)).toBe('Счистить затоптанный навоз в совок (2/6)');
     expect(s.player.held!.load).toBe(2);
-    expect(s.cells[3][3].kind).toBe('bare');
+    expect(s.cells[cy][cx].kind).toBe('bare');
   });
 
   it('рядом тачка — навоз сразу в тачку, отсек пуст', () => {

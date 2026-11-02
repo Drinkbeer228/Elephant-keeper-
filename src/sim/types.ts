@@ -20,7 +20,9 @@ export type ItemKind =
   | 'basin'
   | 'hay'
   | 'straw'
-  | 'basket';
+  | 'basket'
+  | 'shovel' // совковая лопата из Опилочника: набирает опилки в ведро и в тачку
+  | 'net'; // длинный сачок: вылавливает навоз из бассейна
 
 export interface Item {
   id: number;
@@ -53,7 +55,8 @@ export type ElephantState =
   | 'walkCommand'
   | 'sleep'
   | 'sway'
-  | 'reach';
+  | 'reach'
+  | 'bathe'; // купание в бассейне: намокает, сохнет после выхода
 
 export interface Tally {
   inBucket: number;
@@ -85,6 +88,8 @@ export interface Elephant {
   dirtyFeet: number; // сколько клеток ещё испачкает следами
   lastCell: string;
   tally: Tally;
+  wetness: number; // 0..100: после купания мокрый и тёмный, на солнце светлеет
+  pool?: number; // в каком бассейне купается
   targetItem?: number;
   signalStarted?: number;
 }
@@ -94,6 +99,16 @@ export type MealId = 'kasha1' | 'kasha2' | 'dinner';
 export interface Kitchen {
   kasha: { status: 'idle' | 'cooking' | 'ready'; readyAt: number; portions: number; meal: MealId | null };
   veg: { portions: number }; // нарезанный ужин, ждёт тазов
+}
+
+// Запасы-счётчики (этап 2): рисуются физически на складах, но хранятся числами
+export interface Stock {
+  grain: number; // мешки зерна в кладовой — на кашу
+  veg: number; // овощи на овощном стеллаже — на ужин
+  fruit: number; // ящик фруктов в кладовой — на лакомство
+  hay: number; // тюки под навесом — в кормушку
+  straw: number; // охапки под навесом — на подстилку
+  sawdust: number; // заряды опилок у ларя — на мокрый пол
 }
 
 // Чистка овощей: крупный план овоща, на нём дефекты — срезать каждый
@@ -132,6 +147,8 @@ export interface Barrow {
   balance: number; // -1..1, на краях тюк падает
   parkedAt: number;
   trail: number; // сколько проехала с грузом с последнего рассыпания
+  stuck: boolean; // в прошлый кадр упёрлась в препятствие (для встряски при упоре)
+  spoiled: boolean; // в тачке смесь с навозом: на пол нельзя, только в мусорный бак
 }
 
 // Большой мусорный бак: заезжать, пока не наполовину; потом дверцу закрыть и ставить трап; полный — вызывать мусоровоз
@@ -143,13 +160,63 @@ export interface Container {
   truckLeftAt: number | null; // когда уехал (для картинки)
 }
 
+// Рохля — вторая толкаемая тележка (этап 2): возит один поддон с грузом, ездит только по твёрдому полу.
+// Виды груза совпадают с видами запасов; поддон может нести несколько видов с одной сдачей по частям
+export type CargoKind = keyof Stock;
+export interface CargoUnit {
+  kind: CargoKind;
+  qty: number;
+}
+export interface Jack {
+  x: number;
+  y: number;
+  pushed: boolean;
+  cargo: CargoUnit[] | null;
+}
+
+// Продуктовый грузовик (этап 3): встаёт у дороги, водитель ждёт у заднего борта
+export interface Driver {
+  x: number;
+  y: number;
+  wp: number; // точка маршрута: из кабины к борту
+  said: boolean; // уже окликнул кипера
+  babbleAt: number; // когда следующая реплика у борта
+}
+export interface Supply {
+  arrived: boolean;
+  left: boolean;
+  missed: boolean; // уехал с непринятым грузом — замечание в табеле
+  bays: CargoUnit[][]; // поддоны в борту; каждый — список видов груза
+  driver: Driver;
+}
+
+// Димон — второй дежурный кипер (ИИ-напарник): сам обслуживает нижний загон самцов
+export interface Partner {
+  x: number;
+  y: number;
+  facing: { x: number; y: number };
+  bucket: number; // литров в его баке
+  waste: number; // единиц мусора в его тачке
+  mode: string; // текущее дело (для отладки и тестов)
+  babbleAt: number; // следующая реплика
+  timer: number; // пауза до следующего решения, минут
+  path: { x: number; y: number }[];
+  pathTarget: { x: number; y: number } | null;
+}
+
+// Бассейн: мутность воды и плавающий навоз
+export interface PoolState {
+  dirty: number; // 0..100
+  floats: { id: number; x: number; y: number }[];
+}
+
 export interface State {
   seed: number;
   rng: number;
   phase: Phase;
   t: number; // игровых минут от 08:00 дня приёма
   nextItemId: number;
-  player: { x: number; y: number; held: Item | null; facing: { x: number; y: number } };
+  player: { x: number; y: number; held: Item | null; facing: { x: number; y: number }; pocketTreats: number; sprinting?: boolean };
   elephants: Elephant[];
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
@@ -159,13 +226,21 @@ export interface State {
   feederHay: number;
   trough: number;
   valveOpen: boolean;
+  feederHay2: number; // кормушка нижнего загона (самцы)
+  trough2: number;
+  valve2Open: boolean;
+  pools: PoolState[]; // состояние бассейнов: грязь и плавающий навоз
+  partner: Partner; // Димон — ИИ-напарник в нижнем слоновнике
   dutyLight: boolean; // дежурный свет в вольере
   lastOverflow: number;
   gateOpen: boolean;
   barrow: Barrow;
+  jack: Jack;
+  supply: Supply;
   container: Container;
   spareBucket: boolean;
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
+  stock: Stock;
   stats: {
     drySamples: number;
     drySum: number;
@@ -183,7 +258,7 @@ export interface State {
 }
 
 export type Command =
-  | { type: 'move'; dx: number; dy: number }
+  | { type: 'move'; dx: number; dy: number; sprint?: boolean }
   | { type: 'balance'; dir: -1 | 1 }
   | { type: 'action'; choice?: number }
   | { type: 'inspect' }

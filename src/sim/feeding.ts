@@ -4,6 +4,7 @@ import { clockText } from './clock';
 import { emit, hint } from './events';
 import { wetAround } from './floor';
 import { randomInt, randomRange } from './rng';
+import { takeStock } from './stock';
 import type { MealId, State, VegKind, VegSpot } from './types';
 
 const F = BALANCE.food;
@@ -37,6 +38,11 @@ export function kashaDue(state: State): MealId | null {
 export function startKasha(state: State): boolean {
   const meal = kashaDue(state);
   if (!meal || state.kitchen.kasha.status !== 'idle') return false;
+  // Зерно расходуется на каждое запаривание; кончилось — прими поставку
+  if (!takeStock(state, 'grain', BALANCE.consumption.kashaGrain)) {
+    emit(state, { kind: 'info', text: `Зерна не хватает: нужно ${BALANCE.consumption.kashaGrain} мешка на кашу. Жди поставку.` });
+    return false;
+  }
   state.kitchen.kasha = { status: 'cooking', readyAt: state.t + F.kashaCook, portions: 0, meal };
   emit(state, { kind: 'info', text: `Каша запаривается, будет готова к ${clockText(state.t + F.kashaCook)}.` });
   return true;
@@ -126,6 +132,7 @@ export function updateKitchen(state: State, dt: number): void {
       }
     }
   }
+  if (state.valve2Open) state.trough2 = Math.min(100, state.trough2 + F.troughFill * dt);
 }
 
 export type MealStatus = 'ok' | 'late' | 'missed';

@@ -1,12 +1,14 @@
 import Phaser from 'phaser';
 import { PX } from '../art/pixel';
-import type { ElephantProfile } from '../data/elephants';
+import { type ElephantProfile } from '../data/elephants';
+import { MAP } from '../data/map';
 import type { Elephant, State } from '../sim';
 
 const TILE = 48;
 const FONT = '"Press Start 2P", monospace';
 
-// Слониха: пиксельные кадры — стоит, шагает, топает, ест, спит
+// Слон: пиксельные кадры — стоит, шагает, топает, ест, спит, купается.
+// Мокрая шкура темнеет (wetness) и светлеет обратно, пока слон сохнет
 export class ElephantView {
   private sprite: Phaser.GameObjects.Image;
   private shadow: Phaser.GameObjects.Image;
@@ -36,7 +38,11 @@ export class ElephantView {
     this.last = { x: px, y: py };
     if (e.state === 'walk' && Math.abs(e.tx - e.x) > 0.05) this.facing = e.tx > e.x ? 1 : -1;
     else if (e.state === 'eatHay' || e.state === 'drink' || e.state === 'eatBasin') {
-      const target = e.state === 'eatHay' ? 2.2 : e.state === 'drink' ? 11.8 : this.profile.slot.x;
+      // Цели — в своём загоне: кормушка, поилка, своё место для таза
+      const lower = this.profile.paddock === 'lower';
+      const feeder = lower ? MAP.feeder2 : MAP.feeder;
+      const trough = lower ? MAP.trough2 : MAP.trough;
+      const target = e.state === 'eatHay' ? feeder.x : e.state === 'drink' ? trough.x : this.profile.slot.x;
       if (Math.abs(target - e.x) > 0.3) this.facing = target > e.x ? 1 : -1;
     }
 
@@ -46,7 +52,11 @@ export class ElephantView {
     let frame = 'idle0';
     let dx = 0;
     if (e.state === 'sleep') frame = 'lying';
-    else if (e.state === 'walk' && moved > 0.05) {
+    else if (e.state === 'bathe') {
+      // Купание: плещется — кадр с хоботом-крюком и лёгкое покачивание
+      frame = Math.floor(t * 2.5) % 2 === 0 ? 'eat' : 'idle0';
+      dx = Math.round(Math.sin(t * 3) * 1.5) * PX;
+    } else if (e.state === 'walk' && moved > 0.05) {
       this.phase += moved / 9;
       frame = `walk${Math.floor(this.phase) % 4}`;
     } else if (signaling) {
@@ -65,10 +75,17 @@ export class ElephantView {
     }
 
     this.sprite.setTexture(`el-${id}-${frame}`).setFlipX(this.facing < 0).setPosition(px + dx, py).setDepth(py);
+    // Мокрая кожа темнеет: белый тон → тёмно-графитовый по wetness
+    const wet = Math.min(1, e.wetness / 100);
+    if (wet > 0.02) {
+      const mix = (from: number, to: number) => Math.round(from + (to - from) * wet * 0.62);
+      const tint = (mix(0xfc, 0x34) << 16) | (mix(0xfc, 0x44) << 8) | mix(0xfc, 0x54);
+      this.sprite.setTint(tint);
+    } else this.sprite.clearTint();
     this.shadow.setTexture(e.state === 'sleep' ? 'shadow-lying' : 'shadow-el').setPosition(px, py - 2).setDepth(py - 1);
 
-    // Над слонихой — только имя. Что она хочет, игрок читает по поведению: топот, стойка у решётки
-    const top = py - (e.state === 'sleep' ? 16 : 31) * PX * (id === 'audrey' ? 0.88 : 1);
+    // Над слоном — только имя. Что он хочет, игрок читает по поведению: топот, стойка у решётки
+    const top = py - (e.state === 'sleep' ? 16 : 31) * PX * (id === 'audrey' || id === 'caesar' ? 0.88 : 1);
     this.name.setPosition(px, top).setDepth(20000);
   }
 }

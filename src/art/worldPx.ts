@@ -1,6 +1,6 @@
 import { MAP } from '../data/map';
 import { C } from './palette';
-import { Sprite, rng } from './pixel';
+import { Sprite, ellipse, rng } from './pixel';
 
 // Пол, фон и ночной свет. Всё в пикселях рисунка: клетка = 16×16.
 
@@ -110,12 +110,16 @@ export function floorTiles(): Record<string, Sprite> {
 const W = MAP.w * CELL;
 const H = MAP.h * CELL;
 const px = (v: number) => Math.round(v * CELL);
-const FENCE_Y = px(MAP.fenceY);
-const TENT_X = px(MAP.bedding.x + MAP.bedding.cols);
+const FENCE_Y1 = px(MAP.fenceY);
+const FENCE_Y2 = px(MAP.fenceY2);
 const ROOM_Y0 = px(MAP.rooms.duty.y0);
-const ROAD_Y = px(MAP.road.y0);
-const PAD_X = px(MAP.asphalt.x0);
-const PAD_Y = px(MAP.asphalt.y0);
+const ROOM_Y1 = px(MAP.rooms.duty.y1);
+const YARD_X = px(MAP.yard.x0);
+const ROAD_X = px(MAP.road.x0);
+const FOREST_X = px(MAP.forest.x1);
+const TENT_X = px(MAP.bedding.x + MAP.bedding.cols);
+const TENT2_Y0 = px(MAP.bedding2.y);
+const TENT2_Y1 = px(MAP.bedding2.y + MAP.bedding2.rows);
 
 // Кирпич в духе NES: оранжевый, чёрные швы вразбежку, светлая кромка сверху
 function brick(s: Sprite, x0: number, y0: number, x1: number, y1: number): void {
@@ -128,65 +132,139 @@ function brick(s: Sprite, x0: number, y0: number, x1: number, y1: number): void 
   for (let x = x0; x <= x1; x++) s.set(x, y1 + 1, C.k);
 }
 
-// Дощатый настил: оранжевые доски с чёрными швами и гвоздями
-function boards(s: Sprite, r: () => number, inside: (x: number, y: number) => boolean, y0: number, y1: number): void {
-  for (let y = y0; y < y1; y += 8) {
-    for (let x = 0; x < W; x++) {
-      if (!inside(x, y)) continue;
-      s.set(x, y, C.orangeLight);
-      for (let k = 1; k < 7; k++) if (inside(x, y + k)) s.set(x, y + k, C.orange);
-      if (inside(x, y + 7)) s.set(x, y + 7, C.redDark);
-    }
-    let x = Math.floor(r() * 30);
-    while (x < W) {
-      if (inside(x, y)) {
-        for (let k = 0; k < 8; k++) if (inside(x, y + k)) s.set(x, y + k, C.k);
-        s.set(x + 2, y + 3, C.redDark);
-      }
-      x += 26 + Math.floor(r() * 30);
-    }
-  }
-}
-
 // Асфальт: тёмно-серый с крошкой
 function asphalt(s: Sprite, r: () => number, inside: (x: number, y: number) => boolean): void {
   s.fill(inside, '#3c3c40');
-  for (let i = 0; i < 900; i++) {
+  for (let i = 0; i < 1600; i++) {
     const x = Math.floor(r() * W);
     const y = Math.floor(r() * H);
     if (inside(x, y)) s.set(x, y, r() < 0.6 ? C.greyDark : C.greyMid);
   }
 }
 
-// Неподвижный фон: небо, шатёр над подстилкой, трава выгула, дорожка, постройки, навес, асфальт и проезд
+// Бетон коридоров и служебного двора
+function concrete(s: Sprite, r: () => number, inside: (x: number, y: number) => boolean): void {
+  s.fill(inside, '#9c9ca0');
+  for (let i = 0; i < 900; i++) {
+    const x = Math.floor(r() * W);
+    const y = Math.floor(r() * H);
+    if (inside(x, y)) s.set(x, y, r() < 0.5 ? '#8c8c90' : '#b0b0b4');
+  }
+}
+
+// Дерево на лугу: крона двумя тонами и ствол. Проходу не мешает — под ним трава
+function tree(s: Sprite, x: number, y: number, seed: number): void {
+  const r = rng(seed);
+  const h = 10 + Math.floor(r() * 6);
+  for (let i = 0; i < h; i++) s.set(x, y - i, '#5c3000');
+  const top = y - h;
+  s.fill(ellipse(x, top - 5, 7, 5.5), C.greenDark);
+  s.fill(ellipse(x - 2, top - 7, 5, 4), C.green);
+  s.fill(ellipse(x + 3, top - 3, 4, 3), C.green);
+  for (let i = 0; i < 10; i++) s.set(x - 6 + r() * 12, top - 10 + r() * 6, C.greenLight);
+}
+
+// Куст: низкая тёмно-зелёная кочка
+function bush(s: Sprite, x: number, y: number, seed: number): void {
+  const r = rng(seed);
+  s.fill(ellipse(x, y - 2, 4, 2.6), C.greenDark);
+  s.fill(ellipse(x - 1, y - 3, 2.6, 1.8), C.green);
+  for (let i = 0; i < 5; i++) s.set(x - 3 + r() * 6, y - 4 + r() * 2, r() < 0.5 ? C.red : C.gold);
+}
+
+function rock(s: Sprite, x: number, y: number, seed: number): void {
+  const r = rng(seed);
+  s.fill(ellipse(x, y - 1, 4, 2.4), C.greyDark);
+  s.fill(ellipse(x - 1, y - 2, 2.8, 1.5), C.greyMid);
+  s.set(x + Math.floor(r() * 3) - 1, y - 2, C.grey);
+}
+
+// Навигационная линия на полу коридора: цветная пунктирная, «как в аэропорту»
+function navLine(s: Sprite, x0: number, y0: number, x1: number, y1: number, color: string): void {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const n = Math.max(Math.abs(dx), Math.abs(dy));
+  for (let i = 0; i <= n; i++) {
+    if (i % 8 >= 5) continue; // пунктир
+    const x = Math.round(x0 + (dx * i) / (n || 1));
+    const y = Math.round(y0 + (dy * i) / (n || 1));
+    for (let k = -1; k <= 1; k++) s.set(x, y + k, color);
+  }
+}
+
+// Неподвижный фон: небо, лесополоса, два загона с песком и лугами, бассейны, коридоры
+// с навигационными линиями, пять помещений, двор с баком и дорога справа
 export function background(cloud: Sprite): Sprite {
   const s = new Sprite(W, H);
   const r = rng(99);
 
-  // Вольер: под подстилкой — солома (её закроют клетки), справа трава до решётки и за ней
-  s.fill((x, y) => y >= CELL && y < FENCE_Y && x < TENT_X, '#f8d878');
-  const grass = (x: number, y: number) => y >= CELL && y < FENCE_Y && x >= TENT_X;
+  // Загоны: песок под подстилкой (её закроют клетки) и трава лугов
+  const sand = (x: number, y: number) =>
+    (y >= CELL && y < FENCE_Y1 && x < TENT_X && x >= FOREST_X) || (y >= TENT2_Y0 && y < TENT2_Y1 && x < TENT_X && x >= FOREST_X);
+  s.fill(sand, '#f8d878');
+  const grass = (x: number, y: number) =>
+    (y >= CELL && y < FENCE_Y1 && x >= TENT_X && x < YARD_X) || (y >= TENT2_Y0 && y < TENT2_Y1 && x >= TENT_X && x < YARD_X);
   s.fill(grass, C.green);
-  for (let i = 0; i < 520; i++) {
-    const x = TENT_X + Math.floor(r() * (W - TENT_X));
-    const y = CELL + 2 + Math.floor(r() * (FENCE_Y - CELL - 4));
+  for (let i = 0; i < 900; i++) {
+    const x = TENT_X + Math.floor(r() * (YARD_X - TENT_X));
+    const y = CELL + 2 + Math.floor(r() * (H - CELL - 4));
+    if (!grass(x, y)) continue;
     s.set(x, y, C.greenLight);
     s.set(x + 1, y - 1, C.greenLight);
     s.set(x + 2, y, C.greenLight);
   }
-  for (let i = 0; i < 260; i++) s.set(TENT_X + r() * (W - TENT_X), CELL + r() * (FENCE_Y - CELL), C.greenDark);
-  // Тропинки, натоптанные слонихами вдоль решётки
-  s.fill((x, y) => grass(x, y) && y >= FENCE_Y - 10 && (x + y) % 3 === 0, '#c88c4c');
+  for (let i = 0; i < 420; i++) {
+    const x = TENT_X + r() * (YARD_X - TENT_X);
+    const y = CELL + r() * (H - CELL);
+    if (grass(x, y)) s.set(x, y, C.greenDark);
+  }
+  // Тропинки, натоптанные слонами вдоль решёток
+  s.fill((x, y) => grass(x, y) && Math.abs(y - (FENCE_Y1 - 10)) < 8 && (x + y) % 3 === 0, '#c88c4c');
+  s.fill((x, y) => grass(x, y) && Math.abs(y - (FENCE_Y2 + 10)) < 8 && (x + y) % 3 === 0, '#c88c4c');
 
-  // Дорожка вдоль решётки — доски; справа от неё начинается асфальт
-  boards(s, r, (x, y) => y >= FENCE_Y && y < ROOM_Y0 && x < PAD_X, FENCE_Y, ROOM_Y0);
+  // Бассейны на лугах: песчаный ободок и вода (мерцание и мусор рисует сцена)
+  for (const p of MAP.pools) {
+    const cx = px(p.x);
+    const cy = px(p.y);
+    const rx = px(p.rx);
+    const ry = px(p.ry);
+    s.fill(ellipse(cx, cy, rx + 6, ry + 6), '#e8c878'); // ободок-бертма
+    s.fill(ellipse(cx, cy, rx, ry), C.blueDark);
+    s.fill(ellipse(cx, cy, rx - 3, ry - 3), C.blue);
+    s.fill(ellipse(cx - rx / 4, cy - ry / 4, rx / 3, ry / 4), C.blueLight);
+  }
 
-  // Постройки: дежурка — доски, мойка — плитка, кормовая — линолеум, навес — бетонные плиты
+  // Коридоры и двор: бетон
+  concrete(s, r, (x, y) => x >= FOREST_X && x < ROAD_X && ((y >= FENCE_Y1 && y < ROOM_Y0) || (y >= ROOM_Y1 && y < FENCE_Y2)));
+  concrete(s, r, (x) => x >= YARD_X && x < ROAD_X);
+
+  // Навигационные линии коридоров «как в аэропорту»:
+  // жёлтая → Дежурка, синяя → Мойка, зелёная → Кормовая, оранжевая → Сенник и Опилочник
+  const midUp = Math.round((FENCE_Y1 + ROOM_Y0) / 2);
+  const midDown = Math.round((ROOM_Y1 + FENCE_Y2) / 2);
+  navLine(s, FOREST_X + 8, midUp, ROAD_X - 8, midUp, C.gold);
+  navLine(s, FOREST_X + 8, midDown, ROAD_X - 8, midDown, C.gold);
+  const doors: [number, string][] = [
+    [px(6.9), '#f8b800'],
+    [px(17.1), C.blueLight],
+    [px(27.3), C.greenLight],
+    [px(37.3), C.orange],
+    [px(47.1), C.orange],
+  ];
+  for (const [x, color] of doors) {
+    navLine(s, x, midUp, x, ROOM_Y0, color);
+    navLine(s, x, ROOM_Y1, x, midDown, color);
+  }
+  // Ветка к рохле и выезду к дороге
+  navLine(s, px(49.5), midUp, px(49.5), FENCE_Y1 + 8, C.white);
+  navLine(s, px(54.4), FENCE_Y1 + 8, px(54.4), midUp, C.white);
+
+  // Постройки: дежурка — резиновая плитка, мойка — кафель, кормовая — линолеум,
+  // сенник — дощатый пол, опилочник — бетонные плиты
   const room = (k: keyof typeof MAP.rooms) => {
     const m = MAP.rooms[k];
     return (x: number, y: number) => x >= px(m.x0) && x < px(m.x1) && y >= px(m.y0) && y < px(m.y1);
   };
-  // Дежурка: серая резиновая плитка — ровная, без цветных пятен
   const duty = room('duty');
   s.fill(duty, '#6c6c74');
   s.fill((x, y) => duty(x, y) && (x % 12 === 0 || y % 12 === 0), '#4c4c54');
@@ -202,69 +280,108 @@ export function background(cloud: Sprite): Sprite {
   const kitchen = room('kitchen');
   s.fill(kitchen, C.grey);
   s.fill((x, y) => kitchen(x, y) && (Math.floor(x / 8) + Math.floor(y / 8)) % 2 === 0, C.greyMid);
-  const shed = room('shed');
-  s.fill(shed, '#a4a4a8');
-  s.fill((x, y) => shed(x, y) && (x % 16 === 0 || y % 16 === 0), C.greyMid);
-  // Секции навеса: низкие дощатые перегородки — сено сзади, солома и опилки впереди
-  const st = MAP.stations;
-  const plank = (x0: number, y0: number, x1: number, y1: number) => {
-    s.fill((x, y) => x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1, C.k);
-    s.fill((x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1, C.orange);
-    s.fill((x, y) => x >= x0 && x <= x1 && y === y0, C.orangeLight);
+  const hayRoom = room('hay');
+  s.fill(hayRoom, C.orange);
+  s.fill((x, y) => hayRoom(x, y) && y % 8 === 7, C.redDark);
+  s.fill((x, y) => hayRoom(x, y) && (x + Math.floor(y / 8) * 4) % 13 === 0, C.k);
+  const sawdustRoom = room('sawdust');
+  s.fill(sawdustRoom, '#a4a4a8');
+  s.fill((x, y) => sawdustRoom(x, y) && (x % 16 === 0 || y % 16 === 0), C.greyMid);
+
+  // Асфальт двора и дороги; разметка дороги — вертикальная осевая
+  asphalt(s, r, (x, y) => x >= ROAD_X || (x >= YARD_X && y >= FENCE_Y1 && y < FENCE_Y2));
+  for (let y = 4; y < H; y += 16) for (let k = 0; k < 8; k++) s.set(Math.round((ROAD_X + W) / 2) - 2, y + k, C.white);
+  for (let y = 4; y < H; y += 16) for (let k = 0; k < 8; k++) s.set(Math.round((ROAD_X + W) / 2) - 1, y + k, C.white);
+  // Жёлтая рамка места мусорного бака и зона разгрузки у борта
+  const mark = (cx: number, cy: number, w: number, h: number) => {
+    const [cx0, cy0, cx1, cy1] = [px(cx - w / 2) - 3, px(cy - h / 2) - 3, px(cx + w / 2) + 2, px(cy + h / 2) + 2];
+    for (let x = cx0; x <= cx1; x++) if (x % 4 < 2) {
+      s.set(x, cy0, C.gold);
+      s.set(x, cy1, C.gold);
+    }
+    for (let y = cy0; y <= cy1; y++) if (y % 4 < 2) {
+      s.set(cx0, y, C.gold);
+      s.set(cx1, y, C.gold);
+    }
   };
-  plank(px(MAP.rooms.shed.x0) + 2, px(st.hay.y - st.hay.h / 2) - 4, px(MAP.rooms.shed.x1) - 3, px(st.hay.y - st.hay.h / 2) - 3);
-  plank(px((st.straw.x + st.sawdust.x) / 2), px(st.straw.y - st.straw.h / 2), px((st.straw.x + st.sawdust.x) / 2) + 1, px(st.straw.y + st.straw.h / 2));
+  mark(MAP.stations.dump.x, MAP.stations.dump.y, MAP.stations.dump.w, MAP.stations.dump.h);
+  mark(MAP.stations.unload.x, MAP.stations.unload.y, MAP.stations.unload.w, MAP.stations.unload.h);
 
-  // Асфальт: площадка с контейнером и хозяйственный проезд вдоль задних стен
-  asphalt(s, r, (x, y) => (x >= PAD_X && y >= PAD_Y) || y >= ROAD_Y);
-  // Разметка: прерывистая осевая на проезде и жёлтая рамка места контейнера
-  const midY = Math.round((ROAD_Y + H) / 2);
-  for (let x = 4; x < W; x += 16) for (let k = 0; k < 8; k++) s.set(x + k, midY, C.white);
-  const c = MAP.stations.dump;
-  const [cx0, cy0, cx1, cy1] = [px(c.x - c.w / 2) - 3, px(c.y - c.h / 2) - 3, px(c.x + c.w / 2) + 2, px(c.y + c.h / 2) + 2];
-  for (let x = cx0; x <= cx1; x++) if (x % 4 < 2) {
-    s.set(x, cy0, C.gold);
-    s.set(x, cy1, C.gold);
+  // Лесополоса слева — граница территории: тёмная зелень и кроны
+  s.fill((x) => x < FOREST_X, '#004000');
+  for (let i = 0; i < 260; i++) {
+    const x = r() * FOREST_X;
+    const y = r() * H;
+    s.set(x, y, C.greenDark);
   }
-  for (let y = cy0; y <= cy1; y++) if (y % 4 < 2) {
-    s.set(cx0, y, C.gold);
-    s.set(cx1, y, C.gold);
-  }
+  for (let y = 14; y < H; y += 56) tree(s, 4 + Math.floor(r() * 3), y, Math.floor(y));
+  for (let y = 34; y < H; y += 64) tree(s, Math.floor(r() * 3), y, Math.floor(y * 7));
 
-  // Стены построек — кирпич; левая кромка дежурки — тоже
-  brick(s, 0, ROOM_Y0 - 3, 2, ROAD_Y);
+  // Деревья и кусты на лугах — не в бассейне и не у решёток
+  const meadow = (x: number, y: number) => grass(x, y);
+  const clearOfPools = (x: number, y: number) =>
+    MAP.pools.every((p) => Math.hypot((x - p.x) / (p.rx + 3), (y - p.y) / (p.ry + 3)) > 1);
+  const spots: [number, number][] = [];
+  const rs = rng(7);
+  for (let i = 0; i < 60; i++) {
+    const x = 24 + rs() * 26;
+    const y = (rs() < 0.5 ? 2.5 + rs() * 9 : 29.5 + rs() * 15.5);
+    if (!meadow(x, y) || !clearOfPools(x, y)) continue;
+    if (Math.abs(y - MAP.fenceY) < 2 || Math.abs(y - MAP.fenceY2) < 2) continue;
+    spots.push([x, y]);
+  }
+  spots.forEach(([x, y], i) => {
+    if (i % 3 === 0) tree(s, px(x), px(y), 30 + i);
+    else if (i % 3 === 1) bush(s, px(x), px(y), 60 + i);
+    else if (i % 5 === 4) rock(s, px(x), px(y), 90 + i);
+    else {
+      s.set(px(x), px(y) - 1, C.gold);
+      s.set(px(x) + 1, px(y), i % 2 ? C.red : C.white);
+    }
+  });
+
+  // Стены построек — кирпич
   for (const w of MAP.walls) {
     if (w.y0 === w.y1) brick(s, px(w.x0) - 2, px(w.y0) - 3, px(w.x1) + 1, px(w.y0) + 1);
     else brick(s, px(w.x0) - 2, px(w.y0) - 3, px(w.x0) + 2, px(w.y1));
   }
 
-  // Проезд закрыт для игрока: перила — серая труба на столбиках, задняя дверь кормовой — закрытая дощатая
-  for (const b of MAP.barriers) {
-    const x0 = px(b.x0);
-    const x1 = px(b.x1);
-    const y = px(b.y0);
-    if (b.kind === 'door') {
-      s.fill((x, yy) => x >= x0 && x <= x1 && yy >= y - 3 && yy <= y + 1, C.k);
-      s.fill((x, yy) => x > x0 && x < x1 && yy >= y - 2 && yy <= y, '#8c5418');
-      for (let x = x0 + 4; x < x1; x += 5) s.set(x, y - 1, '#5c3000');
-    } else {
-      for (let x = x0; x <= x1; x++) {
-        s.set(x, y - 3, C.k);
-        s.set(x, y - 2, C.grey);
-        s.set(x, y - 1, C.k);
-      }
-      for (let x = x0 + 2; x <= x1; x += 8) for (let yy = y - 3; yy <= y + 2; yy++) s.set(x, yy, yy === y - 3 ? C.grey : C.greyDark);
-    }
+  // Перила дороги — серая труба на столбиках вдоль двора
+  for (let y = 0; y < H; y++) {
+    s.set(ROAD_X - 3, y, C.k);
+    s.set(ROAD_X - 2, y, C.grey);
+    s.set(ROAD_X - 1, y, C.k);
+  }
+  for (let y = 10; y < H; y += 40) for (let yy = y - 4; yy <= y + 4; yy++) s.set(ROAD_X - 2, yy, C.greyDark);
+
+  // Верхняя решётка над верхним загоном и нижняя кромка мира у нижнего
+  for (let x = FOREST_X; x < YARD_X; x++) {
+    s.set(x, CELL - 6, C.k);
+    s.set(x, CELL - 1, C.k);
+    if (x % 3 === 0) for (let y = CELL - 6; y < CELL; y++) s.set(x, y, C.greyDark);
+  }
+  for (let x = FOREST_X; x < YARD_X; x++) {
+    s.set(x, H - 6, C.k);
+    s.set(x, H - 1, C.k);
+    if (x % 3 === 0) for (let y = H - 6; y < H; y++) s.set(x, y, C.greyDark);
   }
 
-  // Левая стена вольера — кирпич у края карты
-  brick(s, 0, CELL, 3, FENCE_Y - 2);
+  // Плафоны на стенах у дверей помещений: аккуратные, проходу не мешают
+  for (const t of MAP.thresholds) {
+    const x = Math.round(((t.x0 + t.x1) / 2) * CELL);
+    const up = t.y0 === ROOM_Y0 / CELL;
+    const y = up ? px(t.y0) - 5 : px(t.y0) + 3;
+    s.set(x, y, C.k);
+    s.set(x, y + 1, C.gold);
+    s.set(x - 1, y + 1, C.k);
+    s.set(x + 1, y + 1, C.k);
+  }
 
   // Небо и облака сверху
   s.fill((_x, y) => y < CELL, C.sky);
-  for (const cx of [20, 120, 230, 300]) s.draw(cloud, cx, -6);
-  // Кромка шатра над подстилкой: красно-белые фестоны
-  for (let x = 0; x < TENT_X; x++) {
+  for (const cx of [80, 300, 560, 820]) s.draw(cloud, cx, -6);
+  // Кромка шатра над песком верхнего загона: красно-белые фестоны
+  for (let x = FOREST_X; x < TENT_X; x++) {
     const stripe = Math.floor(x / 8) % 2 === 0;
     const col = stripe ? C.red : C.white;
     const shade = stripe ? C.redDark : C.grey;
@@ -274,37 +391,47 @@ export function background(cloud: Sprite): Sprite {
     s.set(x, bottom + 1, C.k);
     s.set(x, 6, C.k);
   }
-  for (let x = 0; x < TENT_X; x++) s.set(x, 5, C.orange);
-  // Над выгулом — верхняя решётка: прутья на фоне неба
-  for (let x = TENT_X; x < W; x++) {
-    s.set(x, CELL - 6, C.k);
-    s.set(x, CELL - 1, C.k);
-    if (x % 3 === 0) for (let y = CELL - 6; y < CELL; y++) s.set(x, y, C.greyDark);
-  }
+  for (let x = FOREST_X; x < TENT_X; x++) s.set(x, 5, C.orange);
   return s;
 }
 
-// Фонари на столбах — только снаружи решётки, на её линии: светят на дорожку, а не в вольер
-export const LAMPS: { x: number; y: number }[] = [1.2, 4.6, 9.6, 13.4, 16.9, 20.4].map((x) => ({ x, y: 9.3 }));
+// Фонари на столбах — только вдоль автомобильной дороги справа
+export const LAMPS: { x: number; y: number }[] = [3.5, 11, 18.5, 26, 33.5, 41, 44.5].map((y) => ({ x: MAP.road.x0 - 0.6, y }));
 
-// Сколько света в точке ночью, 0…1: постройки освещены целиком, у фонарей — пятно на дорожке,
-// дежурный свет — ровный тусклый по всему вольеру
+// Плафоны коридоров: точки света (без столбов — свет на полу коридора)
+const CEILING: { x: number; y: number }[] = [
+  { x: 8.8, y: 15.2 },
+  { x: 20.2, y: 15.2 },
+  { x: 29.6, y: 15.2 },
+  { x: 39.4, y: 15.2 },
+  { x: 47.2, y: 15.2 },
+  { x: 10.7, y: 26 },
+  { x: 20.3, y: 26 },
+  { x: 29.9, y: 26 },
+  { x: 39.5, y: 26 },
+  { x: 48.7, y: 26 },
+];
+
+// Сколько света в точке ночью, 0…1: постройки освещены целиком, у фонарей — пятно на асфальте,
+// в коридорах — свет от плафонов, дежурный свет — ровный тусклый по обоим вольерам
 function lightAt(x: number, y: number, duty: boolean): number {
   let light = 0;
   const checker = (x + y) % 2 === 0;
   for (const r of Object.values(MAP.rooms)) {
-    if (x >= px(r.x0) && x < px(r.x1) && y >= px(r.y0) && y < px(r.y1)) light = r === MAP.rooms.shed ? 0.6 : 0.85;
+    if (x >= px(r.x0) && x < px(r.x1) && y >= px(r.y0) && y < px(r.y1)) light = r === MAP.rooms.hay || r === MAP.rooms.sawdust ? 0.6 : 0.85;
   }
-  for (const l of LAMPS) {
-    const d = Math.hypot(x - l.x * CELL, (y - (l.y + 0.7) * CELL) * 1.4);
-    const v = d < 14 ? 0.75 : d < 22 ? (checker ? 0.75 : 0.45) : d < 30 ? (checker ? 0.45 : 0.15) : 0;
-    light = Math.max(light, v);
-  }
+  const lampGlowAt = (l: { x: number; y: number }, scale = 1): number => {
+    const d = Math.hypot(x - l.x * CELL, (y - (l.y + 0.7) * CELL) * 1.4) / scale;
+    return d < 14 ? 0.75 : d < 22 ? (checker ? 0.75 : 0.45) : d < 30 ? (checker ? 0.45 : 0.15) : 0;
+  };
+  for (const l of LAMPS) light = Math.max(light, lampGlowAt(l));
+  for (const l of CEILING) light = Math.max(light, lampGlowAt(l, 1.2));
   if (duty) {
-    const p = MAP.paddock;
-    const inside = x >= px(p.x0) && x < px(p.x1) && y >= px(p.y0) && y < px(p.y1);
-    const edge = x < px(p.x0) + 2 || x >= px(p.x1) - 2 || y < px(p.y0) + 2 || y >= px(p.y1) - 2;
-    if (inside) light = Math.max(light, edge && checker ? 0.3 : 0.55);
+    for (const p of [MAP.paddock, MAP.paddock2]) {
+      const inside = x >= px(p.x0) && x < px(p.x1) && y >= px(p.y0) && y < px(p.y1);
+      const edge = x < px(p.x0) + 2 || x >= px(p.x1) - 2 || y < px(p.y0) + 2 || y >= px(p.y1) - 2;
+      if (inside) light = Math.max(light, edge && checker ? 0.3 : 0.55);
+    }
   }
   return light;
 }

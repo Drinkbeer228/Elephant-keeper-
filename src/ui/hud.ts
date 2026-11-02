@@ -74,7 +74,7 @@ export class Hud {
         <div class="actionHint panel" data-el="hint"></div>
         <div class="buttons">
           <button class="btn round inspectBtn" data-el="inspectBtn" aria-label="Осмотр">${ICON.eye}<small>F</small></button>
-          <button class="btn round actionBtn" data-el="actionBtn" aria-label="Действие">${ICON.hand}<small>Space</small></button>
+          <button class="btn round actionBtn" data-el="actionBtn" aria-label="Действие">${ICON.hand}<small>Space / E</small></button>
         </div>
       </div>
       <div class="overlay" data-el="intro">
@@ -85,14 +85,15 @@ export class Hud {
           <div class="portraits">${portraits}</div>
           <p>Ты заступаешь на сутки при трёх слонихах — <b>Претти</b>, <b>Марго</b> и <b>Одри</b>. Утром сменщик примет у тебя слоновник и будет придираться.</p>
           <ol class="rules">
-            <li><b>Смена идёт сразу.</b> Утром сменщик примет вольер по чек-листу: ворота, вода, сено, инвентарь на стойке, тачка, тазы, чистота.</li>
-            <li><b>Туалет.</b> Смотри на слоних: у каждой свой знак — топот, стойка у решётки. Успей подставить бак — иначе мокрая подстилка и больные ноги. Угости за бак, бак вылей в решётку слива. Одри не предупреждает: веди её «погулять».</li>
+            <li><b>Смена идёт сразу.</b> Утром сменщик примет вольер по чек-листу: ворота, вода, сено, инвентарь на стойке, тачка и рохля на местах, тазы, чистота.</li>
+            <li><b>Запасы не бесконечны.</b> Зерно, овощи, фрукты, сено, солома и опилки расходуются — следи за строкой сверху. Утром (с 09:15) к задней двери кормовой подаёт грузовик: гудок — выноси рохлю, снимай поддоны и развоз по складам. Не успел к 11:30 — груз уехал.</li>
+            <li><b>Туалет.</b> Смотри на слоних: у каждой свой знак — топот, стойка у решётки. Успей подставить бак — иначе мокрая подстилка и больные ноги. Угости за бак (это тратит фрукты!), бак вылей в решётку слива. Одри не предупреждает: веди её «погулять».</li>
             <li><b>Пол.</b> Мокрое — вилами, потом опилки (ведро — у кучи под навесом); впитали — метлой до пола, сверху солома. Навоз — совком, сразу: в его отсек, в тачку или мешок. Сор с тачки на дорожке — метлой.</li>
-            <li><b>Корм.</b> Каша в 13:00 и 17:00. Ужин к 19:00: с 14:00 овощи со стеллажа в корзину, замочить и промыть на мойке, почистить и нарезать у стола. Разложи по тазам на стеллаже, носи по одному; пустые — стопкой на мойку и обратно.</li>
+            <li><b>Корм.</b> Каша в 13:00 и 17:00 (на каждую уходит зерно). Ужин к 19:00: с 14:00 овощи со стеллажа в корзину, замочить и промыть на мойке, почистить и нарезать у стола. Разложи по тазам на стеллаже, носи по одному; пустые — стопкой на мойку и обратно.</li>
             <li><b>Ночь.</b> В вольере темно: включи дежурный свет у двери дежурки, утром выключи.</li>
-            <li><b>Тачка.</b> Возит инвентарь, опилки, солому, тюки и мусор. Поставь рядом — и убирай. Три тюка и больше качаются: держи равновесие Q / E.</li>
+            <li><b>Тачка и рохля.</b> Тачка возит инвентарь, опилки, солому, тюки и мусор (три тюка и больше качаются: Q / E). Рохля — только по твёрдому полу: дорожка, комнаты, асфальт. С тяжёлым в руках идёшь медленнее — катай тележку.</li>
           </ol>
-          <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd><kbd>E</kbd> равновесие · <kbd>P</kbd> пауза</p>
+          <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd>/<kbd>E</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd>/<kbd>E</kbd> равновесие тачки · <kbd>P</kbd> пауза</p>
           <button class="btn primary big" data-el="introBtn">Заступить на смену</button>
         </div>
       </div>
@@ -284,16 +285,35 @@ export class Hud {
     }
     const low = (v: number, min: number) => (v < min ? ' low' : '');
     const clean = basinsOnRack(s).filter((b) => !b.dirty && !b.food).length;
+    const stock = (v: number, icon: string, title: string) =>
+      `<span class="r${v <= 0 ? ' low' : ''}" title="${title}: ${v}">${icon}${v}</span>`;
     this.els.res.innerHTML = `
       <span class="r${low(s.trough, BALANCE.handover.troughMin)}" title="Вода в поилке">${ICON.drop}${Math.round(s.trough)}%</span>
       <span class="r${low(s.feederHay, BALANCE.handover.hayMin)}" title="Сено в кормушке">${ICON.hay}${Math.round(s.feederHay)}%</span>
-      <span class="r${clean < 3 ? ' low' : ''}" title="Чистых тазов на стеллаже">${ICON.bowl}${clean}</span>`;
+      <span class="r${clean < 3 ? ' low' : ''}" title="Чистых тазов на стеллаже">${ICON.bowl}${clean}</span>
+      <span class="sep">|</span>
+      ${stock(s.stock.grain, ICON.sack, 'Зерно в кладовой')}
+      ${stock(s.stock.veg, ICON.carrot, 'Овощи на стеллаже')}
+      ${stock(s.stock.fruit, ICON.apple, 'Фрукты в кладовой')}
+      <span class="r${s.player.pocketTreats <= 0 ? ' low' : ''}" title="Лакомства в поясной сумке (до ${BALANCE.player.pocketMax})">${ICON.apple}×${s.player.pocketTreats}</span>
+      ${stock(s.stock.hay, ICON.bale, 'Тюки сена под навесом')}
+      ${stock(s.stock.straw, ICON.straw, 'Охапки соломы под навесом')}
+      ${stock(s.stock.sawdust, ICON.saw, 'Опилки у ларя')}
+      `;
 
-    const heldKey = s.barrow.pushed ? `barrow-${barrowSummary(s)}` : s.player.held ? `${s.player.held.kind}-${itemLabel(s.player.held)}` : '';
+    const heldKey = s.jack.pushed
+      ? `jack-${s.jack.cargo?.map((u) => u.kind).join('+') ?? 'пусто'}`
+      : s.barrow.pushed
+        ? `barrow-${barrowSummary(s)}`
+        : s.player.held
+          ? `${s.player.held.kind}-${itemLabel(s.player.held)}`
+          : '';
     if (heldKey !== this.lastHeld) {
       this.lastHeld = heldKey;
-      this.els.held.innerHTML = s.barrow.pushed
-        ? `<img src="${barrowUrl()}" alt=""><span>Тачка: <b>${barrowSummary(s)}</b></span>`
+      this.els.held.innerHTML = s.jack.pushed
+        ? `<span>Рохля: <b>${s.jack.cargo ? 'поддон с грузом' : 'пустая'}</b></span>`
+        : s.barrow.pushed
+          ? `<img src="${barrowUrl()}" alt=""><span>Тачка: <b>${barrowSummary(s)}</b></span>`
         : s.player.held
           ? `<img src="${itemIcon(s.player.held)}" alt=""><span>В руках: <b>${itemLabel(s.player.held)}</b></span>`
           : `<span class="muted">Руки свободны</span>`;

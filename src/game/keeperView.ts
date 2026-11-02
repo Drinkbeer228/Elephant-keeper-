@@ -8,7 +8,8 @@ const TILE = 48;
 
 // Кипер: два кадра шага, предмет в руке, над головой стрелка, когда рядом есть дело
 export class KeeperView {
-  private sprite: Phaser.GameObjects.Image;
+  // Спрайт открыт для следящей камеры (startFollow)
+  sprite: Phaser.GameObjects.Image;
   private shadow: Phaser.GameObjects.Image;
   private held: Phaser.GameObjects.Image;
   private arrow: Phaser.GameObjects.Image;

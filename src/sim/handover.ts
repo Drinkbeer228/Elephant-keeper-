@@ -82,11 +82,13 @@ export const HANDOVER_CHECKS: { id: HandoverCheckId; label: string; ok: (s: Stat
   },
   {
     id: 'barrow',
-    label: 'Тачка пустая и на месте',
+    label: 'Тачка и рохля пустые, на своих местах',
     ok: (s) => {
       const b = s.barrow;
       const home = !b.pushed && Math.hypot(b.x - MAP.barrowStart.x, b.y - MAP.barrowStart.y) <= 1.5;
-      return home && !b.waste && !b.tools.length && !b.bales && !b.sawdust && !b.straw;
+      const j = s.jack;
+      const jackHome = !j.pushed && !j.cargo && Math.hypot(j.x - MAP.jackStart.x, j.y - MAP.jackStart.y) <= 1.5;
+      return home && jackHome && !b.waste && !b.tools.length && !b.bales && !b.sawdust && !b.straw;
     },
   },
   {
@@ -112,6 +114,7 @@ export function finishShift(state: State): Report {
   if (stinkSources(state).length >= 5) remarks.push('Мухи и вонь');
   if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
+  if (state.supply.missed) remarks.push('Груз не принят');
   if (state.dutyLight) remarks.push('Дежурный свет не выключен');
   if (state.litter.length >= 6) remarks.push('Сор на дорожке');
 

@@ -303,6 +303,92 @@ function truck(): Sprite {
   return s;
 }
 
+// Продуктовый грузовик: тот же кузов в другой палитре, борт открыт, поддоны видны
+function supplyTruck(): Sprite {
+  const s = new Sprite(76, 40);
+  // Платформа с открытым бортом
+  s.shape(rect(2, 16, 50, 30), T.metal);
+  s.shape(rect(2, 8, 50, 12), T.steel);
+  for (let x = 6; x < 50; x += 10) s.fill(rect(x, 10, x + 1, 12), C.grey);
+  // Поддоны в борту: мешки и ящики
+  for (const x of [4, 20, 36]) {
+    s.shape(rect(x, 2, x + 12, 8), T.cream);
+    s.fill(rect(x + 1, 4, x + 11, 5), C.orange);
+    s.set(x + 2, 1, C.greenLight);
+    s.set(x + 9, 1, C.red);
+  }
+  s.shape(rect(0, 30, 74, 33), T.steel);
+  // Кабина
+  s.shape(union(rect(52, 10, 72, 30), rect(56, 6, 70, 10)), T.blue);
+  s.fill(rect(58, 12, 68, 18), C.skyLight);
+  s.fill(rect(59, 13, 62, 14), C.white);
+  s.fill(rect(73, 24, 74, 28), C.gold);
+  // Колёса
+  for (const x of [12, 36, 62]) {
+    s.shape(ellipse(x, 34, 4.6, 4.6), T.black);
+    s.fill(ellipse(x, 34, 1.6, 1.6), C.grey);
+  }
+  return s;
+}
+
+// Рохля: гидравлическая тележка — низкая платформа, вилка спереди, ручка сзади
+function jackCart(): Sprite {
+  const s = new Sprite(26, 16);
+  s.shape(rect(1, 9, 24, 12), T.red);
+  s.fill(rect(2, 10, 23, 10), C.redDark);
+  s.shape(rect(0, 13, 8, 15), T.steel); // вилка
+  s.fill(rect(0, 14, 8, 14), C.grey);
+  for (const x of [5, 20]) {
+    s.shape(ellipse(x, 13.5, 3.2, 3.2), T.black);
+    s.fill(ellipse(x, 13.5, 1.2, 1.2), C.grey);
+  }
+  // Ручка под углом назад
+  s.shape(rect(23, 2, 25, 10), T.steel);
+  s.fill(rect(22, 0, 26, 2), C.k);
+  return s;
+}
+
+// Поддон с грузом на рохле — вид сверху-сбоку, по виду груза
+function pallet(kind: string): Sprite {
+  const s = new Sprite(22, 14);
+  s.shape(rect(1, 11, 20, 13), T.wood); // поддон
+  for (const x of [2, 10, 18]) s.fill(rect(x, 12, x, 13), C.k);
+  if (kind === 'grain') {
+    for (const x of [2, 12]) {
+      s.shape(ellipse(x + 4, 6, 4.5, 5), T.cream);
+      s.fill(rect(x + 1, 4, x + 7, 5), C.orange);
+    }
+  } else if (kind === 'veg' || kind === 'fruit') {
+    s.shape(rect(1, 3, 20, 11), T.wood);
+    for (const x of [4, 10, 16]) {
+      s.set(x, 2, kind === 'fruit' ? C.red : C.greenLight);
+      s.set(x + 1, 2, kind === 'fruit' ? C.red : C.greenLight);
+    }
+  } else if (kind === 'hay') {
+    s.shape(rect(1, 4, 20, 11), T.straw);
+    for (const y of [5, 8]) s.fill(rect(5, y, 6, y), C.redDark);
+    s.fill(rect(14, 5, 15, 8), C.redDark);
+  } else if (kind === 'straw') {
+    for (const [x0, y0] of [[2, 10], [8, 8], [14, 10]]) s.shape(rect(x0, y0, x0 + 5, 11), T.straw);
+  } else {
+    s.shape(union(ellipse(7, 9, 5.5, 3.5), ellipse(15, 9, 5.5, 3.5)), T.cream);
+    for (const [x, y] of [[5, 8], [12, 7], [17, 9]]) s.set(x, y, '#c49a5c');
+  }
+  return s;
+}
+
+// Водитель: простая фигурка в кепке и синей робе
+function driver(): Sprite {
+  const s = new Sprite(10, 20);
+  s.shape(rect(3, 0, 6, 3), T.red); // кепка
+  s.shape(rect(3, 3, 6, 5), T.cream); // лицо
+  s.shape(rect(2, 6, 7, 13), T.blue); // роба
+  s.fill(rect(3, 7, 4, 12), C.blueLight);
+  s.shape(rect(2, 13, 3, 19), T.black); // ноги
+  s.shape(rect(6, 13, 7, 19), T.black);
+  return s;
+}
+
 function drain(): Sprite {
   const s = new Sprite(16, 9);
   s.shape(rect(0, 0, 15, 8), T.steel);
@@ -341,9 +427,51 @@ function bulb(color: string): Sprite {
   return grid(['.k.', 'kck', 'kck', '.k.'], { k: C.k, c: color });
 }
 
+// ——— Единицы запаса: сколько мешков и ящиков на складе — столько и в запасе (этап 2) ———
+
+// Мешок зерна: горловина и полный корпус с оранжевой полосой
+function sackUnit(): Sprite {
+  const s = new Sprite(10, 13);
+  s.shape(rect(3, 0, 6, 2), T.wood);
+  s.shape(ellipse(4.5, 7.5, 4.5, 5.5), T.cream);
+  s.fill(rect(1, 5, 8, 5), C.orange);
+  s.set(3, 12, C.goldDark);
+  s.set(6, 12, C.goldDark);
+  return s;
+}
+
+// Ящик: деревянная тара с решёткой; содержимое — точки цвета над краем
+function crateUnit(fruit: boolean): Sprite {
+  const s = new Sprite(11, 9);
+  s.shape(rect(0, 0, 10, 8), T.wood);
+  for (const x of [2, 5, 8]) s.fill(rect(x, 1, x, 7), C.k);
+  s.fill(rect(0, 3, 10, 3), C.k);
+  s.fill(rect(1, 4, 9, 4), C.orange);
+  for (const [x, y] of fruit ? [[2, 0], [5, 0], [8, 0]] : [[2, 1], [5, 1], [8, 1]]) {
+    s.set(x, y, fruit ? C.red : C.greenLight);
+    s.set(x, y + 1, fruit ? C.red : C.greenLight);
+  }
+  return s;
+}
+
+// Стол нарезки: деревянная столешница, доска и нож
+function table(): Sprite {
+  const s = new Sprite(44, 22);
+  s.shape(rect(1, 8, 42, 12), T.wood);
+  s.shape(rect(1, 8, 42, 9), { L: C.orangeLight, M: C.orange, D: C.redDark });
+  s.shape(rect(4, 13, 8, 21), T.wood);
+  s.shape(rect(35, 13, 39, 21), T.wood);
+  // Разделочная доска с ножом
+  s.fill(rect(14, 6, 26, 10), '#e4b878');
+  s.fill(rect(14, 6, 26, 7), C.goldLight);
+  s.fill(line([[29, 5], [24, 8]], 1), C.grey);
+  return s;
+}
+
 export function stationSprites(): Record<string, Sprite> {
   return {
     'st-rack': rack(),
+    'st-table': table(),
     'st-grain': grain(),
     'st-sawdust': sawdustBin(),
     'st-bags': bagsPile(),
@@ -379,6 +507,18 @@ export function stationSprites(): Record<string, Sprite> {
     'st-ramp': ramp(),
     'st-drain': drain(),
     truck: truck(),
+    'truck-supply': supplyTruck(),
+    jack: jackCart(),
+    'pallet-grain': pallet('grain'),
+    'pallet-veg': pallet('veg'),
+    'pallet-fruit': pallet('fruit'),
+    'pallet-hay': pallet('hay'),
+    'pallet-straw': pallet('straw'),
+    'pallet-sawdust': pallet('sawdust'),
+    driver: driver(),
+    'unit-sack': sackUnit(),
+    'unit-crate-veg': crateUnit(false),
+    'unit-crate-fruit': crateUnit(true),
     'deco-bale': bale(),
     'deco-cloud': cloud(),
     'deco-lantern': lantern(),

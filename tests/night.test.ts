@@ -54,9 +54,9 @@ describe('ночь и дежурный свет', () => {
 
 describe('хозяйственный проезд', () => {
   it('на проезд не выйти ни из кормовой, ни из навеса, ни с площадки контейнера', () => {
-    expect(walkable(13.7, MAP.road.y0)).toBe(false); // задняя дверь кормовой закрыта
-    expect(walkable(16.8, MAP.road.y0)).toBe(false); // перила за навесом
-    expect(walkable(20.3, MAP.road.y0)).toBe(false); // перила у площадки
-    expect(walkable(20.3, MAP.road.y0 + 1)).toBe(true); // сам проезд в мире есть — по нему ездит мусоровоз
+    expect(walkable(55.4, 15)).toBe(true); // служебный двор
+    expect(walkable(56.2, 15)).toBe(false); // перила отделяют игрока от дороги
+    expect(walkable(57, 15)).toBe(true); // по дороге ездит транспорт
+    expect(MAP.road.x0).toBe(56);
   });
 });

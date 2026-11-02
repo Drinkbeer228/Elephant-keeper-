@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { availableAction, createShift, inspect, tick, type Command, type State } from './sim';
 import { Input } from './game/input';
 import { WorldScene, type FrameResult } from './game/world';
+import { OverlayScene } from './game/overlay';
 import '@fontsource/press-start-2p';
 import { Hud } from './ui/hud';
 
@@ -46,7 +47,8 @@ function frame(dt: number): FrameResult {
         pending.push({ type: 'action', choice: press });
         hud.closeMenu();
       }
-    } else if (press === 'action') {
+    } else if (press === 'action' || press === 'interact') {
+      if (press === 'interact' && state.barrow.pushed) continue;
       if (hud.menuOpen) hud.closeMenu();
       else if (before?.choices) hud.openMenu(before);
       else pending.push({ type: 'action' });
@@ -62,7 +64,7 @@ function frame(dt: number): FrameResult {
     hud.hideInspect();
     hud.closeMenu();
   }
-  let commands: Command[] = [{ type: 'move', dx: move.x, dy: move.y }, ...pending.splice(0)];
+  let commands: Command[] = [{ type: 'move', dx: move.x, dy: move.y, sprint: input.sprint() }, ...pending.splice(0)];
   const lean = input.balance();
   if (lean) commands.push({ type: 'balance', dir: lean });
   const inspected = commands.some((c) => c.type === 'inspect') ? inspect(state).join('\n') : undefined;
@@ -99,7 +101,8 @@ function startGame(): void {
     backgroundColor: '#1c1916',
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     pixelArt: true,
-    scene: new WorldScene(() => state, frame),
+    // Мир и отдельная сцена-оверлей (закадровые маркеры): обе читают один state
+    scene: [new WorldScene(() => state, frame), new OverlayScene(() => state)],
   });
 }
 startGame();

@@ -1,5 +1,8 @@
 import { BALANCE } from '../data/balance';
-import { MAP } from '../data/map';
+import { MAP, floorZoneOf, inPaddock, isHardFloor } from '../data/map';
+import { walkable as navWalkable } from './nav';
+import { updateTrucks } from './truck';
+export { walkable } from './nav';
 import { availableAction, inspect } from './actions';
 import { dayPart, pace } from './clock';
 import { updateElephants } from './elephants';
@@ -9,6 +12,7 @@ import { cutSpot, updateKitchen } from './feeding';
 import { finishShift } from './handover';
 import { updateItems } from './items';
 import { barrowOffset, spillFromBarrow, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
+import { updatePartner } from './partner';
 import type { Command, ShiftEvent, State } from './types';
 
 // Один кадр игры: dtReal — реальные секунды с прошлого кадра
@@ -21,7 +25,7 @@ export function tick(state: State, dtReal: number, commands: Command[] = []): Sh
   for (const c of commands) {
     switch (c.type) {
       case 'move':
-        moved = movePlayer(state, c.dx, c.dy, dtReal);
+        moved = movePlayer(state, c.dx, c.dy, dtReal, c.sprint === true);
         break;
       case 'balance':
         balanceInput += c.dir;
@@ -74,9 +78,11 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   const before = dayPart(state.t);
   state.t += dt;
   updateElephants(state, dt, dtReal);
+  updatePartner(state, dt, dtReal);
   updateItems(state, dt);
   updateBarrowRisk(state, dt);
   updateContainer(state);
+  updateTrucks(state);
   updateKitchen(state, dt);
   updateFloor(state);
   const after = dayPart(state.t);
@@ -86,57 +92,107 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   if (state.t >= BALANCE.time.shiftEnd) finishShift(state);
 }
 
-function segDist(x: number, y: number, w: { x0: number; y0: number; x1: number; y1: number }): number {
-  const dx = w.x1 - w.x0;
-  const dy = w.y1 - w.y0;
-  const t = Math.max(0, Math.min(1, ((x - w.x0) * dx + (y - w.y0) * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(x - (w.x0 + t * dx), y - (w.y0 + t * dy));
+// Тяжёлый груз в руках замедляет (чтобы у тачки и рохли был смысл): полный таз, тюк, мешок,
+// корзина, охапка соломы, полный бак. Лёгкое — пустой таз, инструмент — нет.
+// Ведро опилок — плавно: полное ведро 85% скорости, с каждой высыпанной порцией быстрее
+export function playerSpeedFactor(state: State): number {
+  const h = state.player.held;
+  if (!h) return 1;
+  if (h.kind === 'sawdust') {
+    const charges = h.charges ?? 0;
+    if (charges <= 0) return 1;
+    return 1 - BALANCE.player.bucketSlowdown * Math.min(1, charges / BALANCE.items.sawdustCharges);
+  }
+  const heavy =
+    h.kind === 'hay' ||
+    h.kind === 'bag' ||
+    h.kind === 'basket' ||
+    (h.kind === 'basin' && (h.food != null || (h.nested?.length ?? 0) > 0)) ||
+    (h.kind === 'bucket' && (h.liters ?? 0) >= 20) ||
+    (h.kind === 'straw' && (h.charges ?? 0) > 0);
+  return heavy ? BALANCE.player.loadedSpeedFactor : 1;
 }
 
-// Стены, решётка, стены построек, контейнер. В вольер — через проход для человека или открытые ворота
-export function walkable(x: number, y: number, gateOpen = false): boolean {
-  if (x < 0.4 || y < 0.4 || x > MAP.w - 0.4 || y > MAP.h - 0.4) return false;
-  if (y < MAP.paddock.y0 + 0.3) return false;
-  const inDoor = x > MAP.door.x0 + 0.3 && x < MAP.door.x1 - 0.3;
-  const inGate = gateOpen && x > MAP.elephantGate.x0 + 0.3 && x < MAP.elephantGate.x1 - 0.3;
-  if (Math.abs(y - MAP.fenceY) < 0.3 && x < MAP.fenceX + 0.3 && !inDoor && !inGate) return false;
-  if (Math.abs(x - MAP.fenceX) < 0.3 && y < MAP.fenceY + 0.3) return false;
-  for (const w of MAP.walls) if (segDist(x, y, w) < 0.3) return false;
-  for (const w of MAP.barriers) if (segDist(x, y, w) < 0.3) return false;
-  // Морской контейнер — твёрдый: обходят, заезжают только в его двери (это действие, а не проход)
-  const c = MAP.stations.dump;
-  if (Math.abs(x - c.x) < c.w / 2 + 0.3 && Math.abs(y - c.y) < c.h / 2 + 0.3) return false;
-  return true;
-}
-
-// Кипер идёт; если везёт тачку — она катится перед ним и тоже не пролезает сквозь ограждение
-function movePlayer(state: State, dx: number, dy: number, dtReal: number): { moving: boolean; turned: boolean } {
+// Кипер идёт; толкаемое (тачка или рохля) катится перед ним. Рохля — только по твёрдому полу.
+// Спринт (Shift): быстрее, но с гружёной тачкой дребезжит и сыплет на поворотах и стыках покрытий
+function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint: boolean): { moving: boolean; turned: boolean } {
   const len = Math.hypot(dx, dy);
   if (len < 0.01) return { moving: false, turned: false };
   const p = state.player;
   const b = state.barrow;
+  const j = state.jack;
+  const jackPushed = j.pushed && !b.pushed;
+  const barrowPushed = b.pushed;
   const nx = dx / len;
   const ny = dy / len;
   const turned = nx * p.facing.x + ny * p.facing.y < 0.3;
   p.facing = { x: nx, y: ny };
-  const pushed = b.pushed;
-  const step = BALANCE.player.speed * (pushed ? BALANCE.barrow.speedFactor : 1) * Math.min(len, 1) * dtReal;
-  let off = { x: b.x - p.x, y: b.y - p.y };
-  if (pushed) {
+  p.sprinting = sprint;
+  const speedFactor = barrowPushed ? BALANCE.barrow.speedFactor : jackPushed ? BALANCE.jack.speedFactor : 1;
+  const sprintFactor = sprint ? BALANCE.player.sprintFactor : 1;
+  const step = BALANCE.player.speed * playerSpeedFactor(state) * speedFactor * sprintFactor * Math.min(len, 1) * dtReal;
+  const target = barrowPushed ? b : jackPushed ? j : null;
+  const w = (x: number, y: number) => navWalkable(x, y, state.gateOpen, false);
+  let off = target ? { x: target.x - p.x, y: target.y - p.y } : { x: 0, y: 0 };
+  if (target) {
     const want = barrowOffset(p.facing);
-    if (walkable(p.x + want.x, p.y + want.y, state.gateOpen)) off = want;
+    if (w(p.x + want.x, p.y + want.y)) off = want;
   }
-  const g = state.gateOpen;
-  const ok = (x: number, y: number) => walkable(x, y, g) && (!pushed || walkable(x + off.x, y + off.y, g));
+  const ok = (x: number, y: number) => {
+    if (!w(x, y)) return false;
+    if (!target) return true;
+    const tx = x + off.x;
+    const ty = y + off.y;
+    if (!w(tx, ty)) return false;
+    if (barrowPushed && inPaddock(x, y) !== inPaddock(tx, ty) && !crossesPaddockDoor(x, y, tx, ty, state.gateOpen)) return false;
+    if (jackPushed && !isHardFloor(x + off.x, y + off.y)) return false;
+    return true;
+  };
   const x0 = p.x;
   const y0 = p.y;
+  const zoneBefore = floorZoneOf(b.x, b.y);
   if (ok(p.x + nx * step, p.y)) p.x += nx * step;
   if (ok(p.x, p.y + ny * step)) p.y += ny * step;
-  if (pushed) {
-    b.x = p.x + off.x;
-    b.y = p.y + off.y;
+  if (target) {
+    target.x = p.x + off.x;
+    target.y = p.y + off.y;
   }
   const moved = Math.hypot(p.x - x0, p.y - y0);
-  if (pushed) spillFromBarrow(state, moved);
+  if (barrowPushed) {
+    // Встряски тачки: резкий поворот, стык покрытий (границы зон, трапы, пороги), упор в препятствие
+    const blocked = len >= 0.01 && moved < step * 0.25;
+    const jolt = {
+      turn: turned && moved > 0.001, // резкий поворот на ходу
+      zone: floorZoneOf(b.x, b.y) !== zoneBefore || onThreshold(b.x, b.y),
+      bump: blocked && !b.stuck,
+      sprint, // спринт с грузом — тачка дребезжит сильнее
+    };
+    b.stuck = blocked;
+    spillFromBarrow(state, moved, jolt);
+  } else if (b.stuck) b.stuck = false;
   return { moving: moved > 0.001, turned };
+}
+
+function crossesPaddockDoor(x: number, y: number, tx: number, ty: number, gateOpen: boolean): boolean {
+  const crosses = (a: number, b: number, fence: number) => (a < fence) !== (b < fence);
+  const aligned = (a: number, b: number, range: { x0: number; x1: number }) =>
+    a > range.x0 + 0.3 && a < range.x1 - 0.3 && b > range.x0 + 0.3 && b < range.x1 - 0.3;
+  const upper = crosses(y, ty, MAP.fenceY);
+  const lower = crosses(y, ty, MAP.fenceY2);
+  if (upper && aligned(x, tx, MAP.door)) return true;
+  if (lower && aligned(x, tx, MAP.door2)) return true;
+  if (gateOpen && upper && aligned(x, tx, MAP.elephantGate)) return true;
+  return gateOpen && lower && aligned(x, tx, MAP.elephantGate2);
+}
+
+// Пороги дверей и сливные трапы — «неровности пола» для встряски
+function onThreshold(x: number, y: number): boolean {
+  for (const t of MAP.thresholds) {
+    if (x >= t.x0 - 0.2 && x <= t.x1 + 0.2 && Math.abs(y - t.y0) < 0.35) return true;
+  }
+  for (const id of ['drain', 'drain2'] as const) {
+    const d = MAP.stations[id];
+    if (Math.abs(x - d.x) < d.w / 2 + 0.2 && Math.abs(y - d.y) < d.h / 2 + 0.2) return true;
+  }
+  return false;
 }

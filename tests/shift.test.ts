@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { advance, createShift, type State } from '../src/sim';
 import { finishShift } from '../src/sim/handover';
 import { BALANCE } from '../src/data/balance';
-import { inPaddock } from '../src/data/map';
+import { MAP, inPaddock } from '../src/data/map';
 import { addItem, newItem } from '../src/sim/state';
 import { cleanShift, el, hold } from './helpers';
 
@@ -34,7 +34,10 @@ describe('смена и сдача', () => {
     ['inventory', (s: State): unknown => (s.items.find((i) => i.kind === 'fork')!.x += 3)],
     ['barrow', (s: State): unknown => (s.barrow.x += 3)],
     ['basins', (s: State): unknown => Object.assign(s.items.find((i) => i.kind === 'basin')!, { x: 12.6, y: 10.6 })],
-    ['dryBedding', (s: State): unknown => [0, 1, 2, 3].forEach((cx) => (s.cells[0][cx] = { kind: 'wet', since: 0 }))],
+    [
+      'dryBedding',
+      (s: State): unknown => [MAP.bedding.x, MAP.bedding.x + 1, MAP.bedding.x + 2, MAP.bedding.x + 3].forEach((cx) => (s.cells[MAP.bedding.y][cx] = { kind: 'wet', since: 0 })),
+    ],
     ['dungCleared', (s: State): unknown => s.dung.push({ id: 999, x: 5.5, y: 5.5, at: 0 })],
   ] as const)('пункт %s ловит своё нарушение и только его', (id, spoil) => {
     const s = cleanShift();
@@ -52,10 +55,8 @@ describe('смена и сдача', () => {
 
   it('смена целиком без кипера: доходит до табеля, слонихи не выходят из вольера', () => {
     const s = cleanShift(42);
-    for (let i = 0; i < 1440 * 2 && s.phase === 'shift'; i++) {
-      advance(s, 0.5);
-      for (const e of s.elephants) expect(inPaddock(e.x, e.y)).toBe(true);
-    }
+    advance(s, BALANCE.time.shiftEnd);
+    for (const e of s.elephants) expect(inPaddock(e.x, e.y)).toBe(true);
     expect(s.phase).toBe('report');
     const r = s.report!;
     expect(r.stars).toBe(1);

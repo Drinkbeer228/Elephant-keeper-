@@ -16,10 +16,11 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     phase: 'shift',
     t: 0,
     nextItemId: 1,
-    player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 } },
+    player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 }, pocketTreats: BALANCE.player.pocketStart },
     elephants: ELEPHANTS.map(createElephant),
-    cells: Array.from({ length: MAP.floor.rows }, () =>
-      Array.from({ length: MAP.floor.cols }, (_, cx) => ({ kind: groundOf(cx), since: 0 })),
+    // Сетка пола на весь мир: солома в песочных зонах, трава на лугах, бетон вне загонов
+    cells: Array.from({ length: MAP.floor.rows }, (_, cy) =>
+      Array.from({ length: MAP.floor.cols }, (_, cx) => ({ kind: groundOf(cx, cy), since: 0 })),
     ),
     dung: [],
     litter: [],
@@ -28,9 +29,26 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       kasha: { status: 'idle', readyAt: 0, portions: 0, meal: null },
       veg: { portions: 0 },
     },
+    stock: { ...BALANCE.stockStart },
     feederHay: BALANCE.food.hayStart,
     trough: 80,
     valveOpen: false,
+    feederHay2: BALANCE.food.hayStart,
+    trough2: 80,
+    valve2Open: false,
+    pools: MAP.pools.map(() => ({ dirty: 0, floats: [] })),
+    partner: {
+      x: MAP.playerStart.x + 2.5,
+      y: 26.4,
+      facing: { x: 0, y: -1 },
+      bucket: 0,
+      waste: 0,
+      mode: 'idle',
+      babbleAt: BALANCE.partner.babbleEvery,
+      timer: 2,
+      path: [],
+      pathTarget: null,
+    },
     dutyLight: false,
     lastOverflow: 0,
     gateOpen: false,
@@ -46,6 +64,16 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       balance: 0,
       parkedAt: 0,
       trail: 0,
+      stuck: false,
+      spoiled: false,
+    },
+    jack: { x: MAP.jackStart.x, y: MAP.jackStart.y, pushed: false, cargo: null },
+    supply: {
+      arrived: false,
+      left: false,
+      missed: false,
+      bays: [],
+      driver: { x: MAP.stations.unload.x + 2.2, y: MAP.stations.unload.y, wp: 0, said: false, babbleAt: 0 },
     },
     container: { fill: 0, doorClosed: false, ramp: false, truckAt: null, truckLeftAt: null },
     spareBucket: true,
@@ -75,9 +103,13 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
   addItem(state, 'scoop', spots.scoop.x, spots.scoop.y, { dirty: false });
   addItem(state, 'fork', spots.fork.x, spots.fork.y);
   addItem(state, 'broom', spots.broom.x, spots.broom.y);
+  // Длинный сачок для бассейнов — на стойке в Дежурке
+  addItem(state, 'net', spots.net.x, spots.net.y);
+  // Совковая лопата — в Опилочнике у стены
+  addItem(state, 'shovel', MAP.shovelSpot.x, MAP.shovelSpot.y);
   // Корзина для овощей — у стеллажа в кормовой
   addItem(state, 'basket', MAP.basketSpot.x, MAP.basketSpot.y);
-  // Ведро для опилок — пустое, у кучи под навесом
+  // Ведро для опилок — пустое, в Дежурке у шкафчиков
   addItem(state, 'sawdust', MAP.pailSpot.x, MAP.pailSpot.y, { charges: 0 });
   // Тазы — чистые, на стеллаже в кормовой
   MAP.basinSpots.slice(0, BALANCE.food.basins).forEach((p) => addItem(state, 'basin', p.x, p.y, { food: null, dirty: false }));
@@ -111,6 +143,7 @@ function createElephant(p: (typeof ELEPHANTS)[number]): Elephant {
     dirtyFeet: 0,
     lastCell: '',
     tally: { inBucket: 0, missed: 0, dung: 0 },
+    wetness: 0,
   };
 }
 
@@ -124,21 +157,23 @@ export function newItem(state: State, kind: Item['kind'], extra: Partial<Item> =
   return { id: state.nextItemId++, kind, x: 0, y: 0, droppedAt: state.t, ...extra };
 }
 
+// Ночная грязь в обоих загонах: мокрые клетки и кучи навоза на песке
 function addNightMess(state: State): void {
-  const b = MAP.bedding;
-  const wet = randomInt(state, 3, 5);
-  for (let i = 0; i < wet; i++) {
-    const cx = randomInt(state, 0, b.cols - 1);
-    const cy = randomInt(state, 0, b.rows - 1);
-    state.cells[cy][cx] = { kind: 'wet', since: 0 };
-  }
-  const piles = randomInt(state, 2, 3);
-  for (let i = 0; i < piles; i++) {
-    state.dung.push({
-      id: state.nextItemId++,
-      x: b.x + randomInt(state, 0, b.cols - 1) + 0.5,
-      y: b.y + randomInt(state, 0, b.rows - 1) + 0.5,
-      at: 0,
-    });
+  for (const b of [MAP.bedding, MAP.bedding2]) {
+    const wet = randomInt(state, 3, 5);
+    for (let i = 0; i < wet; i++) {
+      const cx = b.x + randomInt(state, 0, b.cols - 1);
+      const cy = b.y + randomInt(state, 0, b.rows - 1);
+      state.cells[cy][cx] = { kind: 'wet', since: 0 };
+    }
+    const piles = randomInt(state, 1, 3);
+    for (let i = 0; i < piles; i++) {
+      state.dung.push({
+        id: state.nextItemId++,
+        x: b.x + randomInt(state, 0, b.cols - 1) + 0.5,
+        y: b.y + randomInt(state, 0, b.rows - 1) + 0.5,
+        at: 0,
+      });
+    }
   }
 }

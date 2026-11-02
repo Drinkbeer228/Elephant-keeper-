@@ -18,6 +18,8 @@ export const ITEM_NAMES: Record<Item['kind'], string> = {
   hay: 'тюк сена',
   straw: 'охапка соломы',
   basket: 'корзина для овощей',
+  shovel: 'совковая лопата',
+  net: 'длинный сачок',
 };
 
 function d(a: { x: number; y: number }, b: { x: number; y: number }): number {

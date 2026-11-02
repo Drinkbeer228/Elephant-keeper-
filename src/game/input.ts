@@ -1,6 +1,6 @@
 // Клавиатура и сенсорный джойстик сводятся в один вектор движения и очередь нажатий
 
-export type Press = 'action' | 'inspect' | 'pause' | number; // число — пункт меню действия, с нуля
+export type Press = 'action' | 'interact' | 'inspect' | 'pause' | number; // число — пункт меню действия, с нуля
 
 export class Input {
   private keys = new Set<string>();
@@ -13,6 +13,7 @@ export class Input {
       const k = e.code;
       this.keys.add(k);
       if (k === 'Space') this.push('action');
+      else if (k === 'KeyE') this.push('interact');
       else if (k === 'KeyF') this.push('inspect');
       else if (k === 'KeyP' || k === 'Escape') this.push('pause');
       else if (/^(Digit|Numpad)[1-9]$/.test(k)) this.push(Number(k.slice(-1)) - 1);
@@ -50,6 +51,11 @@ export class Input {
       y = this.stick.y;
     }
     return { x, y };
+  }
+
+  // Спринт (зажатый Shift): быстрее, но с гружёной тачкой — дребезг и просыпание
+  sprint(): boolean {
+    return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
   }
 
   // Джойстик: круг, палец тянет ручку, вектор 0..1
