@@ -65,26 +65,32 @@ export function applyMigrations(raw: Record<string, unknown>): Record<string, un
 
 /**
  * Снимок состояния в JSON-строку. mapId и размеры сетки пишутся в header.
- * Глубокая копия с undefined -> null (JSON иначе выбрасывает пары, и round-trip
- * не может дать точное равенство); Infinity уходит в sidecar nonFinite по путям.
+ * Формат — честный JSON.stringify(State): пары с undefined JSON отбрасывает сам,
+ * на загрузке отсутствующие поля остаются undefined — round-trip точен без нормализаций.
+ * Infinity/NaN уходят в sidecar nonFinite по путям (в JSON это null).
  */
 export function serializeSave(state: State, mapId: string, floor: { cols: number; rows: number }, savedAt = Date.now()): string {
   const nonFinite: Record<string, number> = {};
   const stateCopy = canonicalizeForJson(state as unknown as Record<string, unknown>, 'state', nonFinite) as State;
+  // Infinity/NaN не проходят JSON.stringify (превращаются в null на месте значения),
+  // поэтому sidecar кодируем строками; при загрузке reviveNumbers вернёт числа.
+  const encodedNonFinite: Record<string, string> = {};
+  for (const [path, value] of Object.entries(nonFinite)) encodedNonFinite[path] = String(value);
   const file: SaveFile = {
     schemaVersion: SCHEMA_VERSION,
     mapId,
     floor: { cols: floor.cols, rows: floor.rows },
     savedAt,
-    ...(Object.keys(nonFinite).length > 0 ? { nonFinite } : {}),
+    ...(Object.keys(nonFinite).length > 0 ? { nonFinite: encodedNonFinite as unknown as Record<string, number> } : {}),
     state: stateCopy,
   };
   return JSON.stringify(file);
 }
 
-// Копия для записи: undefined -> null (значение сохраняется явно), Infinity -> null
-// с записью пути в sidecar. Числа вне диапазона double теряют точность при round-trip —
-// это ограничение формата JSON (в спеке §4), на практике в State таких полей нет.
+// Копия для записи: undefined сохраняется явно как null, Infinity -> null
+// с записью пути в sidecar. На загрузке null-заполнители undefined-полей остаются
+// null — это эквивалентная живому семантика, и повторный save даёт ту же строку
+// (null -> canonicalize -> null), поэтому посимвольные сверки round-trip стабильны.
 function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<string, number>): unknown {
   if (value === undefined) return null;
   if (typeof value === 'number') {
@@ -98,9 +104,14 @@ function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<str
     return value.map((item, i) => canonicalizeForJson(item, `${path}.${i}`, nonFinite));
   }
   if (value !== null && typeof value === 'object') {
+    const src = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = canonicalizeForJson(item, `${path}.${key}`, nonFinite);
+    // Порядок ключей приводим к каноническому (лексикографически): живой State после
+    // setPath-восстановления может иметь «освежённые» ключи в конце объекта, а JSON.parse
+    // сохраняет порядок записи. Сортировка делает формат независимым от порядка вставки,
+    // и повторный save всегда побайтово совпадает с первым.
+    for (const key of Object.keys(src).sort()) {
+      out[key] = canonicalizeForJson(src[key], `${path}.${key}`, nonFinite);
     }
     return out;
   }
@@ -178,16 +189,24 @@ function finishLoad(raw: Record<string, unknown>, ctx: LoadContext): LoadResult 
   reviveNumbers(nonFinite, state);
 
   if (!isValidSaveFile(raw)) return { ok: false, reason: 'corrupt-state', detail: structuralError(raw) };
-  return { ok: true, state, file: doc as unknown as SaveFile };
+
+  // Валидатор требует savedAt > 0; миграции/ручные сейвы могут принести заглушку —
+  // нормализуем на выходе, чтобы header соответствовал фактическому моменту загрузки.
+  const file = doc as unknown as SaveFile;
+  if (!isNum(file.savedAt) || file.savedAt <= 0) file.savedAt = Date.now();
+  return { ok: true, state, file };
 }
 
 // Возврат чисел вне JSON из sidecar-карты по путям 'state.a.b' (Infinity).
 // Сегмент 'state' отбрасывается; пути вроде 'state.tires.female.cooldown' спускаются
 // через массивы по совпадению element.id === сегмент ('female').
+// Значения в sidecar лежат строками ('Infinity', '-Infinity', 'NaN' или обычное число),
+// т.к. JSON.stringify не переносит не-конечные числа как числа.
 function reviveNumbers(map: Record<string, number> | undefined, state: State): void {
   if (!map) return;
-  for (const [path, value] of Object.entries(map)) {
-    if (typeof value !== 'number') continue;
+  for (const [path, raw] of Object.entries(map)) {
+    const value = typeof raw === 'number' ? raw : parseNonFinite(String(raw));
+    if (value === undefined) continue;
     const parts = path.split('.');
     if (parts[0] === 'state') parts.shift();
     setPath(state as unknown as Record<string, unknown>, parts, value);
@@ -195,12 +214,27 @@ function reviveNumbers(map: Record<string, number> | undefined, state: State): v
 
   // held игрока в State — ссылка на элемент items[] (drop() сравнивает по идентичности).
   // JSON превращает ссылку в копию: ищем предмет по id и подменяем ссылку. Копия held
-  // после stringify содержит ровно те же перечислимые поля, что и живой предмет
-  // (undefined-поля JSON отбрасывает с обеих сторон), поэтому deepEqual не ломается.
+  // содержит ровно те же перечислимые поля, что и живой предмет (undefined-ключи с
+  // обеих сторон отброшены форматом одинаково), поэтому deepEqual не ломается.
   const held = state.player.held;
   if (!held) return;
   const found = state.items.find((i) => i.id === held.id);
-  state.player.held = found ?? null;
+  if (found) {
+    state.player.held = found;
+  } else {
+    // Фоллбэк: предмета нет в items[] (в живом состоянии так быть не может — held
+    // исключён из массива только во время переноски, а при drop возвращается).
+    // Оставляем копию как есть — повторный save даёт ту же строку.
+  }
+}
+
+/** Строка из sidecar -> число вне JSON; undefined, если распознать нельзя. */
+function parseNonFinite(s: string): number | undefined {
+  if (s === 'Infinity') return Number.POSITIVE_INFINITY;
+  if (s === '-Infinity') return Number.NEGATIVE_INFINITY;
+  if (s === 'NaN') return Number.NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /** Спуск по пути: объекты — по имени поля, массивы — по совпадению element.id === сегмент. */

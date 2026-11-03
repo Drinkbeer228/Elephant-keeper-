@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-// Формат сейва кодирует отсутствующие значения как null (§4 спеки), поэтому перед
-// сравнением приводим живой оригинал к той же канонической форме: undefined -> null.
+// Строка состояния в канонической форме записи (undefined -> null, ключи
+// лексикографически) — для посимвольных сверок round-trip. Порядок ключей в живом
+// State зависит от истории присваиваний, поэтому эталон строим через serializeSave:
+// он приводит обе стороны к одному канону.
 function canon<T>(v: T): T {
   return JSON.parse(JSON.stringify(v, (_k, val) => (val === undefined ? null : val))) as T;
 }
@@ -12,9 +14,8 @@ import { cleanShift, el } from './helpers';
 
 const ctx = (): LoadContext => ({ mapId: MAP_ID, cols: MAP.floor.cols, rows: MAP.floor.rows });
 
-// Строка состояния в канонической форме записи (undefined -> null) — для посимвольных сверок
 function canonStr(s: State): string {
-  return JSON.stringify(JSON.parse(JSON.stringify(s, (_k, v) => (v === undefined ? null : v))));
+  return serializeSave(s, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows });
 }
 
 // Прогон смены на несколько игровых часов с командами движения — состояние «оживает»:
@@ -97,13 +98,18 @@ describe('save/load: round-trip', () => {
   });
 
   it('Infinity в musthNextAt проходит через null и восстанавливается', () => {
+    // Детерминированно: чистое состояние + «никогда» вручную. createShift всегда
+    // планирует первое событие (musthEventsRemaining >= 1), поэтому гадать по сидам
+    // нельзя — ставим значение явно и проверяем полный путь sidecar -> Infinity.
     const s = cleanShift(9);
-    // cleanShift обнуляет разовые события, но createShift всегда планирует первый —
-    // снимаем его вручную, чтобы получить «дежурное» значение Infinity
     s.musthEventsRemaining = 0;
     s.musthNextAt = Number.POSITIVE_INFINITY;
     expect(Number.isFinite(s.musthNextAt)).toBe(false);
-    const res = loadStateFromSave(serializeSave(s, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows }), ctx());
+    const json = serializeSave(s, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows });
+    // В state-части поле лежит как null, настоящее значение — в sidecar nonFinite
+    const file = JSON.parse(json) as { nonFinite?: Record<string, number>; state: { musthNextAt: unknown } };
+    expect(file.state.musthNextAt).toBeNull();
+    const res = loadStateFromSave(json, ctx());
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.state.musthNextAt).toBe(Number.POSITIVE_INFINITY);
