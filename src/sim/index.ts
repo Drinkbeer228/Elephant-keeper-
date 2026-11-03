@@ -8,4 +8,19 @@ export { stinkSources, type Report } from './handover';
 export { takeStock, takeStockUpTo, giveStock, STOCK_LABELS, type StockKind } from './stock';
 // Публичный API предметов: UI не импортирует внутренние модули sim напрямую
 export { basinsOnRack, ITEM_NAMES, reachableItems } from './items';
+// Save/Load: формат, сериализация, валидация (UI/game подставляют mapId и размер сетки)
+export {
+  SCHEMA_VERSION,
+  MAP_IDS,
+  serializeSave,
+  parseSave,
+  loadStateFromSave,
+  isValidSaveFile,
+  applyMigrations,
+  isStateSerializable,
+  type SaveFile,
+  type LoadContext,
+  type LoadResult,
+  type SaveRejectReason,
+} from './save';
 export type * from './types';

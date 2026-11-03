@@ -448,6 +448,8 @@ const LEGACY_MAP = {
 
 const useLegacyMap = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('map') !== 'new';
 export const MAP = useLegacyMap ? LEGACY_MAP : MODERN_MAP;
+// Идентификатор карты для header сейва: загрузка чужого сейва блокируется в sim/save.ts
+export const MAP_ID: 'modern' | 'legacy' = useLegacyMap ? 'legacy' : 'modern';
 export const COMPLEXES: Record<ComplexId, typeof FEMALE> = MAP.complexes;
 export const PADDOCKS = (Object.entries(COMPLEXES) as [ComplexId, typeof FEMALE][]).map(([id, complex]) => ({
   ...complex.bounds,
