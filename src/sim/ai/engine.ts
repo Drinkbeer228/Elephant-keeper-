@@ -140,15 +140,20 @@ export function applyIntent(
   if (toDef?.enter) toDef.enter(ctxFor(e));
 }
 
+/** Глубина цепочки переходов внутри одного подшага: сменил состояние → сразу
+ * делается первый шаг в новом (старая семантика switch). Дальше — нельзя:
+ * жёсткий лимит исключает и расхождение с эталоном, и бесконечные циклы. */
+const MAX_TRANSITION_DEPTH = 2;
+
 /**
  * Один подшаг слона через движок: tick узла (delegate в rules), при отсутствии
  * намерения — явные transitions, затем fallback по истечении timer.
  *
- * Семантика инкремента 2 («перенос 1-в-1»): tick-функции в rules — это исходные
- * кейсы старого switch, они мутируют слона сами (decide/arrive/pee/walkTo) и
- * возвращают 'self'. Движок НЕ повторяет тики в одном подшаге — ровно как старый
- * код: одно обращение к слону за подшаг. Цепочка «проснулся → idle → решил → walk»
- * растянута по подшагам так же, как в эталоне (golden-трассировка).
+ * Контракт переходов — bounded chain (глубина ≤ MAX_TRANSITION_DEPTH): если тик
+ * или переход сменил состояние, новый узел тут же получает свой первый шаг в этом
+ * же подшаге — ровно как старый switch, где timer→decide→walkTo происходил одним
+ * махом. Цепочка короче лимита не отличается от одиночного прохода, длиннее —
+ * невозможна: после второго перехода подшаг завершается. Проверка tests/fsm.test.ts.
  * transitions/fallback остаются доступными для декларативных узлов будущих
  * инкрементов (ассессмент, прерывания) — сейчас реестр их не объявляет.
  */
@@ -159,32 +164,46 @@ export function stepElephant(
   e: Elephant,
   now: number,
 ): void {
-  const def = registry.defs[e.state];
-  if (!def) return;
-  const fsm = ensureFsm(e);
-  fsm.pendingFrom = e.state; // чтобы ветка 'self' увидела, менял ли делегат состояние
-  const intent = def.tick ? behavior.tick(ctx, e, def) : null;
-  if (intent) {
-    applyIntent(registry, behavior, ctx.state, e, intent, now);
-    return;
-  }
-  // Ранний выход: если тик (или arrive внутри него) уже сменил состояние,
-  // дальнейшие transitions/fallback этого тика применять нельзя — ровно как
-  // в старом switch, где смена состояния прекращала выполнение ветки кейса.
-  if (e.state !== fsm.pendingFrom) {
+  for (let depth = 0; depth < MAX_TRANSITION_DEPTH; depth++) {
+    const def = registry.defs[e.state];
+    if (!def) return;
+    const fsm = ensureFsm(e);
+    const prevState = e.state;
+    fsm.pendingFrom = prevState; // чтобы ветка 'self' увидела, менял ли делегат состояние
+    const intent = def.tick ? behavior.tick(ctx, e, def) : null;
+    if (intent) {
+      applyIntent(registry, behavior, ctx.state, e, intent, now);
+      // Служебный 'self' без смены состояния — подшаг закончен (как старый break).
+      // Если узел не объявлен в реестре (внешний переход), chain не продолжается.
+      if (e.state === prevState || !registry.defs[e.state]) return;
+      continue; // bounded chain: новый узел делает первый шаг в этом же подшаге
+    }
+    // Ранний выход: если тик (или arrive внутри него) уже сменил состояние,
+    // дальнейшие transitions/fallback этого тика применять нельзя — ровно как
+    // в старом switch, где смена состояния прекращала выполнение ветки кейса.
+    // Но сам переход даёт новому узлу первый шаг — в пределах глубины цепочки.
+    if (e.state !== prevState) {
+      fsm.pendingFrom = undefined;
+      if (!registry.defs[e.state]) return;
+      continue;
+    }
     fsm.pendingFrom = undefined;
-    return;
-  }
-  fsm.pendingFrom = undefined;
-  if (def.transitions) {
-    for (const tr of def.transitions) {
-      if (tr.when(ctxFor(e))) {
-        applyIntent(registry, behavior, ctx.state, e, typeof tr.to === 'function' ? tr.to() : tr.to, now);
-        return;
+    if (def.transitions) {
+      for (const tr of def.transitions) {
+        if (tr.when(ctxFor(e))) {
+          applyIntent(registry, behavior, ctx.state, e, typeof tr.to === 'function' ? tr.to() : tr.to, now);
+          if (e.state === prevState || !registry.defs[e.state]) return;
+          continue;
+        }
       }
     }
+    if (def.fallback && e.timer <= 0) {
+      applyIntent(registry, behavior, ctx.state, e, def.fallback(), now);
+      if (e.state === prevState || !registry.defs[e.state]) return;
+      continue;
+    }
+    return; // состояние не изменилось — цепочка завершена
   }
-  if (def.fallback && e.timer <= 0) applyIntent(registry, behavior, ctx.state, e, def.fallback(), now);
 }
 
 /** Совместимость со старым вызовом: одиночный проход без chain-повтора. */
