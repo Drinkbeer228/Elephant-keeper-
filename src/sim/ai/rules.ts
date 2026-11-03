@@ -96,7 +96,8 @@ export function temperamentOf(_profile: ElephantProfile): Temperament {
 
 export interface SimBridge {
   profileOf(e: Elephant): ElephantProfile;
-  walkTick(s: State, e: Elephant, dtReal: number): void;
+  /** Возвращает true, если по прибытии сработал внешний переход (arrive сменил узел). */
+  walkTick(s: State, e: Elephant, dtReal: number): boolean;
   signalTick(s: State, e: Elephant, dt: number): Intent | null; // общий для signal/walkCommand
   batheTick(s: State, e: Elephant, dt: number): Intent | null;
   scratchTick(s: State, e: Elephant, dt: number): Intent | null;
@@ -152,10 +153,11 @@ export const elephantBehavior: AiBehavior = {
   tick(ctx: TickCtx, e) {
     const s = ctx.state as State;
     if (e.state === 'walk') {
-      // walkTick сам делает и движение, и arrive по прибытии (arrive может
-      // вернуть 'self' — тогда новый узел уже выставлен, подшаг закрыт)
-      B().walkTick(s, e, ctx.dtReal);
-      return null;
+      // walkTick сам делает и движение, и arrive по прибытии. Если arrive
+      // сменил узел — возвращаем 'self': движок учтёт переход (fsm.last/
+      // transitions/since/priority/commit) и завершит подшаг, не перетикая
+      // новый узел в том же подшаге — ровно как старый switch.
+      return B().walkTick(s, e, ctx.dtReal) ? { target: 'self' } : null;
     }
     return TICKS[e.state]?.(s, e, ctx.dt) ?? null;
   },

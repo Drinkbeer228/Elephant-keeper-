@@ -174,7 +174,7 @@ registerSimBridge({
       if (!path.length) {
         e.state = 'idle';
         e.timer = 1;
-        return;
+        return true; // смена узла: движок учтёт переход и завершит подшаг
       }
       waypoint = path[0];
     }
@@ -186,7 +186,11 @@ registerSimBridge({
     if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
     if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
     // Прибытие — внешний переход по e.next: arrive сам решает, во что войти
-    if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) arrive(state, e, p);
+    if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) {
+      arrive(state, e, p);
+      return e.state !== 'walk';
+    }
+    return false;
   },
   signalTick(state, e, dt) {
     e.timer -= dt;
