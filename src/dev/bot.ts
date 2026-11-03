@@ -11,7 +11,7 @@ import { profileOf, bucketUnder } from '../sim/elephants';
 import { allServedDinner, kashaDue, mealTime } from '../sim/feeding';
 import { isDark } from '../sim/clock';
 import { sawdustAbsorbed } from '../sim/floor';
-import { ITEM_NAMES, basinsOnRack } from '../sim/items';
+import { ITEM_NAMES, basinsOnRack } from '../sim';
 import { STOCK_LABELS } from '../sim/stock';
 import { deliveryAccessOpen, supplyOpen } from '../sim/truck';
 import type { CargoUnit, Elephant, Item } from '../sim/types';

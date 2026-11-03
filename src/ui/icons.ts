@@ -1,14 +1,37 @@
-import type { Item } from '../sim';
-import { itemUrl, portraitUrl } from '../game/textures';
+import type { Item, Prep } from '../sim';
 
-// Иконки интерфейса: те же пиксельные спрайты, что в мире, плюс пиксельные значки
+// Иконки интерфейса: те же пиксельные спрайты, что в мире, плюс пиксельные значки.
+// Ссылки на спрайты подставляет игра (src/game/textures) через setSpriteSources —
+// так UI-слой не зависит от игрового рендера и остаётся переносимым.
+
+type SpriteSources = {
+  itemUrl: (item: Item) => string;
+  portraitUrl: (id: string) => string;
+  vegUrl: (piece: Prep['pieces'][number]) => string;
+  barrowUrl: () => string;
+};
+
+const NO_SOURCE = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+let sources: SpriteSources | null = null;
+
+export function setSpriteSources(s: SpriteSources): void {
+  sources = s;
+}
 
 export function itemIcon(item: Item): string {
-  return itemUrl(item);
+  return sources ? sources.itemUrl(item) : NO_SOURCE;
 }
 
 export function portraitIcon(id: string): string {
-  return portraitUrl(id);
+  return sources ? sources.portraitUrl(id) : NO_SOURCE;
+}
+
+export function vegIcon(piece: Prep['pieces'][number]): string {
+  return sources ? sources.vegUrl(piece) : NO_SOURCE;
+}
+
+export function barrowIcon(): string {
+  return sources ? sources.barrowUrl() : NO_SOURCE;
 }
 
 // Значки на сетке 8×8: каждая клетка — один «пиксель»

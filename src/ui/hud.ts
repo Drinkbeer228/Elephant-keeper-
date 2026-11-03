@@ -1,12 +1,10 @@
 import { WHY } from '../data/why';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
-import { barrowSummary, clockText, dayPart, itemLabel, profileOf, type ActionOption, type ShiftEvent, type State } from '../sim';
+import { barrowSummary, basinsOnRack, clockText, dayPart, itemLabel, profileOf, type ActionOption, type ShiftEvent, type State } from '../sim';
 import type { Input } from '../game/input';
 import { renderReport } from './report';
-import { ICON, itemIcon, portraitIcon } from './icons';
-import { barrowUrl, vegUrl } from '../game/textures';
-import { basinsOnRack } from '../sim/items';
+import { ICON, barrowIcon, itemIcon, portraitIcon, vegIcon } from './icons';
 
 // Интерфейс поверх canvas: часы, слонихи, ресурсы, подсказка действия, лента событий, чек-лист, кнопки
 
@@ -223,7 +221,7 @@ export class Hud {
     if (key === this.prepKey) return;
     this.prepKey = key;
     this.els.prepTitle.textContent = `Чистка: ${VEG_TITLES[piece.kind]} (${prep.index + 1}/3) · осталось ${this.uncut.length}`;
-    (this.els.prepImg as HTMLImageElement).src = vegUrl(piece);
+    (this.els.prepImg as HTMLImageElement).src = vegIcon(piece);
     this.els.prepSpots.innerHTML = piece.spots
       .map((p, i) =>
         p.cut
@@ -356,7 +354,7 @@ export class Hud {
       this.els.held.innerHTML = s.jack.pushed
         ? `<span>Рохля: <b>${s.jack.cargo ? 'поддон с грузом' : 'пустая'}</b></span>`
         : s.barrow.pushed
-          ? `<img src="${barrowUrl()}" alt=""><span>Тачка: <b>${barrowSummary(s)}</b></span>`
+          ? `<img src="${barrowIcon()}" alt=""><span>Тачка: <b>${barrowSummary(s)}</b></span>`
         : s.player.held
           ? `<img src="${itemIcon(s.player.held)}" alt=""><span>В руках: <b>${itemLabel(s.player.held)}</b></span>`
           : `<span class="muted">Руки свободны</span>`;
