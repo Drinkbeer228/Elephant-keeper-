@@ -1,12 +1,16 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
 import { MAP, inPaddock, inReachZone } from '../data/map';
+import { attachRegistry, ensureFsm, stepElephant } from './ai/engine';
+import { elephantBehavior, registerSimBridge } from './ai/rules';
+import { ELEPHANT_AI_REGISTRY } from './ai/states';
 import { isNight } from './clock';
 import { emit, hint } from './events';
 import { cellAt, footHarm, isWet, wetAround } from './floor';
 import { chance, randomRange } from './rng';
 import { takeStock } from './stock';
 import { isOutdoorWalkable, routeForAnimal } from './nav';
+import type { Intent } from './ai/types';
 import type { Elephant, ElephantState, Item, State } from './types';
 
 const E = BALANCE.elephant;
@@ -71,7 +75,11 @@ function drinkTrough(state: State, e: Elephant, amount: number): void {
   else state.trough2 = Math.max(0, state.trough2 - amount);
 }
 
+// Единственная точка входа слонов в симуляцию: её вызывает stepSim (tick.ts) на каждом
+// подшаге — и game-loop через tick(), и «перемотка» через advance(). Здесь же подключается
+// FSM-мост: до registerSimBridge движок не знает tick-функции состояний и молчит.
 export function updateElephants(state: State, dt: number, dtReal: number): void {
+  attachFsmBridge();
   startMusthEvents(state);
   for (const e of state.elephants) updateOne(state, e, dt, dtReal);
 }
@@ -88,6 +96,7 @@ function startMusthEvents(state: State): void {
 }
 
 function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void {
+  ensureFsm(e); // FSM-учёт (since/transitions) создаётся на первом же тике слона
   const p = profileOf(e);
   const night = isNight(state);
   const f = night ? E.nightNeedsFactor : 1;
@@ -133,112 +142,164 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     }
   }
 
-  switch (e.state) {
-    case 'walk': {
-      const step = E.speed * dtReal;
-      let waypoint = { x: e.tx, y: e.ty };
-      const length = Math.hypot(e.tx - e.x, e.ty - e.y);
-      const samples = Math.ceil(length / 0.25);
-      const blockedDirectly = Array.from({ length: samples }, (_, i) => i + 1).some((i) =>
-        !isOutdoorWalkable(e.x + ((e.tx - e.x) * i) / samples, e.y + ((e.ty - e.y) * i) / samples, p.paddock, state.gates),
-      );
-      if (blockedDirectly) {
-        const path = routeForAnimal(e, waypoint, p.paddock, state.gates);
-        if (!path.length) {
-          e.state = 'idle';
-          e.timer = 1;
-          break;
-        }
-        waypoint = path[0];
-      }
-      const wx = waypoint.x - e.x;
-      const wy = waypoint.y - e.y;
-      const wd = Math.hypot(wx, wy);
-      const nx = wd <= step ? wx : (wx / wd) * step;
-      const ny = wd <= step ? wy : (wy / wd) * step;
-      if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
-      if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
-      if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) arrive(state, e, p);
-      break;
-    }
-    case 'signal':
-    case 'walkCommand':
-      e.timer -= dt;
-      if (e.timer <= 0) pee(state, e);
-      break;
-    case 'bathe': {
-      // Купание: намокает, остывает от жары и скуки; в мутной воде — вредит ногам
-      const pool = e.pool ?? 0;
-      const ps = state.pools[pool];
-      e.wetness = Math.min(100, e.wetness + BALANCE.pool.wetPerMinute * dt);
-      e.boredom = clamp(e.boredom + (meadowUnpleasant(state, e) || ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
-      if (ps.dirty >= BALANCE.pool.murkDirt) e.footDebt += BALANCE.pool.dirtyHarm * dt;
-      ps.dirty = Math.min(100, ps.dirty + dt * 0.15);
-      if (chance(state, BALANCE.pool.poopChance * dt)) {
-        // Сходил прямо в воду: плавает, вода мутнеет
-        ps.dirty = Math.min(100, ps.dirty + BALANCE.pool.poopDirt);
-        ps.floats.push({ id: state.nextItemId++, x: e.x + randomRange(state, -0.8, 0.8), y: e.y + randomRange(state, -0.8, 0.8) });
-        emit(state, { kind: 'bad', text: `${p.name} сходил в бассейн — вода мутная, нужен сачок.` });
-      }
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
-      break;
-    }
-    case 'scratch':
-      e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
-      break;
-    case 'play': {
-      e.timer -= dt;
-      if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
-      if (e.timer <= 0) decide(state, e);
-      break;
-    }
-    case 'eatHay': {
-      const hay = feederHayOf(state, e);
-      const eat = Math.min(E.hayFeederPerMinute * dt, hay);
-      if (profileOf(e).paddock === 'female') state.feederHay -= eat;
-      else state.feederHay2 -= eat;
-      const before = e.hunger;
-      e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
-      e.bowel += (before - e.hunger) * E.eatToBowel;
-      e.boredom = clamp(e.boredom - 0.1 * dt);
-      e.timer -= dt;
-      if (e.timer <= 0 || e.hunger < 5 || hay <= 0) decide(state, e);
-      break;
-    }
-    case 'drink': {
-      const before = e.thirst;
-      e.thirst = clamp(e.thirst - E.drinkPerMinute * dt);
-      e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
-      drinkTrough(state, e, E.troughPerMinute * dt);
-      e.timer -= dt;
-      const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
-      if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
-      break;
-    }
-    case 'eatBasin': {
-      e.timer -= dt;
-      if (e.timer <= 0) finishBasin(state, e, p);
-      break;
-    }
-    case 'sway':
-      e.timer -= dt;
-      if (e.timer <= 0 || e.boredom < 50) decide(state, e);
-      break;
-    case 'sleep':
-      e.timer -= dt;
-      if (e.timer <= 0) {
-        // Проснулся: короткое бодрствование, потом снова решает
+  // FSM-движок (инкремент 2): единственный исполнитель поведенческого тика слона —
+  // старого switch в updateOne больше нет. Tick-функции узлов — исходные кейсы
+  // switch (см. мост ниже): та же арифметика таймеров, те же вызовы decide/arrive/pee
+  // в том же порядке RNG. Цепочка переходов внутри подшага ограничена глубиной 2
+  // (engine.ts: MAX_TRANSITION_DEPTH) — как старый код, где timer→decide→walkTo
+  // происходил одним махом, и без риска бесконечного цикла (проверка tests/fsm.test.ts).
+  stepElephant(ELEPHANT_AI_REGISTRY, elephantBehavior, { state, dt, dtReal }, e, state.t);
+}
+
+// Возвращает 'self': старый кейс сам выставил e.state/e.timer напрямую (decide/pee/
+// finishBasin). Движок сверяет учёт fsm-метаданных по факту смены узла; если состояние
+// изменилось — новый узел получает первый шаг в этом же подшаге (bounded chain ≤ 2),
+// если нет — подшаг завершён.
+function afterDecide(): Intent {
+  return { target: 'self' };
+}
+
+// ----------------------------------------------------------------------------
+// Мост sim → ai (реестр FSM). Tick-функции ниже — исходное поведение из
+// старого switch updateOne, перенесено без единой правки логики; диспетчер
+// прерываний к этому циклу ещё НЕ подключён (инкремент 4).
+//
+// Регистрация отложена до первого updateElephants и однократна: tick-функции
+// объявлены в этом модуле и обращаются к его функциям (arrive/pee/decide) через
+// замыкания, поэтому в момент вызова они гарантированно инициализированы.
+// Модульная инициализация этого делать не может: при загрузке тестов порядок
+// импортов таков, что stepSim/tick уже вызывает updateElephants раньше, чем
+// выполняется хвост этого файла, — мост оставался пустым и движок молчал.
+// ----------------------------------------------------------------------------
+
+let bridgeAttached = false;
+
+function attachFsmBridge(): void {
+  if (bridgeAttached) return;
+  bridgeAttached = true;
+  attachRegistry(ELEPHANT_AI_REGISTRY);
+  registerSimBridge({
+  profileOf,
+  walkTick(state, e, dtReal) {
+    const p = profileOf(e);
+    const step = E.speed * dtReal;
+    let waypoint = { x: e.tx, y: e.ty };
+    const length = Math.hypot(e.tx - e.x, e.ty - e.y);
+    const samples = Math.ceil(length / 0.25);
+    const blockedDirectly = Array.from({ length: samples }, (_, i) => i + 1).some((i) =>
+      !isOutdoorWalkable(e.x + ((e.tx - e.x) * i) / samples, e.y + ((e.ty - e.y) * i) / samples, p.paddock, state.gates),
+    );
+    if (blockedDirectly) {
+      const path = routeForAnimal(e, waypoint, p.paddock, state.gates);
+      if (!path.length) {
         e.state = 'idle';
-        e.timer = randomRange(state, 15, 30);
+        e.timer = 1;
+        return true; // смена узла: движок учтёт переход и завершит подшаг
       }
-      break;
-    default:
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
-  }
+      waypoint = path[0];
+    }
+    const wx = waypoint.x - e.x;
+    const wy = waypoint.y - e.y;
+    const wd = Math.hypot(wx, wy);
+    const nx = wd <= step ? wx : (wx / wd) * step;
+    const ny = wd <= step ? wy : (wy / wd) * step;
+    if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
+    if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
+    // Прибытие — внешний переход по e.next: arrive сам решает, во что войти
+    if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) {
+      arrive(state, e, p);
+      return e.state !== 'walk';
+    }
+    return false;
+  },
+  signalTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) pee(state, e);
+    return afterDecide();
+  },
+  batheTick(state, e, dt) {
+    // Купание: намокает, остывает от жары и скуки; в мутной воде — вредит ногам
+    const p = profileOf(e);
+    const pool = e.pool ?? 0;
+    const ps = state.pools[pool];
+    e.wetness = Math.min(100, e.wetness + BALANCE.pool.wetPerMinute * dt);
+    e.boredom = clamp(e.boredom + (meadowUnpleasant(state, e) || ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
+    if (ps.dirty >= BALANCE.pool.murkDirt) e.footDebt += BALANCE.pool.dirtyHarm * dt;
+    ps.dirty = Math.min(100, ps.dirty + dt * 0.15);
+    if (chance(state, BALANCE.pool.poopChance * dt)) {
+      // Сходил прямо в воду: плавает, вода мутнеет
+      ps.dirty = Math.min(100, ps.dirty + BALANCE.pool.poopDirt);
+      ps.floats.push({ id: state.nextItemId++, x: e.x + randomRange(state, -0.8, 0.8), y: e.y + randomRange(state, -0.8, 0.8) });
+      emit(state, { kind: 'bad', text: `${p.name} сходил в бассейн — вода мутная, нужен сачок.` });
+    }
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+    return afterDecide();
+  },
+  scratchTick(state, e, dt) {
+    e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+    return afterDecide();
+  },
+  playTick(state, e, dt) {
+    e.timer -= dt;
+    if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
+    if (e.timer <= 0) decide(state, e);
+    return afterDecide();
+  },
+  eatHayTick(state, e, dt) {
+    const hay = feederHayOf(state, e);
+    const eat = Math.min(E.hayFeederPerMinute * dt, hay);
+    if (profileOf(e).paddock === 'female') state.feederHay -= eat;
+    else state.feederHay2 -= eat;
+    const before = e.hunger;
+    e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
+    e.bowel += (before - e.hunger) * E.eatToBowel;
+    e.boredom = clamp(e.boredom - 0.1 * dt);
+    e.timer -= dt;
+    if (e.timer <= 0 || e.hunger < 5 || hay <= 0) decide(state, e);
+    return afterDecide();
+  },
+  drinkTick(state, e, dt) {
+    const before = e.thirst;
+    e.thirst = clamp(e.thirst - E.drinkPerMinute * dt);
+    e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
+    drinkTrough(state, e, E.troughPerMinute * dt);
+    e.timer -= dt;
+    const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
+    if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
+    return afterDecide();
+  },
+  basinTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) finishBasin(state, e, profileOf(e));
+    return afterDecide();
+  },
+  sleepTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) {
+      // Проснулся: короткое бодрствование, потом снова решает
+      e.state = 'idle';
+      e.timer = randomRange(state, 15, 30);
+    }
+    return afterDecide();
+  },
+  idleTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+    return afterDecide();
+  },
+  swayTick(state, e, dt) {
+    // Старый кейс sway: выход по скуке < 50 раньше истечения timer
+    e.timer -= dt;
+    if (e.timer <= 0 || e.boredom < 50) decide(state, e);
+    return afterDecide();
+  },
+  arriveNow(state, e) {
+    arrive(state, e, profileOf(e));
+  },
+  });
 }
 
 // Свежий навоз слоны обходят. Залежавшийся — затаптывают и разносят следами по подстилке.
