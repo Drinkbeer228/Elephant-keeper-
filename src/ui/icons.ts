@@ -18,20 +18,39 @@ export function setSpriteSources(s: SpriteSources): void {
   sources = s;
 }
 
+// Кэш data URL: toDataURL на каждый кадр рисовал canvas и кодировал base64 —
+// интерфейс подвисал. Генерируем ссылку один раз на вариант спрайта.
+const memo = new Map<string, string>();
+function cached(key: string, make: () => string): string {
+  let v = memo.get(key);
+  if (!v) {
+    v = make();
+    memo.set(key, v);
+  }
+  return v;
+}
+
 export function itemIcon(item: Item): string {
-  return sources ? sources.itemUrl(item) : NO_SOURCE;
+  if (!sources) return NO_SOURCE;
+  const key = `${item.kind}:${item.liters ?? 0}:${item.dirty ? 1 : 0}:${item.food ?? ''}:${item.nested?.length ?? 0}:${item.load ?? 0}:${item.fill ?? 0}:${item.charges ? 1 : 0}:${item.veg ?? ''}`;
+  return cached(`i:${key}`, () => sources!.itemUrl(item));
 }
 
 export function portraitIcon(id: string): string {
-  return sources ? sources.portraitUrl(id) : NO_SOURCE;
+  if (!sources) return NO_SOURCE;
+  return cached(`p:${id}`, () => sources!.portraitUrl(id));
 }
 
 export function vegIcon(piece: Prep['pieces'][number]): string {
-  return sources ? sources.vegUrl(piece) : NO_SOURCE;
+  if (!sources) return NO_SOURCE;
+  // Рисунок зависит от того, какие пятна уже срезаны
+  const key = `${piece.kind}:${piece.spots.map((s) => (s.cut ? 1 : 0)).join('')}`;
+  return cached(`v:${key}`, () => sources!.vegUrl(piece));
 }
 
 export function barrowIcon(): string {
-  return sources ? sources.barrowUrl() : NO_SOURCE;
+  if (!sources) return NO_SOURCE;
+  return cached('b', () => sources!.barrowUrl());
 }
 
 // Значки на сетке 8×8: каждая клетка — один «пиксель»
