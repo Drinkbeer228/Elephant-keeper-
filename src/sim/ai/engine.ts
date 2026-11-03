@@ -38,10 +38,19 @@ export function getRegistry(): AiRegistry | undefined {
   return activeRegistry ?? undefined;
 }
 
+/** Контекст тика: state — это State симуляции, dt/dtReal — шаг текущего подшага. */
+export interface TickCtx {
+  state: unknown;
+  /** Игровые минуты текущего подшага (state.aiDt). */
+  dt: number;
+  /** Реальные секунды текущего подшага (state.aiDtReal) — нужны для скорости шага walk. */
+  dtReal: number;
+}
+
 /** Вызовы поведения делегируются в rules.ts (там живут ссылки на симуляцию). */
 export interface AiBehavior {
   enter(state: unknown, e: Elephant, intent: Intent): void;
-  tick(state: unknown, e: Elephant, def: AiStateDef): Intent | null;
+  tick(ctx: TickCtx, e: Elephant, def: AiStateDef): Intent | null;
 }
 
 export function ensureFsm(e: Elephant): NonNullable<Elephant['fsm']> {
@@ -71,6 +80,10 @@ export function canInterrupt(defs: Record<ElephantState, AiStateDef>, e: Elephan
 /**
  * Применить намерение: exit старого узла → смена состояния → цели/next → enter нового узла.
  * now — игровое время для учёта fsm.since/committedUntil.
+ * Возвращает true, если состояние СМЕНИЛОСЬ (или цель — 'walk': её задаёт bridge),
+ * false если переход остался внутри текущего узла ('self') — тогда узел продолжает
+ * тикать в этом же подшаге. Так один шаг движка воспроизводит цепочки старых switch
+ * (timer→decide→walkTo, arrive→decide и т.д.) без изменения порядка вызовов RNG.
  */
 export function applyIntent(
   registry: AiRegistry,
@@ -79,7 +92,8 @@ export function applyIntent(
   e: Elephant,
   intent: Intent,
   now: number,
-): void {
+): boolean {
+  if (intent.target === 'self') return false; // узел сам обновил таймеры — остаёмся в нём
   const defs = registry.defs;
   const from = e.state;
   const fromDef = defs[from];
@@ -97,7 +111,7 @@ export function applyIntent(
 
   e.state = target;
   if (target === 'walk') {
-    // Цели walk задаёт rules (там же, где раньше был walkTo); engine только помечает занятие
+    // Цели walk задаёт rules/bridge (там же, где раньше был walkTo); engine только помечает занятие
     e.next = intent.next ?? 'idle';
   } else {
     e.next = 'idle';
@@ -107,13 +121,43 @@ export function applyIntent(
   behavior.enter(state, e, intent);
   const toDef = defs[target];
   if (toDef?.enter) toDef.enter(ctxFor(e));
+  return true;
 }
 
 /**
- * Тик состояния через движок: поведение узла (delegate в rules), затем
- * явные transitions, затем fallback по истечении timer. Возвращает применённый
- * переход или null (остались в состоянии).
+ * Один подшаг слона через движок: tick узла (delegate в rules), при отсутствии
+ * намерения — явные transitions, затем fallback по истечении timer. Если переход
+ * сменил состояние, новый узел тут же тикает в этом же подшаге — ровно как старый
+ * switch, где fall-through вёл себя как немедленный вход в новое состояние.
+ * maxSteps — страховка от бесконечных self-петель (в старом коде таких нет).
  */
+export function stepElephant(
+  registry: AiRegistry,
+  behavior: AiBehavior,
+  ctx: TickCtx,
+  e: Elephant,
+  now: number,
+  maxSteps = 8,
+): void {
+  for (let i = 0; i < maxSteps; i++) {
+    const def = registry.defs[e.state];
+    if (!def) return;
+    let intent = def.tick ? behavior.tick(ctx, e, def) : null;
+    if (!intent && def.transitions) {
+      for (const tr of def.transitions) {
+        if (tr.when(ctxFor(e))) {
+          intent = typeof tr.to === 'function' ? tr.to() : tr.to;
+          break;
+        }
+      }
+    }
+    if (!intent && def.fallback && e.timer <= 0) intent = def.fallback();
+    if (!intent) return; // остались в состоянии до следующего подшага
+    if (!applyIntent(registry, behavior, ctx.state, e, intent, now)) return; // self — узел уже всё сделал
+  }
+}
+
+/** Совместимость со старым вызовом: одиночный проход без chain-повтора. */
 export function stepState(
   registry: AiRegistry,
   behavior: AiBehavior,
@@ -123,7 +167,9 @@ export function stepState(
 ): Intent | null {
   const def = registry.defs[e.state];
   if (!def) return null;
-  let intent = def.tick ? behavior.tick(state, e, def) : null;
+  let intent = def.tick
+    ? behavior.tick({ state, dt: (state as { aiDt?: number }).aiDt ?? 0, dtReal: (state as { aiDtReal?: number }).aiDtReal ?? 0 }, e, def)
+    : null;
   if (!intent && def.transitions) {
     for (const tr of def.transitions) {
       if (tr.when(ctxFor(e))) {

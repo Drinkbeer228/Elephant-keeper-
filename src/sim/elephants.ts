@@ -1,7 +1,7 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
 import { MAP, inPaddock, inReachZone } from '../data/map';
-import { attachRegistry, stepState } from './ai/engine';
+import { attachRegistry, stepElephant } from './ai/engine';
 import { elephantBehavior, registerSimBridge } from './ai/rules';
 import { ELEPHANT_AI_REGISTRY } from './ai/states';
 import { isNight } from './clock';
@@ -10,6 +10,7 @@ import { cellAt, footHarm, isWet, wetAround } from './floor';
 import { chance, randomRange } from './rng';
 import { takeStock } from './stock';
 import { isOutdoorWalkable, routeForAnimal } from './nav';
+import type { Intent } from './ai/types';
 import type { Elephant, ElephantState, Item, State } from './types';
 
 const E = BALANCE.elephant;
@@ -136,16 +137,18 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     }
   }
 
-  // FSM-движок (инкремент 2): dispatch состояния через stepState. Поведение
-  // узлов делегируется в ai/rules, тот зовёт tick-функции ниже 1-в-1 —
-  // тайминги и порядок вызовов RNG не изменились (проверка tests/fsm.test.ts).
-  // sway смотан сюда из старого switch: у него выход по скуке < 50 раньше timer.
-  if (e.state === 'sway') {
-    e.timer -= dt;
-    if (e.timer <= 0 || e.boredom < 50) decide(state, e);
-    return;
-  }
-  stepState(ELEPHANT_AI_REGISTRY, elephantBehavior, state, e, state.t);
+  // FSM-движок (инкремент 2): один подшаг слона через stepElephant. Tick-функции
+  // узлов — исходные кейсы старого switch (см. мост ниже): та же арифметика
+  // таймеров, те же вызовы decide/arrive/pee в том же порядке RNG. Если переход
+  // сменил узел, движок тут же тикает новый узел в этом же подшаге — как старый
+  // код, где timer→decide→walkTo происходил одним махом (проверка tests/fsm.test.ts).
+  stepElephant(ELEPHANT_AI_REGISTRY, elephantBehavior, { state, dt, dtReal }, e, state.t);
+}
+
+// Возвращает 'self': старый кейс сам выставил e.state/e.timer (или остался в
+// состоянии) — движок не применяет смену узла и завершает подшаг.
+function afterDecide(): Intent {
+  return { target: 'self' };
 }
 
 // ----------------------------------------------------------------------------
@@ -188,6 +191,7 @@ registerSimBridge({
   signalTick(state, e, dt) {
     e.timer -= dt;
     if (e.timer <= 0) pee(state, e);
+    return afterDecide();
   },
   batheTick(state, e, dt) {
     // Купание: намокает, остывает от жары и скуки; в мутной воде — вредит ногам
@@ -206,16 +210,19 @@ registerSimBridge({
     }
     e.timer -= dt;
     if (e.timer <= 0) decide(state, e);
+    return afterDecide();
   },
   scratchTick(state, e, dt) {
     e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
     e.timer -= dt;
     if (e.timer <= 0) decide(state, e);
+    return afterDecide();
   },
   playTick(state, e, dt) {
     e.timer -= dt;
     if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
     if (e.timer <= 0) decide(state, e);
+    return afterDecide();
   },
   eatHayTick(state, e, dt) {
     const hay = feederHayOf(state, e);
@@ -228,6 +235,7 @@ registerSimBridge({
     e.boredom = clamp(e.boredom - 0.1 * dt);
     e.timer -= dt;
     if (e.timer <= 0 || e.hunger < 5 || hay <= 0) decide(state, e);
+    return afterDecide();
   },
   drinkTick(state, e, dt) {
     const before = e.thirst;
@@ -237,10 +245,12 @@ registerSimBridge({
     e.timer -= dt;
     const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
     if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
+    return afterDecide();
   },
   basinTick(state, e, dt) {
     e.timer -= dt;
     if (e.timer <= 0) finishBasin(state, e, profileOf(e));
+    return afterDecide();
   },
   sleepTick(state, e, dt) {
     e.timer -= dt;
@@ -249,10 +259,18 @@ registerSimBridge({
       e.state = 'idle';
       e.timer = randomRange(state, 15, 30);
     }
+    return afterDecide();
   },
   idleTick(state, e, dt) {
     e.timer -= dt;
     if (e.timer <= 0) decide(state, e);
+    return afterDecide();
+  },
+  swayTick(state, e, dt) {
+    // Старый кейс sway: выход по скуке < 50 раньше истечения timer
+    e.timer -= dt;
+    if (e.timer <= 0 || e.boredom < 50) decide(state, e);
+    return afterDecide();
   },
   arriveNow(state, e) {
     arrive(state, e, profileOf(e));

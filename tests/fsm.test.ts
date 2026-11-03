@@ -9,9 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { createShift } from '../src/sim/state';
 import { advance } from '../src/sim/tick';
 import { serializeSave } from '../src/sim/save';
-import { MAP } from '../src/data/map';
 import { ELEPHANT_AI_REGISTRY } from '../src/sim/ai/states';
-import { ensureFsm, canInterrupt, applyIntent, stepState, INTERRUPT_HYSTERESIS } from '../src/sim/ai/engine';
+import { ensureFsm, canInterrupt, applyIntent, stepElephant } from '../src/sim/ai/engine';
 import { elephantBehavior, resolveTransition, intentPriority, TEMPERAMENTS, temperamentOf } from '../src/sim/ai/rules';
 import type { Elephant, State } from '../src/sim/types';
 
@@ -121,7 +120,7 @@ describe('FSM golden (инкремент 2)', () => {
       expect(e.fsm).toBeDefined();
       expect(e.fsm!.transitions).toBeGreaterThan(0);
     }
-    const json = serializeSave(state, MAP.id, { cols: MAP.floor.cols, rows: MAP.floor.rows }, 1730000000000);
+    const json = serializeSave(state, 'modern', { cols: 120, rows: 100 }, 1730000000000);
     expect(json).not.toContain('"fsm"');
     expect(json).not.toContain('aiDt');
     expect(json).not.toContain('committedUntil');
@@ -182,16 +181,14 @@ describe('движок FSM', () => {
     expect(intentPriority({ target: 'idle' })).toBe(10);
   });
 
-  it('stepState возвращает null, пока внешние переходы делают старые функции', () => {
+  it('stepElephant исполняет цепочку timer→decide одним подшагом', () => {
     const s = createShift(7);
     const e = s.elephants[0];
-    s.aiDt = 0.5;
-    s.aiDtReal = 0.5;
     e.state = 'idle';
-    e.timer = 0.1; // истечёт — decide уйдёт во внешний walkTo/arrive
-    const intent = stepState(ELEPHANT_AI_REGISTRY, elephantBehavior, s, e, s.t);
-    expect(intent).toBeNull();
-    expect(['idle', 'walk']).toContain(e.state);
+    e.timer = 0.1; // истечёт — decide выберет следующее занятие (walk/idle/sway...)
+    stepElephant(ELEPHANT_AI_REGISTRY, elephantBehavior, { state: s, dt: 0.5, dtReal: 0.5 }, e, s.t);
+    expect(e.state).not.toBe('idle'); // движок обязан был выйти из idle, как старый switch
+    expect(e.timer).toBeGreaterThan(0);
   });
 
   it('характеры: в инкременте 2 все множители = 1 (нейтральный профиль)', () => {

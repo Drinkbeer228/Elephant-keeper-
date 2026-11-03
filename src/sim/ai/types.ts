@@ -19,9 +19,13 @@ export interface AiCtx {
   elephantId: string;
 }
 
-/** Намерение перейти в состояние. target === 'walk' означает «идти к цели, потом next». */
+/**
+ * Намерение перейти в состояние. target === 'walk' означает «идти к цели, потом next»
+ * (цели задаёт bridge/walkTo). target === 'self' — служебный: узел сам обновил таймеры
+ * и остался в себе (воспроизводит старые цепочки arrive/decide/pee без смены состояния).
+ */
 export interface Intent {
-  target: ElephantState;
+  target: ElephantState | 'self';
   /** Куда идти, если target — 'walk'. */
   destination?: { x: number; y: number };
   /** Чем заняться по прибытии (e.next). */

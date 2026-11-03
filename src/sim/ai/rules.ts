@@ -15,7 +15,7 @@
 
 import type { ElephantProfile } from '../../data/elephants';
 import type { Elephant, State } from '../types';
-import type { AiBehavior } from './engine';
+import type { AiBehavior, TickCtx } from './engine';
 import { ensureFsm, getRegistry } from './engine';
 import type { Intent, Temperament } from './types';
 
@@ -97,15 +97,16 @@ export function temperamentOf(_profile: ElephantProfile): Temperament {
 export interface SimBridge {
   profileOf(e: Elephant): ElephantProfile;
   walkTick(s: State, e: Elephant, dtReal: number): void;
-  signalTick(s: State, e: Elephant, dt: number): void; // общий для signal/walkCommand
-  batheTick(s: State, e: Elephant, dt: number): void;
-  scratchTick(s: State, e: Elephant, dt: number): void;
-  playTick(s: State, e: Elephant, dt: number): void;
-  eatHayTick(s: State, e: Elephant, dt: number): void;
-  drinkTick(s: State, e: Elephant, dt: number): void;
-  basinTick(s: State, e: Elephant, dt: number): void;
-  sleepTick(s: State, e: Elephant, dt: number): void;
-  idleTick(s: State, e: Elephant, dt: number): void; // старый default: timer→decide
+  signalTick(s: State, e: Elephant, dt: number): Intent | null; // общий для signal/walkCommand
+  batheTick(s: State, e: Elephant, dt: number): Intent | null;
+  scratchTick(s: State, e: Elephant, dt: number): Intent | null;
+  playTick(s: State, e: Elephant, dt: number): Intent | null;
+  eatHayTick(s: State, e: Elephant, dt: number): Intent | null;
+  drinkTick(s: State, e: Elephant, dt: number): Intent | null;
+  basinTick(s: State, e: Elephant, dt: number): Intent | null;
+  sleepTick(s: State, e: Elephant, dt: number): Intent | null;
+  idleTick(s: State, e: Elephant, dt: number): Intent | null; // старый default: timer→decide
+  swayTick(s: State, e: Elephant, dt: number): Intent | null; // выход по скуке < 50 раньше timer
   arriveNow(s: State, e: Elephant): void; // внешний переход по e.next
 }
 
@@ -121,8 +122,12 @@ function B(): SimBridge {
   return bridge;
 }
 
-type TickFn = (s: State, e: Elephant, dt: number) => void;
+type TickFn = (s: State, e: Elephant, dt: number) => Intent | null;
 
+// Каждая tick-функция — исходный кейс старого switch из elephants.ts: та же
+// арифметика таймеров, те же вызовы decide/pee/finishBasin в том же порядке.
+// Возврат 'self' означает «узел сам обновил состояние/таймеры» — движок не
+// применяет смену узла и завершает подшаг (см. engine.stepElephant).
 const TICKS: Partial<Record<Elephant['state'], TickFn>> = {
   signal: (s, e, dt) => B().signalTick(s, e, dt),
   walkCommand: (s, e, dt) => B().signalTick(s, e, dt),
@@ -133,8 +138,9 @@ const TICKS: Partial<Record<Elephant['state'], TickFn>> = {
   drink: (s, e, dt) => B().drinkTick(s, e, dt),
   eatBasin: (s, e, dt) => B().basinTick(s, e, dt),
   sleep: (s, e, dt) => B().sleepTick(s, e, dt),
-  idle: (s, e, dt) => B().idleTick(s, e, dt),
-  reach: (s, e, dt) => B().idleTick(s, e, dt),
+  idle: (s, e, dt) => B().idleTick(s, e, dt), // старый default: timer→decide
+  sway: (s, e, dt) => B().swayTick(s, e, dt), // выход по скуке < 50 раньше timer
+  reach: (s, e, dt) => B().idleTick(s, e, dt), // old case 'reach': timer<=0 → decide
   peeing: (s, e, dt) => B().idleTick(s, e, dt),
 };
 
@@ -143,16 +149,15 @@ export const elephantBehavior: AiBehavior = {
   // функции (walkTo/arrive/pee/decide) — сохранена и последовательность RNG.
   enter(_state, _e, _intent) {},
 
-  tick(state, e) {
-    const s = state as State;
+  tick(ctx: TickCtx, e) {
+    const s = ctx.state as State;
     if (e.state === 'walk') {
-      // walkTick сам делает и движение, и arrive по прибытии (внешний переход)
-      B().walkTick(s, e, s.aiDtReal ?? 0);
+      // walkTick сам делает и движение, и arrive по прибытии (arrive может
+      // вернуть 'self' — тогда новый узел уже выставлен, подшаг закрыт)
+      B().walkTick(s, e, ctx.dtReal);
       return null;
     }
-    const dt = s.aiDt ?? 0;
-    TICKS[e.state]?.(s, e, dt);
-    return null;
+    return TICKS[e.state]?.(s, e, ctx.dt) ?? null;
   },
 };
 
@@ -162,7 +167,9 @@ export const elephantBehavior: AiBehavior = {
 // ---------------------------------------------------------------------------
 
 export function intentPriority(intent: Intent): number {
-  return intent.priority ?? getRegistry()?.defs[intent.target]?.priority ?? 0;
+  if (intent.priority !== undefined) return intent.priority;
+  if (intent.target === 'self') return 0; // служебная цель вне реестра
+  return getRegistry()?.defs[intent.target]?.priority ?? 0;
 }
 
 /**
