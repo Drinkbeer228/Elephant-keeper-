@@ -10,9 +10,9 @@ function nightPile(t = 900) {
   const s = cleanShift();
   s.elephants.forEach((e) => hold(e, 18, 3));
   s.t = t;
-  s.dung.push({ id: 990, x: 5.5, y: 5.5, at: t });
+  s.dung.push({ id: 990, x: 18.5, y: 22.5, at: t });
   s.player.held = newItem(s, 'scoop');
-  at(s, 5.5, 5.8);
+  at(s, 18.5, 22.8);
   return s;
 }
 
@@ -53,10 +53,10 @@ describe('ночь и дежурный свет', () => {
 });
 
 describe('хозяйственный проезд', () => {
-  it('на проезд не выйти ни из кормовой, ни из навеса, ни с площадки контейнера', () => {
-    expect(walkable(55.4, 15)).toBe(true); // служебный двор
-    expect(walkable(56.2, 15)).toBe(false); // перила отделяют игрока от дороги
-    expect(walkable(57, 15)).toBe(true); // по дороге ездит транспорт
-    expect(MAP.road.x0).toBe(56);
+  it('периметральная дорога доступна пешком, закрытый грузовой двор — нет', () => {
+    expect(walkable(98, 30)).toBe(true);
+    expect(walkable(84, 60, { deliveryOpen: false })).toBe(false);
+    expect(walkable(84, 60, { deliveryOpen: true })).toBe(true);
+    expect(MAP.road.x0).toBe(96);
   });
 });

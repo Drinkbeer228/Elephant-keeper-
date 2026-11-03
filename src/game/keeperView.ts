@@ -13,6 +13,7 @@ export class KeeperView {
   private shadow: Phaser.GameObjects.Image;
   private held: Phaser.GameObjects.Image;
   private arrow: Phaser.GameObjects.Image;
+  private stars: Phaser.GameObjects.Text;
   private phase = 0;
   private facing = 1;
   private last = { x: 0, y: 0 };
@@ -22,6 +23,7 @@ export class KeeperView {
     this.sprite = scene.add.image(0, 0, 'keeper-0').setScale(PX).setOrigin(0.5, 1);
     this.held = scene.add.image(0, 0, 'item-bucket').setScale(2).setOrigin(0.5, 0.75).setVisible(false);
     this.arrow = scene.add.image(0, 0, 'fx-arrow').setScale(PX).setOrigin(0.5, 1).setVisible(false);
+    this.stars = scene.add.text(0, 0, '💫', { fontSize: '22px' }).setOrigin(0.5, 1).setDepth(20004).setVisible(false);
   }
 
   update(s: State, time: number, actionReady: boolean): void {
@@ -33,8 +35,14 @@ export class KeeperView {
     if (Math.abs(p.facing.x) > 0.2) this.facing = p.facing.x > 0 ? 1 : -1;
     if (moved > 0.3) this.phase += moved / 14;
     const frame = moved > 0.3 ? 1 + (Math.floor(this.phase) % 2) : 0;
-    this.sprite.setTexture(`keeper-${frame}`).setFlipX(this.facing < 0).setPosition(px, py).setDepth(py + 1);
+    this.sprite
+      .setTexture(`keeper-${frame}`)
+      .setFlipX(this.facing < 0)
+      .setPosition(px, py)
+      .setRotation(p.knockdownTimer > 0 ? Math.PI / 2 : 0)
+      .setDepth(py + 1);
     this.shadow.setPosition(px, py - 2).setDepth(py);
+    this.stars.setVisible(p.knockdownTimer > 0).setPosition(px, py - 12);
 
     if (p.held) {
       const hx = (KEEPER_HAND.x - KEEPER_W / 2) * PX * this.facing;

@@ -10,7 +10,7 @@ describe('смена и сдача', () => {
   it('смена идёт сразу: время, слонихи, закрытые ворота', () => {
     const s = createShift(1);
     expect(s.phase).toBe('shift');
-    expect(s.gateOpen).toBe(false);
+    expect(s.gates).toEqual({ female: false, male: false });
     expect(s.trough).toBeGreaterThanOrEqual(30);
     expect(s.feederHay).toBeGreaterThanOrEqual(20);
     const before = s.elephants.map((e) => [e.x, e.y]);
@@ -25,9 +25,19 @@ describe('смена и сдача', () => {
     expect(r.checklist.every((c) => c.ok)).toBe(true);
   });
 
+  it('табель игрока содержит всех шестерых слонов', () => {
+    const report = finishShift(cleanShift());
+    const playerNames = ['Претти', 'Марго', 'Одри', 'Раджа', 'Барон', 'Цезарь'];
+
+    expect(report.pees.map((elephant) => elephant.name)).toEqual(playerNames);
+    expect(report.footDebt.map((elephant) => elephant.name)).toEqual(playerNames);
+    expect(report.meals.every((meal) => meal.statuses.map((elephant) => elephant.name).join(',') === playerNames.join(','))).toBe(true);
+    expect(JSON.stringify(report)).toContain('Раджа');
+  });
+
   it.each([
-    ['gate', (s: State): unknown => (s.gateOpen = true)],
-    ['paddockClear', (s: State): unknown => addItem(s, 'bucket', 5, 5)],
+    ['gate', (s: State): unknown => (s.gates.female = true)],
+    ['paddockClear', (s: State): unknown => addItem(s, 'bucket', 20, 25)],
     ['standing', (s: State): unknown => (s.elephants[0].footDebt += BALANCE.footDebt.limpThreshold)],
     ['water', (s: State): unknown => (s.trough = 10)],
     ['hay', (s: State): unknown => (s.feederHay = 5)],
@@ -49,7 +59,7 @@ describe('смена и сдача', () => {
   it('чек-лист весит 30 баллов: один ✗ стоит 3', () => {
     const a = cleanShift();
     const b = structuredClone(a);
-    b.gateOpen = true;
+    b.gates.female = true;
     expect(finishShift(a).score - finishShift(b).score).toBe(3);
   });
 
@@ -79,10 +89,10 @@ describe('вещи у ограждения', () => {
       const s = cleanShift(11);
       s.elephants.forEach((e) => hold(e, 3, 3));
       const m = el(s, 'margo');
-      hold(m, 6, 8.2);
+      hold(m, 20.5, 30);
       s.elephants.forEach((e) => (e.trust = trust));
       m.boredom = 100;
-      s.items.push({ ...newItem(s, 'fork'), x: 5, y: 9.6 });
+      s.items.push({ ...newItem(s, 'fork'), x: 21, y: 30 });
       advance(s, 600);
       return s.stats.broken;
     };

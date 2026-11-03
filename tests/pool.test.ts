@@ -50,4 +50,16 @@ describe('бассейны', () => {
     expect(s.pools[0].dirty).toBe(Math.max(0, dirty - BALANCE.pool.poopDirt));
     expect(s.items.find((i) => i.kind === 'bag')?.fill).toBe(1);
   });
+
+  it('бак в бассейне можно поднять с берега', () => {
+    const s = cleanShift();
+    const pool = MAP.pools[0];
+    const bucket = newItem(s, 'bucket');
+    s.items.push({ ...bucket, x: pool.x, y: pool.y });
+    at(s, pool.x, pool.y + pool.ry + 0.2);
+
+    expect(availableAction(s)?.label).toMatch(/^Взять: бак/);
+    act(s);
+    expect(s.player.held?.kind).toBe('bucket');
+  });
 });

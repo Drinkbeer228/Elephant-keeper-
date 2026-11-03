@@ -56,7 +56,9 @@ export type ElephantState =
   | 'sleep'
   | 'sway'
   | 'reach'
-  | 'bathe'; // купание в бассейне: намокает, сохнет после выхода
+  | 'bathe'
+  | 'scratch'
+  | 'play'; // играет с покрышкой
 
 export interface Tally {
   inBucket: number;
@@ -89,6 +91,8 @@ export interface Elephant {
   lastCell: string;
   tally: Tally;
   wetness: number; // 0..100: после купания мокрый и тёмный, на солнце светлеет
+  traits: { appetite: number; messiness: number; aggression: number };
+  musthTimer: number; // реальные секунды
   pool?: number; // в каком бассейне купается
   targetItem?: number;
   signalStarted?: number;
@@ -174,6 +178,15 @@ export interface Jack {
   cargo: CargoUnit[] | null;
 }
 
+export interface ReceivingPallet {
+  id: number;
+  cargo: CargoUnit[];
+  x: number;
+  y: number;
+  reservedBy?: 'partner';
+  carriedBy?: 'partner';
+}
+
 // Продуктовый грузовик (этап 3): встаёт у дороги, водитель ждёт у заднего борта
 export interface Driver {
   x: number;
@@ -187,6 +200,7 @@ export interface Supply {
   left: boolean;
   missed: boolean; // уехал с непринятым грузом — замечание в табеле
   bays: CargoUnit[][]; // поддоны в борту; каждый — список видов груза
+  ground: ReceivingPallet[];
   driver: Driver;
 }
 
@@ -202,6 +216,22 @@ export interface Partner {
   timer: number; // пауза до следующего решения, минут
   path: { x: number; y: number }[];
   pathTarget: { x: number; y: number } | null;
+  foodBasin: number | null;
+  supplyPalletId: number | null;
+  knockdownTimer: number;
+}
+
+export interface Tire {
+  id: 'female' | 'male';
+  paddock: 'female' | 'male';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  flightLeft: number;
+  flightDuration: number;
+  cooldown: number;
+  hit: boolean;
 }
 
 // Бассейн: мутность воды и плавающий навоз
@@ -216,7 +246,7 @@ export interface State {
   phase: Phase;
   t: number; // игровых минут от 08:00 дня приёма
   nextItemId: number;
-  player: { x: number; y: number; held: Item | null; facing: { x: number; y: number }; pocketTreats: number; sprinting?: boolean };
+  player: { x: number; y: number; held: Item | null; facing: { x: number; y: number }; pocketTreats: number; knockdownTimer: number; sprinting?: boolean };
   elephants: Elephant[];
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
@@ -230,10 +260,13 @@ export interface State {
   trough2: number;
   valve2Open: boolean;
   pools: PoolState[]; // состояние бассейнов: грязь и плавающий навоз
+  tires: Tire[];
+  musthEventsRemaining: number;
+  musthNextAt: number;
   partner: Partner; // Димон — ИИ-напарник в нижнем слоновнике
   dutyLight: boolean; // дежурный свет в вольере
   lastOverflow: number;
-  gateOpen: boolean;
+  gates: { female: boolean; male: boolean };
   barrow: Barrow;
   jack: Jack;
   supply: Supply;

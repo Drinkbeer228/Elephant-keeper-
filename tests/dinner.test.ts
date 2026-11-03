@@ -59,8 +59,8 @@ describe('ужин: корзина и чистка овощей', () => {
     cutAll(s);
     expect(basket(s).veg).toBe('peeled');
     expect(act(s)).toBe('Нарезать ужин');
-    expect(s.kitchen.veg.portions).toBe(3);
-    expect(act(s)).toBe('Разложить ужин по тазам (3)');
+    expect(s.kitchen.veg.portions).toBe(6);
+    expect(act(s)).toBe('Разложить ужин по тазам (6)');
   });
 
   it('раньше 14:00 овощи для ужина не берут', () => {

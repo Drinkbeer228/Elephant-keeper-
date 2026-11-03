@@ -10,6 +10,27 @@ export function supplyOpen(state: State): boolean {
   return state.supply.arrived && !state.supply.left;
 }
 
+export function deliveryAccessOpen(state: State): boolean {
+  const { truckYard } = MAP.areas;
+  const insideYard = (point: { x: number; y: number }) =>
+    point.x >= truckYard.x0 && point.x < truckYard.x1 && point.y >= truckYard.y0 && point.y < truckYard.y1;
+  return state.supply.arrived && (
+    !state.supply.left ||
+    state.supply.bays.length > 0 ||
+    state.supply.ground.length > 0 ||
+    state.jack.cargo !== null ||
+    insideYard(state.player) ||
+    insideYard(state.jack)
+  );
+}
+
+export function acceptSupplyIfUnloaded(state: State): void {
+  const sp = state.supply;
+  if (!sp.arrived || sp.left || sp.bays.length) return;
+  sp.left = true;
+  emit(state, { kind: 'good', text: 'Груз принят. Водитель уехал, паллеты оставлены на площадке.' });
+}
+
 // Общий кадр машин: мусоровоз живёт в updateContainer, поставка — здесь.
 // Приехала → «гудок» и поддоны в борту; водитель ждёт у борта; в конце окна уехала
 export function updateTrucks(state: State): void {

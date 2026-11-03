@@ -31,25 +31,25 @@ describe('тачка', () => {
 
   it('из стоящей тачки берут инструмент, убирают в неё и кладут инструмент обратно', () => {
     const s = cleanShift();
-    s.elephants.forEach((e) => hold(e, 11, 7));
-    Object.assign(s.barrow, { x: 7, y: 5.5, pushed: false, tools: ['scoop', 'fork', 'broom'], parkedAt: 0 });
-    s.dung.push({ id: 900, x: 5.5, y: 4.5, at: 0 });
-    setCell(s, 6, 4, 'wet');
-    at(s, 6.5, 5.5);
+    s.elephants.forEach((e) => hold(e, 45, 24));
+    Object.assign(s.barrow, { x: 20, y: 22.5, pushed: false, tools: ['scoop', 'fork', 'broom'], parkedAt: 0 });
+    s.dung.push({ id: 900, x: 18.5, y: 22.5, at: 0 });
+    setCell(s, 18, 22, 'wet');
+    at(s, 20, 22.5);
     expect(act(s, 'Взять: совок')).toMatch(/совок/);
     expect(s.player.held?.kind).toBe('scoop');
-    at(s, 5.5, 4.8);
+    at(s, 18.5, 22.8);
     expect(act(s)).toBe('Убрать навоз в тачку');
-    at(s, 6.5, 5.5);
+    at(s, 20, 22.5);
     expect(act(s)).toBe('Положить в тачку: совок со скребком');
     expect(act(s, 'Взять: вилы')).toBe('Взять: вилы');
-    at(s, 6.5, 4.5);
+    at(s, 18.5, 22.5);
     expect(act(s)).toBe('Убрать мокрую солому в тачку');
-    at(s, 6.5, 5.5);
+    at(s, 20, 22.5);
     act(s);
     expect(act(s, 'Взять: метл')).toMatch(/метл/);
     expect(s.player.held?.kind).toBe('broom');
-    at(s, 6.5, 5.5);
+    at(s, 20, 22.5);
     expect(act(s)).toBe('Положить в тачку: метла');
     expect(s.barrow.tools).toContain('broom');
     expect(s.barrow.waste).toBe(2);
@@ -57,19 +57,18 @@ describe('тачка', () => {
 
   it('тачка едет перед кипером и не проходит сквозь ограждение', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 10.5, y: 15.4, pushed: true });
-    at(s, 10.5, 15.4);
+    Object.assign(s.barrow, { x: 30, y: 49.5, pushed: true });
+    at(s, 30, 49.5);
     push(s, 0, -1, 1.5);
-    // упёрлись в ограждение — дальше не пускает
-    expect(s.player.y).toBeGreaterThanOrEqual(MAP.fenceY + 0.3 - 0.1);
-    expect(s.barrow.y).toBeGreaterThanOrEqual(MAP.fenceY + 0.3 - 0.1);
+    expect(s.player.y).toBeGreaterThanOrEqual(MAP.complexes.female.bounds.y1 + 0.3 - 0.1);
+    expect(s.barrow.y).toBeGreaterThanOrEqual(MAP.complexes.female.bounds.y1 + 0.3 - 0.1);
   });
 
   it('три тюка раскачиваются: без балансировки падают, с ней доезжают', () => {
     const ride = (steer: boolean) => {
       const s = cleanShift(3);
-      Object.assign(s.barrow, { x: 8, y: 10.4, pushed: true, bales: 3 });
-      at(s, 7, 10.4);
+      Object.assign(s.barrow, { x: 52, y: 53, pushed: true, bales: 3 });
+      at(s, 51, 53);
       for (let i = 0; i < 30 * 6; i++) {
         const dir = (i % 60 < 30 ? -1 : 1) as -1 | 1;
         const cmds: Parameters<typeof tick>[2] = [{ type: 'move', dx: dir, dy: 0 }];
@@ -85,8 +84,8 @@ describe('тачка', () => {
 
   it('два тюка едут спокойно', () => {
     const s = cleanShift();
-    Object.assign(s.barrow, { x: 8, y: 10.4, pushed: true, bales: 2 });
-    at(s, 7, 10.4);
+    Object.assign(s.barrow, { x: 52, y: 53, pushed: true, bales: 2 });
+    at(s, 51, 53);
     push(s, -1, 0, 3);
     expect(s.barrow.bales).toBe(2);
   });
@@ -104,11 +103,11 @@ describe('тачка', () => {
   it('скучающая слониха опрокидывает тачку у себя под боком', () => {
     const s = cleanShift(5);
     s.elephants.forEach((e) => {
-      hold(e, 6, 5);
+      hold(e, 19, 22.5);
       e.trust = 0;
       e.boredom = 100;
     });
-    Object.assign(s.barrow, { x: 7, y: 5.5, pushed: false, tools: ['scoop'], waste: 6, parkedAt: 0 });
+    Object.assign(s.barrow, { x: 19, y: 22.5, pushed: false, tools: ['scoop'], waste: 6, parkedAt: 0 });
     advance(s, 600);
     expect(s.barrow.tools).toEqual([]);
     expect(s.log.some((l) => l.why === 'barrowTipped')).toBe(true);
@@ -157,7 +156,7 @@ describe('туалет и слив', () => {
   it('просится — бак под неё, сходит сразу; бак выливают в решётку слива', () => {
     const s = cleanShift();
     const margo = el(s, 'margo');
-    hold(margo, 6.5, 3);
+    hold(margo, 22, 30);
     margo.bladder = 99.9;
     for (let i = 0; i < 40 && margo.state !== 'signal'; i++) advance(s, 0.5);
     s.player.held = s.items.find((i) => i.kind === 'bucket')!;
@@ -179,10 +178,10 @@ describe('туалет и слив', () => {
 describe('тачка за оградой', () => {
   it('не помогает, если стоит по другую сторону ограждения', () => {
     const s = cleanShift();
-    s.elephants.forEach((e) => hold(e, 3, 3));
-    Object.assign(s.barrow, { x: 6, y: 10.4, pushed: false, tools: ['scoop', 'fork', 'broom'] });
-    s.dung.push({ id: 901, x: 6, y: 8.2, at: 0 });
-    at(s, 6, 8.4);
+    s.elephants.forEach((e) => hold(e, 45, 24));
+    Object.assign(s.barrow, { x: 20, y: 49, pushed: false, tools: ['scoop', 'fork', 'broom'] });
+    s.dung.push({ id: 901, x: 20, y: 25, at: 0 });
+    at(s, 20, 25.2);
     expect(act(s) ?? '').not.toMatch(/в тачку/);
   });
 });

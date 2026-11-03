@@ -10,7 +10,7 @@ function drive(s: ReturnType<typeof cleanShift>, seconds: number, dx = 1, dy = 0
   for (let i = 0; i < seconds * 30; i++) tick(s, 1 / 30, [{ type: 'move', dx, dy }]);
 }
 
-function loaded(load: Partial<ReturnType<typeof cleanShift>['barrow']>, x = 9, y = 15.4) {
+function loaded(load: Partial<ReturnType<typeof cleanShift>['barrow']>, x = 9, y = 53.5) {
   const s = cleanShift();
   s.elephants.forEach((e) => hold(e, 18, 3));
   Object.assign(s.barrow, { x: x + 0.9, y, pushed: true, ...load });
@@ -58,14 +58,14 @@ describe('сор с тачки', () => {
   });
 
   it('выезд из вольера через проход — встряска на пороге', () => {
-    const s = loaded({ sawdust: 8 }, 7, 8);
-    drive(s, 2, 0, 1); // через дверь в коридор
+    const s = loaded({ sawdust: 8 }, 44, 44);
+    drive(s, 1.5, 0, 1);
     expect(s.litter).toHaveLength(1);
     expect(s.barrow.sawdust).toBe(7);
   });
 
   it('в вольере рассыпанное не считается: подстилка и трава', () => {
-    const s = loaded({ sawdust: 8 }, 9, 6);
+    const s = loaded({ sawdust: 8 }, 20, 25);
     drive(s, 1);
     drive(s, 1, 0, -1);
     expect(s.litter).toHaveLength(0);

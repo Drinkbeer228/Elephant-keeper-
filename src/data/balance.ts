@@ -49,7 +49,7 @@ export const BALANCE = {
     bladderCare: 65, // самца с пузырем от этой отметки ведёт «гулять»
     feederMin: 35, // ниже — несёт тюк из Сенника
     troughMin: 40, // ниже — открывает вентиль
-    troughMax: 90, // выше — закрывает
+    troughMax: 100, // закрывает только когда поилка заполнена
     babbleEvery: 40, // игровые минуты между репликами
   },
 
@@ -191,7 +191,7 @@ export const BALANCE = {
   food: {
     kashaCook: 20,
     kashaEarly: 60, // раньше этого до срока запаривать нельзя
-    basins: 4, // на кормление нужно три, четвёртый — запас
+    basins: 7, // шесть мисок для двух загонов и одна запасная
     basinCrushAfter: 45,
     basinCrushChance: 0.01,
     hayBale: 40,

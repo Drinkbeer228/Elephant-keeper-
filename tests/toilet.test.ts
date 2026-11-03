@@ -14,7 +14,7 @@ describe('туалет', () => {
   it('Претти просится; без бака — мимо и мокрая подстилка', () => {
     const s = cleanShift();
     const pretty = el(s, 'pretty');
-    hold(pretty, 6, 4);
+    hold(pretty, 20, 25);
     pretty.bladder = 99.9;
     advance(s, 1);
     expect(texts(s)).toContain('Претти просится');
@@ -27,16 +27,16 @@ describe('туалет', () => {
   it('бак подставили — сразу в бак, лакомство за это поднимает доверие', () => {
     const s = cleanShift();
     const pretty = el(s, 'pretty');
-    hold(pretty, 6, 4);
+    hold(pretty, 20, 25);
     pretty.bladder = 99.9;
     advance(s, 1);
     takeBucket(s);
-    at(s, 6, 5.2);
+    at(s, 20, 25.8);
     expect(act(s)).toBe('Подставить бак под Претти');
     advance(s, 1.5);
     expect(pretty.tally.inBucket).toBe(1);
     expect(countWet(s)).toBe(0);
-    hold(pretty, 6, 4);
+    hold(pretty, 20, 25);
     const trust = pretty.trust;
     expect(act(s)).toBe('Угостить Претти (за бак)');
     expect(pretty.trust).toBeGreaterThan(trust);
@@ -45,11 +45,11 @@ describe('туалет', () => {
   it('Марго идёт к ограждению и ждёт дольше', () => {
     const s = cleanShift();
     const margo = el(s, 'margo');
-    hold(margo, 6.5, 3);
+    hold(margo, 22, 30);
     margo.bladder = 99.9;
     for (let i = 0; i < 40 && margo.state !== 'signal'; i++) advance(s, 0.5);
     expect(margo.state).toBe('signal');
-    expect(margo.y).toBeGreaterThan(7.5);
+    expect(margo.y).toBeGreaterThan(33);
     advance(s, 8);
     expect(margo.tally.missed).toBe(0);
     advance(s, 4);
@@ -59,15 +59,15 @@ describe('туалет', () => {
   it('Одри писает без сигнала, поймать можно только «погулять»', () => {
     const s = cleanShift();
     const audrey = el(s, 'audrey');
-    hold(audrey, 4, 4);
+    hold(audrey, 24, 24);
     audrey.bladder = 99.9;
     advance(s, 1);
     expect(audrey.tally.missed).toBe(1);
 
-    hold(audrey, 4, 4);
+    hold(audrey, 24, 24);
     audrey.bladder = 30;
     takeBucket(s);
-    at(s, 4, 5.3);
+    at(s, 24, 24.8);
     expect(act(s)).toBe('Бак под Одри: «Давай гуляй»');
     expect(texts(s)).toContain('не хочет');
 
@@ -82,18 +82,18 @@ describe('туалет', () => {
   it('угостить можно только за бак', () => {
     const s = cleanShift();
     const audrey = el(s, 'audrey');
-    hold(audrey, 4, 4);
-    at(s, 4, 5.3);
+    hold(audrey, 24, 24);
+    at(s, 24, 24.8);
     expect(act(s) ?? '').not.toMatch(/Угостить/);
   });
 
   it('полный бак не принимает мочу', () => {
     const s = cleanShift();
     const pretty = el(s, 'pretty');
-    hold(pretty, 6, 4);
+    hold(pretty, 20, 25);
     const bucket = s.items.find((i) => i.kind === 'bucket')!;
-    bucket.x = 6;
-    bucket.y = 4;
+    bucket.x = 20;
+    bucket.y = 25;
     bucket.liters = 60;
     pretty.bladder = 99.9;
     advance(s, 7);

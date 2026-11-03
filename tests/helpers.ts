@@ -10,6 +10,9 @@ import type { Elephant } from '../src/sim/types';
 export function cleanShift(seed = 1): State {
   const s = createShift(seed, { mess: false });
   s.log = [];
+  s.partner.timer = 1e9;
+  s.musthEventsRemaining = 0;
+  s.tires.forEach((tire) => (tire.cooldown = Number.POSITIVE_INFINITY));
   return s;
 }
 
@@ -78,11 +81,12 @@ export function kashaReady(seed = 1): State {
 
 // Взять со стеллажа таз с едой и поставить на место слонихи
 export function serve(s: State, elephantId: string): void {
-  const b = basinsOnRack(s).find((x) => x.food)!;
+  const b = basinsOnRack(s).find((x) => x.food && x.owner === elephantId)!;
   at(s, b.x + 0.5, b.y);
-  act(s);
-  const e = s.elephants.find((x) => x.id === elephantId)!;
-  const slot = profileOf(e).slot;
+  const elephant = s.elephants.find((x) => x.id === elephantId)!;
+  const food = b.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
+  act(s, `Взять: ${food} для ${profileOf(elephant).name}`);
+  const slot = profileOf(elephant).slot;
   at(s, slot.x, slot.y + 0.9);
   act(s);
 }
