@@ -168,6 +168,14 @@ export function stepElephant(
     applyIntent(registry, behavior, ctx.state, e, intent, now);
     return;
   }
+  // Ранний выход: если тик (или arrive внутри него) уже сменил состояние,
+  // дальнейшие transitions/fallback этого тика применять нельзя — ровно как
+  // в старом switch, где смена состояния прекращала выполнение ветки кейса.
+  if (e.state !== fsm.pendingFrom) {
+    fsm.pendingFrom = undefined;
+    return;
+  }
+  fsm.pendingFrom = undefined;
   if (def.transitions) {
     for (const tr of def.transitions) {
       if (tr.when(ctxFor(e))) {
