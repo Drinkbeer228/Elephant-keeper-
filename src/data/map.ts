@@ -407,13 +407,7 @@ const LEGACY_MAP = {
     garageApproach: EMPTY_RECT,
   },
   rooms: { ...MODERN_MAP.rooms, ...LEGACY_LAYOUT.rooms },
-  walls: [
-    ...LEGACY_LAYOUT.walls,
-    // Вертикальные перегородки между боксами самок в верхнем загоне (y 1..11.5),
-    // внизу у решётки остаётся свободный проход к поилкам и кормушкам
-    { x0: 18, y0: 1, x1: 18, y1: 11.5 },
-    { x0: 24, y0: 1, x1: 24, y1: 11.5 },
-  ],
+  walls: LEGACY_LAYOUT.walls,
   barriers: LEGACY_LAYOUT.barriers,
   gates: [
     {
