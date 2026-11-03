@@ -91,6 +91,10 @@ export function serializeSave(state: State, mapId: string, floor: { cols: number
 // с записью пути в sidecar. На загрузке null-заполнители undefined-полей остаются
 // null — это эквивалентная живому семантика, и повторный save даёт ту же строку
 // (null -> canonicalize -> null), поэтому посимвольные сверки round-trip стабильны.
+// RUNTIME_ONLY_FIELDS — внутренние поля текущего подшага (FSM-мост): в JSON их
+// быть не должно, при загрузке их отсутствующий ключ = undefined — семантика та же.
+const RUNTIME_ONLY_FIELDS: ReadonlySet<string> = new Set(['aiDt', 'aiDtReal']);
+
 function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<string, number>): unknown {
   if (value === undefined) return null;
   if (typeof value === 'number') {
@@ -111,6 +115,7 @@ function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<str
     // сохраняет порядок записи. Сортировка делает формат независимым от порядка вставки,
     // и повторный save всегда побайтово совпадает с первым.
     for (const key of Object.keys(src).sort()) {
+      if (RUNTIME_ONLY_FIELDS.has(key)) continue; // aiDt/aiDtReal — только для живого цикла
       out[key] = canonicalizeForJson(src[key], `${path}.${key}`, nonFinite);
     }
     return out;

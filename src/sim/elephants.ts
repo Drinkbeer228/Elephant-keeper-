@@ -1,6 +1,9 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
 import { MAP, inPaddock, inReachZone } from '../data/map';
+import { attachRegistry, stepState } from './ai/engine';
+import { elephantBehavior, registerSimBridge } from './ai/rules';
+import { ELEPHANT_AI_REGISTRY } from './ai/states';
 import { isNight } from './clock';
 import { emit, hint } from './events';
 import { cellAt, footHarm, isWet, wetAround } from './floor';
@@ -133,113 +136,128 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     }
   }
 
-  switch (e.state) {
-    case 'walk': {
-      const step = E.speed * dtReal;
-      let waypoint = { x: e.tx, y: e.ty };
-      const length = Math.hypot(e.tx - e.x, e.ty - e.y);
-      const samples = Math.ceil(length / 0.25);
-      const blockedDirectly = Array.from({ length: samples }, (_, i) => i + 1).some((i) =>
-        !isOutdoorWalkable(e.x + ((e.tx - e.x) * i) / samples, e.y + ((e.ty - e.y) * i) / samples, p.paddock, state.gates),
-      );
-      if (blockedDirectly) {
-        const path = routeForAnimal(e, waypoint, p.paddock, state.gates);
-        if (!path.length) {
-          e.state = 'idle';
-          e.timer = 1;
-          break;
-        }
-        waypoint = path[0];
-      }
-      const wx = waypoint.x - e.x;
-      const wy = waypoint.y - e.y;
-      const wd = Math.hypot(wx, wy);
-      const nx = wd <= step ? wx : (wx / wd) * step;
-      const ny = wd <= step ? wy : (wy / wd) * step;
-      if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
-      if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
-      if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) arrive(state, e, p);
-      break;
-    }
-    case 'signal':
-    case 'walkCommand':
-      e.timer -= dt;
-      if (e.timer <= 0) pee(state, e);
-      break;
-    case 'bathe': {
-      // Купание: намокает, остывает от жары и скуки; в мутной воде — вредит ногам
-      const pool = e.pool ?? 0;
-      const ps = state.pools[pool];
-      e.wetness = Math.min(100, e.wetness + BALANCE.pool.wetPerMinute * dt);
-      e.boredom = clamp(e.boredom + (meadowUnpleasant(state, e) || ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
-      if (ps.dirty >= BALANCE.pool.murkDirt) e.footDebt += BALANCE.pool.dirtyHarm * dt;
-      ps.dirty = Math.min(100, ps.dirty + dt * 0.15);
-      if (chance(state, BALANCE.pool.poopChance * dt)) {
-        // Сходил прямо в воду: плавает, вода мутнеет
-        ps.dirty = Math.min(100, ps.dirty + BALANCE.pool.poopDirt);
-        ps.floats.push({ id: state.nextItemId++, x: e.x + randomRange(state, -0.8, 0.8), y: e.y + randomRange(state, -0.8, 0.8) });
-        emit(state, { kind: 'bad', text: `${p.name} сходил в бассейн — вода мутная, нужен сачок.` });
-      }
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
-      break;
-    }
-    case 'scratch':
-      e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
-      break;
-    case 'play': {
-      e.timer -= dt;
-      if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
-      if (e.timer <= 0) decide(state, e);
-      break;
-    }
-    case 'eatHay': {
-      const hay = feederHayOf(state, e);
-      const eat = Math.min(E.hayFeederPerMinute * dt, hay);
-      if (profileOf(e).paddock === 'female') state.feederHay -= eat;
-      else state.feederHay2 -= eat;
-      const before = e.hunger;
-      e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
-      e.bowel += (before - e.hunger) * E.eatToBowel;
-      e.boredom = clamp(e.boredom - 0.1 * dt);
-      e.timer -= dt;
-      if (e.timer <= 0 || e.hunger < 5 || hay <= 0) decide(state, e);
-      break;
-    }
-    case 'drink': {
-      const before = e.thirst;
-      e.thirst = clamp(e.thirst - E.drinkPerMinute * dt);
-      e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
-      drinkTrough(state, e, E.troughPerMinute * dt);
-      e.timer -= dt;
-      const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
-      if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
-      break;
-    }
-    case 'eatBasin': {
-      e.timer -= dt;
-      if (e.timer <= 0) finishBasin(state, e, p);
-      break;
-    }
-    case 'sway':
-      e.timer -= dt;
-      if (e.timer <= 0 || e.boredom < 50) decide(state, e);
-      break;
-    case 'sleep':
-      e.timer -= dt;
-      if (e.timer <= 0) {
-        // Проснулся: короткое бодрствование, потом снова решает
-        e.state = 'idle';
-        e.timer = randomRange(state, 15, 30);
-      }
-      break;
-    default:
-      e.timer -= dt;
-      if (e.timer <= 0) decide(state, e);
+  // FSM-движок (инкремент 2): dispatch состояния через stepState. Поведение
+  // узлов делегируется в ai/rules, тот зовёт tick-функции ниже 1-в-1 —
+  // тайминги и порядок вызовов RNG не изменились (проверка tests/fsm.test.ts).
+  // sway смотан сюда из старого switch: у него выход по скуке < 50 раньше timer.
+  if (e.state === 'sway') {
+    e.timer -= dt;
+    if (e.timer <= 0 || e.boredom < 50) decide(state, e);
+    return;
   }
+  stepState(ELEPHANT_AI_REGISTRY, elephantBehavior, state, e, state.t);
 }
+
+// ----------------------------------------------------------------------------
+// Мост sim → ai (реестр FSM). Tick-функции ниже — исходное поведение из
+// старого switch updateOne, перенесено без единой правки логики; диспетчер
+// прерываний к этому циклу ещё НЕ подключён (инкремент 4).
+// ----------------------------------------------------------------------------
+
+attachRegistry(ELEPHANT_AI_REGISTRY);
+registerSimBridge({
+  profileOf,
+  walkTick(state, e, dtReal) {
+    const p = profileOf(e);
+    const step = E.speed * dtReal;
+    let waypoint = { x: e.tx, y: e.ty };
+    const length = Math.hypot(e.tx - e.x, e.ty - e.y);
+    const samples = Math.ceil(length / 0.25);
+    const blockedDirectly = Array.from({ length: samples }, (_, i) => i + 1).some((i) =>
+      !isOutdoorWalkable(e.x + ((e.tx - e.x) * i) / samples, e.y + ((e.ty - e.y) * i) / samples, p.paddock, state.gates),
+    );
+    if (blockedDirectly) {
+      const path = routeForAnimal(e, waypoint, p.paddock, state.gates);
+      if (!path.length) {
+        e.state = 'idle';
+        e.timer = 1;
+        return;
+      }
+      waypoint = path[0];
+    }
+    const wx = waypoint.x - e.x;
+    const wy = waypoint.y - e.y;
+    const wd = Math.hypot(wx, wy);
+    const nx = wd <= step ? wx : (wx / wd) * step;
+    const ny = wd <= step ? wy : (wy / wd) * step;
+    if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
+    if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
+    // Прибытие — внешний переход по e.next: arrive сам решает, во что войти
+    if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) arrive(state, e, p);
+  },
+  signalTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) pee(state, e);
+  },
+  batheTick(state, e, dt) {
+    // Купание: намокает, остывает от жары и скуки; в мутной воде — вредит ногам
+    const p = profileOf(e);
+    const pool = e.pool ?? 0;
+    const ps = state.pools[pool];
+    e.wetness = Math.min(100, e.wetness + BALANCE.pool.wetPerMinute * dt);
+    e.boredom = clamp(e.boredom + (meadowUnpleasant(state, e) || ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
+    if (ps.dirty >= BALANCE.pool.murkDirt) e.footDebt += BALANCE.pool.dirtyHarm * dt;
+    ps.dirty = Math.min(100, ps.dirty + dt * 0.15);
+    if (chance(state, BALANCE.pool.poopChance * dt)) {
+      // Сходил прямо в воду: плавает, вода мутнеет
+      ps.dirty = Math.min(100, ps.dirty + BALANCE.pool.poopDirt);
+      ps.floats.push({ id: state.nextItemId++, x: e.x + randomRange(state, -0.8, 0.8), y: e.y + randomRange(state, -0.8, 0.8) });
+      emit(state, { kind: 'bad', text: `${p.name} сходил в бассейн — вода мутная, нужен сачок.` });
+    }
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+  },
+  scratchTick(state, e, dt) {
+    e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+  },
+  playTick(state, e, dt) {
+    e.timer -= dt;
+    if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
+    if (e.timer <= 0) decide(state, e);
+  },
+  eatHayTick(state, e, dt) {
+    const hay = feederHayOf(state, e);
+    const eat = Math.min(E.hayFeederPerMinute * dt, hay);
+    if (profileOf(e).paddock === 'female') state.feederHay -= eat;
+    else state.feederHay2 -= eat;
+    const before = e.hunger;
+    e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
+    e.bowel += (before - e.hunger) * E.eatToBowel;
+    e.boredom = clamp(e.boredom - 0.1 * dt);
+    e.timer -= dt;
+    if (e.timer <= 0 || e.hunger < 5 || hay <= 0) decide(state, e);
+  },
+  drinkTick(state, e, dt) {
+    const before = e.thirst;
+    e.thirst = clamp(e.thirst - E.drinkPerMinute * dt);
+    e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
+    drinkTrough(state, e, E.troughPerMinute * dt);
+    e.timer -= dt;
+    const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
+    if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
+  },
+  basinTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) finishBasin(state, e, profileOf(e));
+  },
+  sleepTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) {
+      // Проснулся: короткое бодрствование, потом снова решает
+      e.state = 'idle';
+      e.timer = randomRange(state, 15, 30);
+    }
+  },
+  idleTick(state, e, dt) {
+    e.timer -= dt;
+    if (e.timer <= 0) decide(state, e);
+  },
+  arriveNow(state, e) {
+    arrive(state, e, profileOf(e));
+  },
+});
 
 // Свежий навоз слоны обходят. Залежавшийся — затаптывают и разносят следами по подстилке.
 // На траве куча так и лежит: затаптывать некуда, её убирают совком

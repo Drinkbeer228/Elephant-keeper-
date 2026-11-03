@@ -22,6 +22,22 @@ export interface AiRegistry {
   defs: Record<ElephantState, AiStateDef>;
 }
 
+// Активный реестр подставляется извне (attachRegistry), а не импортируется:
+// states.ts тянет engine (тип AiRegistry), engine не может тянуть states.ts
+// обратно, а rules.ts тоже не тянет states.ts (он тянет elephantBehavior,
+// который engine использует через AiBehavior). Цикл разорван по времени.
+let activeRegistry: AiRegistry | null = null;
+
+/** Вызывается один раз при загрузке elephants.ts (после полной инициации модулей). */
+export function attachRegistry(r: AiRegistry): void {
+  activeRegistry = r;
+}
+
+/** Активный реестр; undefined до attachRegistry — потребители пишутся через ?. */
+export function getRegistry(): AiRegistry | undefined {
+  return activeRegistry ?? undefined;
+}
+
 /** Вызовы поведения делегируются в rules.ts (там живут ссылки на симуляцию). */
 export interface AiBehavior {
   enter(state: unknown, e: Elephant, intent: Intent): void;

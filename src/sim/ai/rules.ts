@@ -6,13 +6,17 @@
 // исходные функции elephants.ts напрямую, минуя applyIntent. Осознанный
 // компромисс инкремента-рефакторинга: golden-тест сверяет путь состояний
 // до/после побитово; ассессмент и прерывания подключаются в инкременте 4.
+//
+// Разрыв цикла импортов: rules НЕ импортирует states.ts (states тянет engine,
+// engine через AiBehavior связан с rules). Активный реестр для диспетчера
+// прерываний берётся из engine.getRegistry() — его подставляет elephants.ts
+// через attachRegistry при загрузке модуля.
 // ============================================================================
 
 import type { ElephantProfile } from '../../data/elephants';
 import type { Elephant, State } from '../types';
 import type { AiBehavior } from './engine';
-import { ensureFsm } from './engine';
-import { ELEPHANT_AI_REGISTRY } from './states';
+import { ensureFsm, getRegistry } from './engine';
 import type { Intent, Temperament } from './types';
 
 // ---------------------------------------------------------------------------
@@ -129,7 +133,6 @@ const TICKS: Partial<Record<Elephant['state'], TickFn>> = {
   drink: (s, e, dt) => B().drinkTick(s, e, dt),
   eatBasin: (s, e, dt) => B().basinTick(s, e, dt),
   sleep: (s, e, dt) => B().sleepTick(s, e, dt),
-  sway: (s, e, dt) => B().idleTick(s, e, dt),
   idle: (s, e, dt) => B().idleTick(s, e, dt),
   reach: (s, e, dt) => B().idleTick(s, e, dt),
   peeing: (s, e, dt) => B().idleTick(s, e, dt),
@@ -143,9 +146,8 @@ export const elephantBehavior: AiBehavior = {
   tick(state, e) {
     const s = state as State;
     if (e.state === 'walk') {
+      // walkTick сам делает и движение, и arrive по прибытии (внешний переход)
       B().walkTick(s, e, s.aiDtReal ?? 0);
-      // Прибытие — внешний переход по e.next (см. комментарий файла)
-      if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) B().arriveNow(s, e);
       return null;
     }
     const dt = s.aiDt ?? 0;
@@ -160,7 +162,7 @@ export const elephantBehavior: AiBehavior = {
 // ---------------------------------------------------------------------------
 
 export function intentPriority(intent: Intent): number {
-  return intent.priority ?? ELEPHANT_AI_REGISTRY.defs[intent.target]?.priority ?? 0;
+  return intent.priority ?? getRegistry()?.defs[intent.target]?.priority ?? 0;
 }
 
 /**
@@ -169,7 +171,8 @@ export function intentPriority(intent: Intent): number {
  * запаса — защита от дрожания на равных кандидатах.
  */
 export function resolveTransition(candidates: Intent[], current: Elephant, t: number, hysteresis = 10): Intent | null {
-  const def = ELEPHANT_AI_REGISTRY.defs[current.state];
+  const registry = getRegistry();
+  const def = registry?.defs[current.state];
   if (!def || def.interrupt === 'none') return null;
   const fsm = ensureFsm(current);
   if (def.interrupt === 'finish' && fsm.committedUntil !== undefined && t < fsm.committedUntil) return null;
