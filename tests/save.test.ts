@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-// Строка состояния в канонической форме записи (undefined -> null, ключи
-// лексикографически) — для посимвольных сверок round-trip. Порядок ключей в живом
-// State зависит от истории присваиваний, поэтому эталон строим через serializeSave:
-// он приводит обе стороны к одному канону.
-function canon<T>(v: T): T {
-  return JSON.parse(JSON.stringify(v, (_k, val) => (val === undefined ? null : val))) as T;
-}
 import { loadStateFromSave, serializeSave, isValidSaveFile, isStateSerializable, SCHEMA_VERSION, type LoadContext, type State } from '../src/sim';
 import { MAP, MAP_ID } from '../src/data/map';
 import { advance, tick } from '../src/sim';
@@ -81,9 +74,10 @@ describe('save/load: round-trip', () => {
     const res = loadStateFromSave(json, ctx());
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    // Эталон — то же состояние, прогнанное через сериализатор (ключи/порядок идентичны записанному)
-    const expected = JSON.parse(serializeSave(canon(original), MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows })).state;
-    expect(res.state).toEqual(expected);
+    // Эталон — исходное «живое» состояние: round-trip обязан восстановить его один в один,
+    // включая non-finite числа (Infinity из sidecar) и ссылку held → элемент items[].
+    // Сравнение с промежуточным «сырым» JSON (где Infinity лежит как null) давало бы ложный red.
+    expect(res.state).toEqual(original);
   });
 
   it('held после загрузки — та же ссылка, что и элемент items[]', () => {

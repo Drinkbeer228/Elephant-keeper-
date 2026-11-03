@@ -181,12 +181,14 @@ function finishLoad(raw: Record<string, unknown>, ctx: LoadContext): LoadResult 
 
   // Восстанавливаем то, что формат не переносит (до структурной проверки:
   // musthNextAt в валидаторе обязан быть числом, а Infinity в JSON лежит как null):
-  // Infinity из sidecar по путям, null-заполнители undefined-полей остаются null —
-  // они эквивалентны живой семантике и одинаково сериализуются повторным save.
+  // Infinity из sidecar по путям; null-заполнители опциональных undefined-полей
+  // возвращаем в undefined (см. restoreUndefinedFields), чтобы загруженное
+  // состояние было глубинно равно живому оригиналу.
   const doc = raw as Record<string, unknown>;
   const state = doc.state as State;
   const nonFinite = isRecord(doc.nonFinite) ? (doc.nonFinite as Record<string, number>) : undefined;
   reviveNumbers(nonFinite, state);
+  restoreUndefinedFields(state);
 
   if (!isValidSaveFile(raw)) return { ok: false, reason: 'corrupt-state', detail: structuralError(raw) };
 
@@ -195,6 +197,34 @@ function finishLoad(raw: Record<string, unknown>, ctx: LoadContext): LoadResult 
   const file = doc as unknown as SaveFile;
   if (!isNum(file.savedAt) || file.savedAt <= 0) file.savedAt = Date.now();
   return { ok: true, state, file };
+}
+
+// Опциональные поля симуляции (Elephant.pool/targetItem/signalStarted и т.п.)
+// при записи кодируются как null (JSON не переносит undefined). Живое состояние
+// хранит в них undefined, поэтому на загрузке возвращаем null -> undefined для
+// полей, тип которых допускает undefined. Поля с честным «пусто = null»
+// (player.held) в список не входят и остаются null. Идемпотентно: повторный
+// save после загрузки даёт ту же запись (undefined -> null).
+const NULLABLE_OPTIONAL_FIELDS: ReadonlySet<string> = new Set([
+  'pool', // Elephant.pool?: number
+  'targetItem', // Elephant.targetItem?: number
+  'signalStarted', // Elephant.signalStarted?: number
+]);
+
+function restoreUndefinedFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) restoreUndefinedFields(item);
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const key of Object.keys(value)) {
+    const child = value[key];
+    if (child === null && NULLABLE_OPTIONAL_FIELDS.has(key)) {
+      delete value[key]; // опциональное поле: отсутствие ключа === undefined
+    } else {
+      restoreUndefinedFields(child);
+    }
+  }
 }
 
 // Возврат чисел вне JSON из sidecar-карты по путям 'state.a.b' (Infinity).
