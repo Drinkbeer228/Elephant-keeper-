@@ -75,6 +75,17 @@ export interface Elephant {
   state: ElephantState;
   next: ElephantState; // что делать по прибытии
   timer: number; // игровых минут до конца текущего занятия
+  /**
+   * Метаданные FSM (спека elephant-fsm, инкремент 2). Опциональное поле —
+   * старые сейвы грузятся без bump схемы: ensureFsm() создаёт запись на лету.
+   */
+  fsm?: {
+    since: number; // игровое время входа в текущее состояние
+    last: string; // предыдущее состояние ('' — до первого перехода)
+    transitions: number; // сколько раз менял состояние за смену
+    currentPriority?: number; // приоритет активного узла (для гистерезиса прерываний)
+    committedUntil?: number; // до какого времени узел 'finish' нельзя прерывать
+  };
   hunger: number;
   thirst: number;
   bladder: number;
@@ -316,6 +327,10 @@ export interface State {
   log: ShiftEvent[];
   prep: Prep | null;
   report: import('./handover').Report | null;
+  /** Внутреннее (не в сейв): игровые минуты текущего подшага — читает FSM-мост. */
+  aiDt?: number;
+  /** Внутреннее (не в сейв): реальные секунды текущего подшага — читает FSM-мост. */
+  aiDtReal?: number;
 }
 
 export type Command =
