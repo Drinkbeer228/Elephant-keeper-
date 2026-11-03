@@ -64,32 +64,47 @@ export function applyMigrations(raw: Record<string, unknown>): Record<string, un
 // ----------------------------------------------------------------------------
 
 /**
- * Числа вне JSON (Infinity → null) и id предмета в руках.
- * Пишутся в sidecar-карту nonFinite: при загрузке значения возвращаются по путям,
- * а held перебиндится на элемент items[] по этому id (копия held после stringify
- * не содержит undefined-полей вроде nested — deepEqual без sidecar не сошёлся бы).
+ * Снимок состояния в JSON-строку. mapId и размеры сетки пишутся в header.
+ * Глубокая копия с undefined -> null (JSON иначе выбрасывает пары, и round-trip
+ * не может дать точное равенство); Infinity уходит в sidecar nonFinite по путям.
  */
-export function nonFiniteNumbers(state: State): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!Number.isFinite(state.musthNextAt)) out['state.musthNextAt'] = state.musthNextAt;
-  for (const tire of state.tires) {
-    if (!Number.isFinite(tire.cooldown)) out[`state.tires.${tire.id}.cooldown`] = tire.cooldown;
-  }
-  if (state.player.held) out['state.player.held.id'] = state.player.held.id;
-  return out;
-}
-
-/** Снимок состояния в JSON-строку. mapId и размеры сетки пишутся в header. */
 export function serializeSave(state: State, mapId: string, floor: { cols: number; rows: number }, savedAt = Date.now()): string {
+  const nonFinite: Record<string, number> = {};
+  const stateCopy = canonicalizeForJson(state as unknown as Record<string, unknown>, 'state', nonFinite) as State;
   const file: SaveFile = {
     schemaVersion: SCHEMA_VERSION,
     mapId,
     floor: { cols: floor.cols, rows: floor.rows },
     savedAt,
-    nonFinite: nonFiniteNumbers(state),
-    state,
+    ...(Object.keys(nonFinite).length > 0 ? { nonFinite } : {}),
+    state: stateCopy,
   };
   return JSON.stringify(file);
+}
+
+// Копия для записи: undefined -> null (значение сохраняется явно), Infinity -> null
+// с записью пути в sidecar. Числа вне диапазона double теряют точность при round-trip —
+// это ограничение формата JSON (в спеке §4), на практике в State таких полей нет.
+function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<string, number>): unknown {
+  if (value === undefined) return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      nonFinite[path] = value;
+      return null;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, i) => canonicalizeForJson(item, `${path}.${i}`, nonFinite));
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = canonicalizeForJson(item, `${path}.${key}`, nonFinite);
+    }
+    return out;
+  }
+  return value;
 }
 
 /**
@@ -153,65 +168,39 @@ function finishLoad(raw: Record<string, unknown>, ctx: LoadContext): LoadResult 
     return { ok: false, reason: 'size-mismatch', detail: `сейв ${floor.cols}×${floor.rows}, карта ${ctx.cols}×${ctx.rows}` };
   }
 
-  if (!isValidSaveFile(raw)) return { ok: false, reason: 'corrupt-state', detail: structuralError(raw) };
-
-  // Структурно файл наш. Восстанавливаем то, что JSON не переносит:
+  // Восстанавливаем то, что формат не переносит (до структурной проверки:
+  // musthNextAt в валидаторе обязан быть числом, а Infinity в JSON лежит как null):
+  // Infinity из sidecar по путям, null-заполнители undefined-полей остаются null —
+  // они эквивалентны живой семантике и одинаково сериализуются повторным save.
   const doc = raw as Record<string, unknown>;
   const state = doc.state as State;
-  reviveNonFinite(doc, state);
-  stripUndefined(state); // в оригинале поля могут лежать со значением undefined — JSON их теряет
+  const nonFinite = isRecord(doc.nonFinite) ? (doc.nonFinite as Record<string, number>) : undefined;
+  reviveNumbers(nonFinite, state);
+
+  if (!isValidSaveFile(raw)) return { ok: false, reason: 'corrupt-state', detail: structuralError(raw) };
   return { ok: true, state, file: doc as unknown as SaveFile };
 }
 
-// JSON выбрасывает пары с undefined. Чтобы round-trip давал deepEqual с живым состоянием,
-// приводим те же ключи к undefined (ключ остаётся, значение отсутствует — семантика та же).
-function stripUndefined(value: unknown, seen = new Set<unknown>()): void {
-  if (value === null || typeof value !== 'object') return;
-  if (seen.has(value)) return;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) stripUndefined(item, seen);
-    return;
-  }
-  const record = value as Record<string, unknown>;
-  for (const [key, item] of Object.entries(record)) {
-    if (item === null && !(key in NON_NULLABLE)) {
-      // null мог прийти из sidecar-восстановления (Infinity) — не трогать
-    }
-    if (item === undefined) delete record[key]; // на всякий случай: парсер такое не создаёт
-    else stripUndefined(item, seen);
-  }
-}
-const NON_NULLABLE: Record<string, true> = { nonFinite: true };
-
-// Возврат значений из sidecar-карты nonFinite по путям 'a.b' (Infinity) и перебиндинг held.
-// Пути вида 'state.tires.female.cooldown' спускаются через массивы по совпадению поля id.
-function reviveNonFinite(doc: Record<string, unknown>, state: State): void {
-  const map = doc.nonFinite;
-  if (!isRecord(map)) return;
+// Возврат чисел вне JSON из sidecar-карты по путям 'state.a.b' (Infinity).
+// Сегмент 'state' отбрасывается; пути вроде 'state.tires.female.cooldown' спускаются
+// через массивы по совпадению element.id === сегмент ('female').
+function reviveNumbers(map: Record<string, number> | undefined, state: State): void {
+  if (!map) return;
   for (const [path, value] of Object.entries(map)) {
     if (typeof value !== 'number') continue;
-    if (path === 'state.player.held.id') continue; // обрабатывается ниже
-    setPath(doc, path.split('.'), value);
+    const parts = path.split('.');
+    if (parts[0] === 'state') parts.shift();
+    setPath(state as unknown as Record<string, unknown>, parts, value);
   }
 
   // held игрока в State — ссылка на элемент items[] (drop() сравнивает по идентичности).
-  // JSON превращает ссылку в копию: id берём из sidecar (копия held теряет undefined-поля вроде
-  // nested/liters), найденный предмет дополняем значениями копии и кладём в руки по ссылке.
+  // JSON превращает ссылку в копию: ищем предмет по id и подменяем ссылку. Копия held
+  // после stringify содержит ровно те же перечислимые поля, что и живой предмет
+  // (undefined-поля JSON отбрасывает с обеих сторон), поэтому deepEqual не ломается.
   const held = state.player.held;
   if (!held) return;
-  const heldIdValue = map['state.player.held.id'];
-  const id = typeof heldIdValue === 'number' ? heldIdValue : held.id;
-  const found = state.items.find((i) => i.id === id);
-  if (found) {
-    // Object.assign копирует только перечислимые ключи самой копии — «мёртвые» поля найденного
-    // предмета (например, liter у поставленной на место вазы) нужно сначала сбросить
-    for (const key of Object.keys(found)) delete (found as unknown as Record<string, unknown>)[key];
-    Object.assign(found, held);
-    state.player.held = found;
-  } else {
-    state.player.held = null;
-  }
+  const found = state.items.find((i) => i.id === held.id);
+  state.player.held = found ?? null;
 }
 
 /** Спуск по пути: объекты — по имени поля, массивы — по совпадению element.id === сегмент. */
@@ -251,6 +240,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function isNum(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
+// Поля-таймеры, где живое значение может быть Infinity («никогда») — после revive
+// sidecar такие числа возвращаются в state, валидатор обязан их пропускать.
+function isTime(v: unknown): v is number {
+  return typeof v === 'number';
+}
 function isStr(v: unknown): v is string {
   return typeof v === 'string';
 }
@@ -272,6 +266,7 @@ export function isValidSaveFile(v: unknown): v is SaveFile {
   if (!isRecord(v.state)) return fail('нет state');
   const s = v.state;
   if (!isNum(s.seed) || !isNum(s.rng) || !isNum(s.t) || !isNum(s.nextItemId)) return fail('state: битые счётчики');
+  if (!isTime(s.musthNextAt)) return fail('state: musthNextAt не число');
   if (!PHASES.includes(String(s.phase))) return fail('state: неизвестная фаза');
   if (!Array.isArray(s.cells) || s.cells.length === 0) return fail('state: нет сетки');
   for (const row of s.cells as unknown[]) {

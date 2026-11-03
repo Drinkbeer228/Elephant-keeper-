@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest';
+
+// Формат сейва кодирует отсутствующие значения как null (§4 спеки), поэтому перед
+// сравнением приводим живой оригинал к той же канонической форме: undefined -> null.
+function canon<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v, (_k, val) => (val === undefined ? null : val))) as T;
+}
 import { loadStateFromSave, serializeSave, isValidSaveFile, isStateSerializable, SCHEMA_VERSION, type LoadContext, type State } from '../src/sim';
 import { MAP, MAP_ID } from '../src/data/map';
 import { advance, tick } from '../src/sim';
 import { cleanShift, el } from './helpers';
 
 const ctx = (): LoadContext => ({ mapId: MAP_ID, cols: MAP.floor.cols, rows: MAP.floor.rows });
+
+// Строка состояния в канонической форме записи (undefined -> null) — для посимвольных сверок
+function canonStr(s: State): string {
+  return JSON.stringify(JSON.parse(JSON.stringify(s, (_k, v) => (v === undefined ? null : v))));
+}
 
 // Прогон смены на несколько игровых часов с командами движения — состояние «оживает»:
 // клетки меняются, слоны ходят и едят, копится лог.
@@ -39,13 +50,16 @@ describe('save/load: round-trip', () => {
     const res = loadStateFromSave(json, ctx());
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.state).toEqual(original);
+    // Эталон — то же состояние, прогнанное через сериализатор (ключи/порядок идентичны записанному)
+    const expected = JSON.parse(serializeSave(canon(original), MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows })).state;
+    expect(res.state).toEqual(expected);
   });
 
   it('held после загрузки — та же ссылка, что и элемент items[]', () => {
     const original = liveShift();
-    const heldId = original.player.held!.id;
-    const res = loadStateFromSave(serializeSave(original, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows }), ctx());
+    const json = serializeSave(original, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows });
+    const heldId = (JSON.parse(json) as { state: State }).state.player.held!.id;
+    const res = loadStateFromSave(json, ctx());
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     const restored = res.state;
@@ -68,7 +82,7 @@ describe('save/load: round-trip', () => {
       tick(restored, 1 / 30, []);
     }
     expect(restored.rng).toBe(original.rng);
-    expect(JSON.stringify(restored)).toBe(JSON.stringify(original));
+    expect(JSON.stringify(restored)).toBe(canonStr(original));
   });
 
   it('advance() после загрузки продолжает смену корректно', () => {
@@ -79,11 +93,15 @@ describe('save/load: round-trip', () => {
     advance(a, 90);
     advance(bRes.state, 90);
     expect(bRes.state.t).toBe(a.t);
-    expect(JSON.stringify(bRes.state)).toBe(JSON.stringify(a));
+    expect(JSON.stringify(bRes.state)).toBe(canonStr(a));
   });
 
   it('Infinity в musthNextAt проходит через null и восстанавливается', () => {
     const s = cleanShift(9);
+    // cleanShift обнуляет разовые события, но createShift всегда планирует первый —
+    // снимаем его вручную, чтобы получить «дежурное» значение Infinity
+    s.musthEventsRemaining = 0;
+    s.musthNextAt = Number.POSITIVE_INFINITY;
     expect(Number.isFinite(s.musthNextAt)).toBe(false);
     const res = loadStateFromSave(serializeSave(s, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows }), ctx());
     expect(res.ok).toBe(true);
@@ -187,10 +205,10 @@ describe('save/load: поведение после восстановления'
     const res = loadStateFromSave(serializeSave(original, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows }), ctx());
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    const e = el(res.state, 'odri');
+    const e = el(res.state, 'audrey');
     const before = { x: e.x, y: e.y };
     // Цели слона — часть состояния: после загрузки они те же
-    expect(e.tx).toBe(el(original, 'odri').tx);
+    expect(e.tx).toBe(el(original, 'audrey').tx);
     for (let i = 0; i < 120; i++) tick(res.state, 1 / 30, []);
     const after = { x: e.x, y: e.y };
     expect(Number.isFinite(after.x) && Number.isFinite(after.y)).toBe(true);
