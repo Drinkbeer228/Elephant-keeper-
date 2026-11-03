@@ -9,7 +9,7 @@ describe('луг и природное обогащение', () => {
     const state = cleanShift();
     const pretty = el(state, 'pretty');
     for (let attempt = 0; attempt < 100 && pretty.next !== 'scratch'; attempt++) {
-      hold(pretty, 30, 5);
+      hold(pretty, 30, 25);
       pretty.boredom = 50;
       decide(state, pretty);
     }
@@ -32,14 +32,14 @@ describe('луг и природное обогащение', () => {
   it('грязный луг и мутный бассейн не дают сбросить скуку', () => {
     const state = cleanShift();
     const pretty = el(state, 'pretty');
-    hold(pretty, 30, 5);
+    hold(pretty, 30, 25);
     pretty.boredom = 80;
     state.dung.push(
-      { id: 101, x: 30, y: 5, at: 0 },
-      { id: 102, x: 30.2, y: 5, at: 0 },
-      { id: 103, x: 30.4, y: 5, at: 0 },
-      { id: 104, x: 30.6, y: 5, at: 0 },
-      { id: 105, x: 30.8, y: 5, at: 0 },
+      { id: 101, x: 30, y: 25, at: 0 },
+      { id: 102, x: 30.2, y: 25, at: 0 },
+      { id: 103, x: 30.4, y: 25, at: 0 },
+      { id: 104, x: 30.6, y: 25, at: 0 },
+      { id: 105, x: 30.8, y: 25, at: 0 },
     );
 
     decide(state, pretty);

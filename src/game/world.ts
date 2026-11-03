@@ -3,7 +3,7 @@ import { PX } from '../art/pixel';
 import { LAMPS } from '../art/worldPx';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
-import { MAP } from '../data/map';
+import { MAP, COMPLEXES, type Segment } from '../data/map';
 import { darkness, groundOf, sawdustAbsorbed, stinkSources, type Cell, type State } from '../sim';
 import { ElephantView } from './elephantView';
 import { KeeperView } from './keeperView';
@@ -66,7 +66,6 @@ export class WorldScene extends Phaser.Scene {
   private glow!: Phaser.GameObjects.Image;
   private bulbs: Phaser.GameObjects.Image[] = [];
   private fence!: Phaser.GameObjects.Graphics;
-  private fenceRight: { g: Phaser.GameObjects.Graphics; y1: number }[] = [];
   private fenceKey = '';
   private poolG!: Phaser.GameObjects.Graphics;
   private water!: Phaser.GameObjects.Graphics;
@@ -84,6 +83,8 @@ export class WorldScene extends Phaser.Scene {
   private truck!: Phaser.GameObjects.Image;
   private supplyTruck!: Phaser.GameObjects.Image;
   private horn!: Phaser.GameObjects.Text;
+  private supplyStatusTag!: Phaser.GameObjects.Text;
+  private receivingTag!: Phaser.GameObjects.Text;
   private jackImg!: Phaser.GameObjects.Image;
   private palletImg!: Phaser.GameObjects.Image;
   private groundPalletImgs = new Map<number, Phaser.GameObjects.Image>();
@@ -214,11 +215,13 @@ export class WorldScene extends Phaser.Scene {
       }
     }
 
-    // Гирлянда по кромке шатра верхнего загона
+    // Гирлянды по кромкам двух слоновников
     const colors = ['r', 'y', 'b', 'g'];
-    const tentRight = (MAP.bedding.x + MAP.bedding.cols) * TILE;
-    for (let i = 0, x = MAP.bedding.x * TILE + 12; x < tentRight; x += 30, i++) {
-      this.bulbs.push(this.img(x, 0.36 * TILE + (i % 2) * PX, `deco-bulb-${colors[i % 4]}`, -800, 0));
+    for (const bedding of [MAP.bedding, MAP.bedding2]) {
+      const tentRight = (bedding.x + bedding.cols) * TILE;
+      for (let i = 0, x = bedding.x * TILE + 12; x < tentRight; x += 30, i++) {
+        this.bulbs.push(this.img(x, bedding.y * TILE - 0.36 * TILE + (i % 2) * PX, `deco-bulb-${colors[i % 4]}`, -800, 0));
+      }
     }
     // Фонари на столбах — только вдоль дороги справа; в постройках свет потолочный
     for (const l of LAMPS) this.img(l.x * TILE, (l.y + 0.35) * TILE, 'deco-lantern', (l.y + 0.35) * TILE);
@@ -229,7 +232,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Места тазов: бетонная площадка у решётки и табличка с именем
     for (const p of ELEPHANTS) {
-      const fenceY = p.paddock === 'upper' ? MAP.fenceY : MAP.fenceY2;
+      const fenceY = MAP.complexes[p.paddock].bounds.y1;
       this.img(p.slot.x * TILE, p.slot.y * TILE + 8, 'st-pad', -850, 0.5);
       this.tag(p.name.toUpperCase(), p.slot.x * TILE, fenceY * TILE - 9 * PX).setDepth(fenceY * TILE + 3).setColor('#000000').setBackgroundColor('#fcfcfc');
     }
@@ -257,14 +260,8 @@ export class WorldScene extends Phaser.Scene {
     const br = at('basinRack');
     this.img(br.x - 2 * PX, br.y, 'st-basin-rack', -860);
     // Вывески построек — на фасаде над дверью из верхнего коридора
-    for (const [r, x] of [
-      [MAP.rooms.duty, 8.8],
-      [MAP.rooms.wash, 18.4],
-      [MAP.rooms.kitchen, 27.3],
-      [MAP.rooms.hay, 37.3],
-      [MAP.rooms.sawdust, 47.1],
-    ] as const)
-      this.tag(r.label, x * TILE, r.y0 * TILE - 6).setDepth(-700);
+    for (const r of Object.values(MAP.rooms))
+      this.tag(r.label, ((r.x0 + r.x1) / 2) * TILE, r.y0 * TILE - 6).setDepth(-700);
     // Котёл каши и стол нарезки — раздельные станции
     const sv = at('stove');
     this.stove = this.img(sv.x, sv.y, 'st-kitchen', sv.y);
@@ -284,7 +281,8 @@ export class WorldScene extends Phaser.Scene {
     const sy = MAP.stations.unload.y * TILE;
     this.supplyTruck = this.img((MAP.road.x0 + 1.4) * TILE, sy, 'truck-supply', sy).setVisible(false);
     this.horn = this.tag('', (MAP.stations.unload.x + 2.4) * TILE, sy - 46 * PX).setVisible(false).setColor('#fcfcfc').setBackgroundColor('#d82800');
-    this.tag('ПРИЁМКА · 4 ПАЛЛЕТЫ', MAP.stations.receiving.x * TILE, (MAP.stations.receiving.y + 1.35) * TILE);
+    this.supplyStatusTag = this.tag('', (MAP.stations.unload.x + 2.4) * TILE, sy - 18 * PX).setVisible(false).setColor('#fcfcfc').setBackgroundColor('#3c3c44');
+    this.receivingTag = this.tag('', MAP.stations.receiving.x * TILE, (MAP.stations.receiving.y - 0.85) * TILE).setColor('#fcfcfc').setBackgroundColor('#3c3c44');
     // Рохля с поддоном: катится за кипером, стоит на своём бетонном пятачке
     const jy = MAP.jackStart.y * TILE;
     this.jackImg = this.img(MAP.jackStart.x * TILE, jy, 'jack', jy);
@@ -314,9 +312,7 @@ export class WorldScene extends Phaser.Scene {
     this.feeder2 = this.img(fd2.x * TILE, (fd2.y - 0.6) * TILE, 'st-feeder-2', (fd2.y - 0.6) * TILE);
 
     // Ограждения: горизонтальные решётки обоих загонов и правые линии
-    this.fence = this.add.graphics().setDepth(MAP.fenceY * TILE + 2);
-    for (let row = 1; row < MAP.fenceY; row++) this.fenceRight.push({ g: this.add.graphics().setDepth((row + 1) * TILE + 2), y1: (row + 1) * TILE });
-    for (let row = MAP.fenceY2; row < MAP.paddock2.y1; row++) this.fenceRight.push({ g: this.add.graphics().setDepth((row + 1) * TILE + 2), y1: (row + 1) * TILE });
+    this.fence = this.add.graphics().setDepth(2000);
 
     // Вода в бассейнах: мерцание и муть, плавающий мусор — картинками
     this.poolG = this.add.graphics().setDepth(12000);
@@ -405,18 +401,20 @@ export class WorldScene extends Phaser.Scene {
     row('grain', 'unit-sack', [
       [24.7, 23.4], [25.1, 23.4], [25.5, 23.4], [25.9, 23.4],
       [24.9, 23.0], [25.3, 23.0], [25.7, 23.0], [26.1, 23.0],
+      [26.3, 23.4],
     ]);
     row('veg', 'unit-crate-veg', [
       [31.1, 19.9], [31.1, 20.6], [31.1, 21.3], [31.5, 19.9], [31.5, 20.6], [31.5, 21.3],
     ]);
     row('fruit', 'unit-crate-fruit', [
       [30.0, 22.5], [30.5, 22.5], [31.0, 22.5], [30.2, 22.1], [30.7, 22.1], [31.2, 22.1],
+      [29.8, 23.0], [30.3, 23.0], [30.8, 23.0], [31.3, 23.0],
     ]);
     // Сенник: тюки сена вдоль южной стены, охапки соломы у северной
-    row('hay', 'deco-bale', stack(36.2, 23.3, 16));
-    row('straw', 'litter-straw', stack(33.9, 19.4, 16));
+    row('hay', 'deco-bale', stack(36.2, 23.3, 17));
+    row('straw', 'litter-straw', stack(33.9, 19.4, 17));
     // Опилочник: горки опилок у ларя
-    row('sawdust', 'litter-sawdust', stack(46.5, 22.6, 16));
+    row('sawdust', 'litter-sawdust', [...stack(46.5, 22.6, 16), ...stack(49.0, 22.6, 8)]);
     for (const [kind, x, y] of [
       ['hay', 37.5, 21.3],
       ['straw', 34.6, 20.7],
@@ -585,73 +583,63 @@ export class WorldScene extends Phaser.Scene {
 
   // Капитальная решётка обоих загонов: проходы с перекладиной, ворота — две створки
   private drawFence(s: State): void {
-    const key = `${s.gateOpen}`;
+    const key = `${s.gates.female}:${s.gates.male}`;
     if (key === this.fenceKey) return;
     this.fenceKey = key;
     const P = PX;
-    const IRON = 0x2c2c30;
     const SHINE = 0x7c7c7c;
-    const bars = (g: Phaser.GameObjects.Graphics, x0: number, x1: number, y: number, h: number) => {
-      g.fillStyle(0x000000).fillRect(x0, y - h - P, x1 - x0, 3 * P);
-      g.fillStyle(SHINE).fillRect(x0, y - h, x1 - x0, P);
-      g.fillStyle(0x000000).fillRect(x0, y - 3 * P, x1 - x0, 3 * P);
-      g.fillStyle(SHINE).fillRect(x0, y - 2 * P, x1 - x0, P);
-      for (let x = x0 + P; x < x1 - P; x += 3 * P) {
-        g.fillStyle(IRON).fillRect(x, y - h, P, h);
-        g.fillStyle(SHINE).fillRect(x, y - h + 2 * P, P, P);
-      }
-    };
-    const post = (g: Phaser.GameObjects.Graphics, x: number, y: number, h: number) => {
-      g.fillStyle(0x000000).fillRect(x - 2 * P, y - h - 2 * P, 4 * P, h + 2 * P);
-      g.fillStyle(0x545454).fillRect(x - P, y - h - P, 2 * P, h + P);
-      g.fillStyle(0xbcbcbc).fillRect(x - P, y - h - P, P, h + P);
-    };
-    const H = 16 * P;
     const g = this.fence;
     g.clear();
-    // Горизонтальные решётки: верхний загон (решётка снизу) и нижний (решётка сверху)
-    for (const [y, door, gate] of [
-      [MAP.fenceY * TILE, MAP.door, MAP.elephantGate],
-      [MAP.fenceY2 * TILE, MAP.door2, MAP.elephantGate2],
-    ] as const) {
-      for (const [x0, x1] of [
-        [MAP.paddock.x0, door.x0],
-        [door.x1, gate.x0],
-        [gate.x1, MAP.fenceX],
-      ]) {
-        bars(g, x0 * TILE, x1 * TILE, y, H);
-        for (let x = x0 + 1.75; x < x1 - 0.5; x += 1.75) post(g, Math.round(x * TILE), y, H);
-      }
-      for (const x of [MAP.paddock.x0, door.x0, door.x1, gate.x0, gate.x1, MAP.fenceX]) post(g, Math.round(x * TILE), y, H + 2 * P);
-      // Проход для человека: перекладина над головой — слон не пролезет
-      g.fillStyle(0x000000).fillRect(door.x0 * TILE, y - H - 9 * P, (door.x1 - door.x0) * TILE, 3 * P);
-      g.fillStyle(SHINE).fillRect(door.x0 * TILE, y - H - 8 * P, (door.x1 - door.x0) * TILE, P);
-      // Ворота для слона: закрыты — две створки с красной задвижкой; открыты — распахнуты, с флажком
-      const gx0 = gate.x0 * TILE + 2 * P;
-      const gx1 = gate.x1 * TILE - 2 * P;
-      const inside = y === MAP.fenceY * TILE ? 1 : -1;
-      if (s.gateOpen) {
-        for (const gx of [gx0, gx1 - 3 * P]) {
-          g.fillStyle(0x000000).fillRect(gx, y - 30 * P * inside, 3 * P, 30 * P * inside);
-          g.fillStyle(SHINE).fillRect(gx + P, y - 29 * P * inside, P, 28 * P * inside);
+    const inComplexBounds = (wall: Segment): boolean =>
+      Object.values(COMPLEXES).some(({ bounds: b }) => {
+        const x0 = Math.min(wall.x0, wall.x1);
+        const x1 = Math.max(wall.x0, wall.x1);
+        const y0 = Math.min(wall.y0, wall.y1);
+        const y1 = Math.max(wall.y0, wall.y1);
+        return x0 >= b.x0 && x1 <= b.x1 && y0 >= b.y0 && y1 <= b.y1;
+      });
+    g.lineStyle(3 * P, 0x000000, 1);
+    for (const wall of MAP.walls.filter(inComplexBounds)) {
+      g.beginPath();
+      g.moveTo(wall.x0 * TILE, wall.y0 * TILE);
+      g.lineTo(wall.x1 * TILE, wall.y1 * TILE);
+      g.strokePath();
+      g.lineStyle(P, SHINE, 1);
+      g.beginPath();
+      g.moveTo(wall.x0 * TILE, wall.y0 * TILE - P);
+      g.lineTo(wall.x1 * TILE, wall.y1 * TILE - P);
+      g.strokePath();
+      g.lineStyle(3 * P, 0x000000, 1);
+    }
+    for (const gate of MAP.gates) {
+      const open = s.gates[gate.id];
+      const color = open ? 0x4cfc20 : 0xd82800;
+      if (gate.orientation === 'horizontal') {
+        const y = gate.coord * TILE;
+        const x0 = gate.opening.start * TILE;
+        const x1 = gate.opening.end * TILE;
+        if (open) {
+          g.lineStyle(2 * P, SHINE, 1);
+          g.lineBetween(x0, y, x0 - 8 * P, y + 8 * P);
+          g.lineBetween(x1, y, x1 + 8 * P, y + 8 * P);
+        } else {
+          g.lineStyle(3 * P, color, 1);
+          g.lineBetween(x0, y, x1, y);
         }
-        g.fillStyle(0xd82800).fillRect(gx0 + 3 * P, y - 30 * P * inside, 5 * P, 4 * P);
       } else {
-        const half = (gx1 - gx0) / 2;
-        bars(g, gx0, gx0 + half - P, y, H);
-        bars(g, gx0 + half + P, gx1, y, H);
-        g.fillStyle(0xd82800).fillRect(gx0 + half - 2 * P, y - 10 * P, 4 * P, 3 * P);
+        const x = gate.coord * TILE;
+        const y0 = gate.opening.start * TILE;
+        const y1 = gate.opening.end * TILE;
+        if (open) {
+          g.lineStyle(2 * P, SHINE, 1);
+          g.lineBetween(x, y0, x - 8 * P, y0 - 8 * P);
+          g.lineBetween(x, y1, x + 8 * P, y1 + 8 * P);
+        } else {
+          g.lineStyle(3 * P, color, 1);
+          g.lineBetween(x, y0, x, y1);
+        }
       }
     }
-    // Правые линии у двора — по сегменту на ряд, чтобы слоны правильно заходили за них
-    this.fenceRight.forEach(({ g: rg, y1 }) => {
-      rg.clear();
-      const x = MAP.fenceX * TILE;
-      rg.fillStyle(0x000000).fillRect(x - 2 * P, y1 - TILE, 4 * P, TILE);
-      rg.fillStyle(IRON).fillRect(x - P, y1 - TILE, 2 * P, TILE);
-      for (let yy = y1 - TILE; yy < y1; yy += 3 * P) rg.fillStyle(SHINE).fillRect(x - P, yy, P, P);
-      if ((y1 / TILE) % 2 === 0) post(rg, x, y1, H);
-    });
   }
 
   private drawStations(s: State): void {
@@ -694,6 +682,10 @@ export class WorldScene extends Phaser.Scene {
     const sp = s.supply;
     const open = sp.arrived && !sp.left;
     this.supplyTruck.setVisible(open);
+    this.supplyStatusTag
+      .setText(`РАЗГРУЗКА: ${sp.bays.length}`)
+      .setVisible(open);
+    this.receivingTag.setText(`БУФЕР: ${Math.max(0, MAP.receivingSpots.length - sp.ground.length)}/${MAP.receivingSpots.length} МЕСТ СВОБОДНО`);
     this.horn
       .setText('ГУДОК!')
       .setVisible(open && s.t - BALANCE.supply.arriveAt < 20 && Math.floor(t * 3) % 2 === 0);
@@ -714,6 +706,8 @@ export class WorldScene extends Phaser.Scene {
         this.groundPalletImgs.set(pallet.id, image);
       }
       image.setTexture(`pallet-${pallet.cargo[0].kind}`).setPosition(pallet.x * TILE, pallet.y * TILE).setDepth(pallet.y * TILE);
+      if (pallet.reservedBy) image.setTint(0x84e8ff);
+      else image.clearTint();
     }
     for (const [id, image] of this.groundPalletImgs) {
       if (!groundIds.has(id)) {

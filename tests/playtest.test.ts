@@ -5,7 +5,7 @@ import { playShift } from '../src/dev/bot';
 // Опытный кипер (бот) проходит смену. Если он не справляется — смена слишком тяжёлая,
 // если скучает больше половины времени — слишком лёгкая.
 describe('плейтест ботом', () => {
-  const seeds = [1, 3, 6];
+  const seeds = [1, 3, 4, 6];
   const results = seeds.map((seed) => {
     const s = createShift(seed);
     const bot = playShift(s);
@@ -24,6 +24,7 @@ describe('плейтест ботом', () => {
       console.log('   дела', JSON.stringify(bot.stats.jobs), 'сорвано', JSON.stringify(bot.stats.aborted), 'лог-бед', s.log.filter((l) => l.kind === 'bad').length);
     }
     expect(results.every((x) => x.s.phase === 'report')).toBe(true);
+    expect(results.every((x) => !x.s.supply.missed && x.s.supply.bays.length === 0)).toBe(true);
     // Страховка от поломок, а не мерило баланса; после расширения карты средний результат ниже.
     const avg = results.reduce((a, x) => a + x.r.score, 0) / results.length;
     console.log('средний балл', Math.round(avg));
@@ -36,5 +37,5 @@ describe('плейтест ботом', () => {
     playShift(again);
     expect(again.report!.score, `seed ${seed}`).toBe(r.score);
     expect(again.report!.checklist).toEqual(r.checklist);
-  }, 15000);
+  }, 60000);
 });

@@ -9,7 +9,7 @@ import { act, at, cleanShift, hold, kashaReady, serve, stand } from './helpers';
 function serveKasha(s: ReturnType<typeof cleanShift>): void {
   stand(s, 'stove');
   expect(act(s)).toBe('Разложить кашу по тазам (6)');
-  for (const e of s.elephants.filter((elephant) => profileOf(elephant).paddock === 'upper')) {
+  for (const e of s.elephants) {
     const b = basinsOnRack(s).find((x) => x.food === 'kasha' && x.owner === e.id)!;
     at(s, b.x + 0.5, b.y);
     expect(act(s, `Взять: таз с кашей для ${profileOf(e).name}`)).toMatch(/^Взять: таз с кашей для/);
@@ -42,7 +42,7 @@ describe('корм', () => {
     expect(act(s)).toBe('Запарить кашу (20 мин)');
     advance(s, 21);
     serveKasha(s);
-    for (const e of s.elephants.filter((elephant) => profileOf(elephant).paddock === 'upper')) expect(mealStatus(s, 'kasha1', e.id)).toBe('ok');
+    for (const e of s.elephants.filter((elephant) => profileOf(elephant).paddock === 'female')) expect(mealStatus(s, 'kasha1', e.id)).toBe('ok');
   });
 
   it('каша на полчаса позже — «опоздание», без каши — «пропуск»', () => {
@@ -54,7 +54,7 @@ describe('корм', () => {
     advance(s, 21);
     advance(s, 5);
     serveKasha(s); // 13:26 — позже 20 минут запаса
-    for (const e of s.elephants.filter((elephant) => profileOf(elephant).paddock === 'upper')) {
+    for (const e of s.elephants.filter((elephant) => profileOf(elephant).paddock === 'female')) {
       expect(mealStatus(s, 'kasha1', e.id)).toBe('late');
       expect(mealStatus(s, 'kasha2', e.id)).toBe('missed');
     }

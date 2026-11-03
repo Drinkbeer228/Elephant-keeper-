@@ -37,15 +37,26 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     trough2: 80,
     valve2Open: false,
     pools: MAP.pools.map(() => ({ dirty: 0, floats: [] })),
-    tires: [
-      { id: 'upper', paddock: 'upper', x: 28, y: 8, vx: 0, vy: 0, flightLeft: 0, flightDuration: 0, cooldown: 0, hit: false },
-      { id: 'lower', paddock: 'lower', x: 28, y: 37, vx: 0, vy: 0, flightLeft: 0, flightDuration: 0, cooldown: 0, hit: false },
-    ],
+    tires: (['female', 'male'] as const).map((id) => {
+      const { active } = MAP.complexes[id];
+      return {
+        id,
+        paddock: id,
+        x: (active.x0 + active.x1) / 2,
+        y: (active.y0 + active.y1) / 2,
+        vx: 0,
+        vy: 0,
+        flightLeft: 0,
+        flightDuration: 0,
+        cooldown: 0,
+        hit: false,
+      };
+    }),
     musthEventsRemaining: 0,
     musthNextAt: Number.POSITIVE_INFINITY,
     partner: {
-      x: MAP.playerStart.x + 2.5,
-      y: 26.4,
+      x: MAP.partnerStart.x,
+      y: MAP.partnerStart.y,
       facing: { x: 0, y: -1 },
       bucket: 0,
       waste: 0,
@@ -55,11 +66,12 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       path: [],
       pathTarget: null,
       foodBasin: null,
+      supplyPalletId: null,
       knockdownTimer: 0,
     },
     dutyLight: false,
     lastOverflow: 0,
-    gateOpen: false,
+    gates: { female: false, male: false },
     barrow: {
       x: MAP.barrowStart.x,
       y: MAP.barrowStart.y,
@@ -108,7 +120,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
   };
 
   for (const elephant of state.elephants) {
-    if (ELEPHANTS.find((p) => p.id === elephant.id)?.paddock === 'lower') {
+    if (ELEPHANTS.find((p) => p.id === elephant.id)?.paddock === 'male') {
       elephant.traits = {
         appetite: randomInt(state, 80, 140) / 100,
         messiness: randomInt(state, 80, 140) / 100,

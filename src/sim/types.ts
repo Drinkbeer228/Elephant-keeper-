@@ -178,6 +178,15 @@ export interface Jack {
   cargo: CargoUnit[] | null;
 }
 
+export interface ReceivingPallet {
+  id: number;
+  cargo: CargoUnit[];
+  x: number;
+  y: number;
+  reservedBy?: 'partner';
+  carriedBy?: 'partner';
+}
+
 // Продуктовый грузовик (этап 3): встаёт у дороги, водитель ждёт у заднего борта
 export interface Driver {
   x: number;
@@ -191,7 +200,7 @@ export interface Supply {
   left: boolean;
   missed: boolean; // уехал с непринятым грузом — замечание в табеле
   bays: CargoUnit[][]; // поддоны в борту; каждый — список видов груза
-  ground: { id: number; cargo: CargoUnit[]; x: number; y: number }[];
+  ground: ReceivingPallet[];
   driver: Driver;
 }
 
@@ -208,12 +217,13 @@ export interface Partner {
   path: { x: number; y: number }[];
   pathTarget: { x: number; y: number } | null;
   foodBasin: number | null;
+  supplyPalletId: number | null;
   knockdownTimer: number;
 }
 
 export interface Tire {
-  id: 'upper' | 'lower';
-  paddock: 'upper' | 'lower';
+  id: 'female' | 'male';
+  paddock: 'female' | 'male';
   x: number;
   y: number;
   vx: number;
@@ -256,7 +266,7 @@ export interface State {
   partner: Partner; // Димон — ИИ-напарник в нижнем слоновнике
   dutyLight: boolean; // дежурный свет в вольере
   lastOverflow: number;
-  gateOpen: boolean;
+  gates: { female: boolean; male: boolean };
   barrow: Barrow;
   jack: Jack;
   supply: Supply;

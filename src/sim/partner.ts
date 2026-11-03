@@ -2,13 +2,15 @@ import { BALANCE } from '../data/balance';
 import { MAP, inPaddock } from '../data/map';
 import { ELEPHANTS } from '../data/elephants';
 import { dist } from './elephants';
+import { emit } from './events';
 import { cleared, sawdustAbsorbed, setCell } from './floor';
 import { basinsOnRack, freeBasinSpot } from './items';
 import { kashaDue, prepareMealBasins, startKasha } from './feeding';
 import { route, walkable } from './nav';
 import { chance, randomRange } from './rng';
-import { takeStock } from './stock';
+import { giveStock, STOCK_LABELS, takeStock } from './stock';
 import { callTruck } from './barrow';
+import { deliveryAccessOpen } from './truck';
 import type { Elephant, State } from './types';
 
 const P = BALANCE.partner;
@@ -24,10 +26,22 @@ interface Job {
   done: (s: State) => boolean;
 }
 
-const MALES = () => ELEPHANTS.filter((p) => p.paddock === 'lower').map((p) => p.id);
+const MALES = () => ELEPHANTS.filter((p) => p.paddock === 'male').map((p) => p.id);
 
 function maleOf(state: State, id: string): Elephant {
   return state.elephants.find((e) => e.id === id)!;
+}
+
+function toiletSpot(state: State, elephant: Elephant): { x: number; y: number } | null {
+  const pool = MAP.pools[1];
+  const heading = Math.atan2(elephant.y - pool.y, elephant.x - pool.x);
+  const options = { gates: state.gates, deliveryOpen: deliveryAccessOpen(state) };
+  for (let i = 0; i < 16; i++) {
+    const angle = heading + (i * Math.PI) / 8;
+    const candidate = { x: elephant.x + Math.cos(angle) * 0.9, y: elephant.y + Math.sin(angle) * 0.9 };
+    if (walkable(candidate.x, candidate.y, options)) return candidate;
+  }
+  return null;
 }
 
 // Очередное дело для нижнего загона; null — всё спокойно
@@ -118,6 +132,74 @@ function nextJob(state: State): Job | null {
     };
   }
 
+  const reservedPallet =
+    s.partner.supplyPalletId === null
+      ? undefined
+      : s.supply.ground.find((pallet) => pallet.id === s.partner.supplyPalletId);
+  if (reservedPallet) {
+    if (reservedPallet.carriedBy !== 'partner') {
+      return {
+        mode: 'supplyPick',
+        target: () => ({ x: reservedPallet.x, y: reservedPallet.y }),
+        done: (st) => {
+          const pallet = st.supply.ground.find((item) => item.id === reservedPallet.id);
+          if (!pallet || pallet.reservedBy !== 'partner') {
+            st.partner.supplyPalletId = null;
+            return true;
+          }
+          if (dist(st.partner, pallet) >= 1) return false;
+          pallet.carriedBy = 'partner';
+          pallet.x = st.partner.x;
+          pallet.y = st.partner.y;
+          st.partner.mode = 'supplyCarry';
+          emit(st, { kind: 'info', text: `Димон забрал паллету: ${pallet.cargo.map((unit) => STOCK_LABELS[unit.kind].toLowerCase()).join(' и ')}.` });
+          return true;
+        },
+      };
+    }
+
+    const unit = reservedPallet.cargo[0];
+    if (unit) {
+      const station = MAP.stations[
+        unit.kind === 'grain' ? 'stove'
+          : unit.kind === 'veg' || unit.kind === 'fruit' ? 'vegRack'
+            : unit.kind
+      ];
+      const target = unit.kind === 'grain'
+        ? { x: station.x, y: station.y + 1.2 }
+        : unit.kind === 'veg' || unit.kind === 'fruit'
+          ? { x: station.x - 1.0, y: station.y }
+          : { x: station.x, y: station.y - 1.2 };
+      return {
+        mode: 'supplyCarry',
+        target: () => target,
+        done: (st) => {
+          const pallet = st.supply.ground.find((item) => item.id === reservedPallet.id && item.carriedBy === 'partner');
+          if (!pallet || dist(st.partner, target) >= 1.0) return false;
+          const delivered = pallet.cargo[0];
+          if (!delivered) return false;
+          giveStock(st, delivered.kind, delivered.qty);
+          pallet.cargo.shift();
+          emit(st, { kind: 'good', text: `Димон доставил на склад: ${STOCK_LABELS[delivered.kind].toLowerCase()} (${delivered.qty}).` });
+          if (!pallet.cargo.length) {
+            st.supply.ground = st.supply.ground.filter((item) => item.id !== pallet.id);
+            st.partner.supplyPalletId = null;
+          }
+          return true;
+        },
+      };
+    }
+  }
+
+  const unclaimedPallet = s.supply.ground.find((pallet) => !pallet.reservedBy && !pallet.carriedBy);
+  if (unclaimedPallet) {
+    return {
+      mode: 'supplyPick',
+      target: () => ({ x: unclaimedPallet.x, y: unclaimedPallet.y }),
+      done: () => false,
+    };
+  }
+
   // Бак уже наполнился: сначала вылить в слив, чтобы не пропустить следующий сигнал.
   if (s.partner.bucket >= 40) {
     return {
@@ -140,10 +222,7 @@ function nextJob(state: State): Job | null {
   if (care) {
     return {
       mode: 'toilet',
-      target: () => {
-        const e = maleOf(s, care.id);
-        return { x: e.x + 0.55, y: e.y };
-      },
+      target: () => toiletSpot(s, maleOf(s, care.id)),
       done: () => false, // ждать, пока не сходит в бак
     };
   }
@@ -184,7 +263,7 @@ function nextJob(state: State): Job | null {
   }
 
   // 3. Навоз в нижнем загоне: свежие кучи и затоптанные клетки
-  const lower = { x0: MAP.paddock2.x0, y0: MAP.paddock2.y0, x1: MAP.paddock2.x1, y1: MAP.paddock2.y1 };
+  const lower = MAP.complexes.male.bounds;
   const pile = s.dung
     .filter((d) => d.x >= lower.x0 && d.x < lower.x1 && d.y >= lower.y0 && d.y < lower.y1)
     .sort((a, b) => dist(a, s.partner) - dist(b, s.partner))[0];
@@ -383,10 +462,23 @@ export function updatePartner(state: State, dt: number, dtReal: number): void {
   }
   const musthActive = state.elephants.some((e) => MALES().includes(e.id) && e.musthTimer > 0);
   if (musthActive) {
+    if (p.mode !== 'flee') {
+      p.path = [];
+      p.pathTarget = null;
+    }
     p.mode = 'flee';
     p.timer = 0;
-    if (inPaddock(p.x, p.y)) stepTo(state, { x: MAP.door2.x0 + 0.7, y: MAP.fenceY2 - 0.5 }, dtReal);
+    if (inPaddock(p.x, p.y)) {
+      stepTo(state, { x: MAP.door2.x0 + 0.7, y: MAP.complexes.male.bounds.y1 + 0.5 }, dtReal);
+    }
     return;
+  }
+  if (p.supplyPalletId !== null && !state.supply.ground.some((pallet) => pallet.id === p.supplyPalletId)) {
+    p.supplyPalletId = null;
+    if (p.mode === 'supplyPick' || p.mode === 'supplyCarry') {
+      p.mode = 'idle';
+      p.timer = 0;
+    }
   }
   if (p.mode === 'flee') {
     p.mode = 'idle';
@@ -416,6 +508,13 @@ export function updatePartner(state: State, dt: number, dtReal: number): void {
   if (p.mode === 'idle' || p.mode === '') {
     const job = nextJob(state);
     if (job) {
+      if (job.mode === 'supplyPick' && p.supplyPalletId === null) {
+        const pallet = state.supply.ground.find((item) => !item.reservedBy && !item.carriedBy);
+        if (pallet) {
+          pallet.reservedBy = 'partner';
+          p.supplyPalletId = pallet.id;
+        }
+      }
       p.mode = job.mode;
       p.timer = 0;
     } else {
@@ -440,7 +539,10 @@ export function updatePartner(state: State, dt: number, dtReal: number): void {
       return;
     }
     // Держаться в радиусе бака
-    if (dist(p, e) > BALANCE.elephant.bucketRadius - 0.1) stepTo(state, { x: e.x + 0.55, y: e.y }, dtReal);
+    if (dist(p, e) > BALANCE.elephant.bucketRadius - 0.1) {
+      const spot = toiletSpot(state, e);
+      if (spot) stepTo(state, spot, dtReal);
+    }
     return;
   }
 
@@ -467,14 +569,22 @@ export function updatePartner(state: State, dt: number, dtReal: number): void {
       basin.y = p.y;
     }
   }
+  if (p.supplyPalletId !== null) {
+    const pallet = state.supply.ground.find((item) => item.id === p.supplyPalletId && item.carriedBy === 'partner');
+    if (pallet) {
+      pallet.x = p.x;
+      pallet.y = p.y;
+    }
+  }
 }
 
 // Шаг к цели по твёрдому полу и вольеру: сначала по прямой, потом оси по очереди
 function stepTo(state: State, target: { x: number; y: number }, dtReal: number): void {
   const p = state.partner;
-  const free = (x: number, y: number) => walkable(x, y, false, false) && (inPaddock(x, y) || x > MAP.forest.x1);
+  const options = { gates: state.gates, deliveryOpen: deliveryAccessOpen(state) };
+  const free = (x: number, y: number) => walkable(x, y, options) && (inPaddock(x, y) || x > MAP.forest.x1);
   if (!p.pathTarget || dist(p.pathTarget, target) > 0.5 || !p.path.length) {
-    p.path = route(p, target);
+    p.path = route(p, target, options);
     p.pathTarget = { ...target };
   }
   while (p.path.length > 1 && dist(p, p.path[0]) < 0.2) p.path.shift();

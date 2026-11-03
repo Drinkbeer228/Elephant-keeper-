@@ -1,9 +1,10 @@
 // Профили слонов. Характеры и сигналы — из docs/context.md, разделы 1 и 6.
 // Логика игры читает только эти поля и не сравнивает имена.
-// Этап 3: сверху — три слонихи (девочки), снизу — три самца (Раджа, Барон, Цезарь).
+// Этап 3: три слонихи и три самца в независимых комплексах.
+import { MAP } from './map';
 
 export type SignalKind = 'frontStomp' | 'fenceStare' | 'none';
-export type Paddock = 'upper' | 'lower';
+export type Paddock = 'female' | 'male';
 
 export interface ElephantProfile {
   id: string;
@@ -24,12 +25,15 @@ export interface ElephantProfile {
   slot: { x: number; y: number }; // куда ставить её таз
 }
 
+const point = (legacy: { x: number; y: number }, modern: { x: number; y: number }) =>
+  MAP.w === 64 ? legacy : modern;
+
 export const ELEPHANTS: ElephantProfile[] = [
   {
     id: 'pretty',
     name: 'Претти',
     color: 0x8a8f99,
-    paddock: 'upper',
+    paddock: 'female',
     signal: 'frontStomp',
     signalHint: 'Претти топнула передней ногой — бак, быстро! У неё почти нет запаса времени.',
     signalLead: 5,
@@ -40,14 +44,14 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: true,
     bedtime: 930, // 23:30
     trust: 40,
-    start: { x: 30, y: 4 },
-    slot: { x: 21, y: 12.35 },
+    start: point({ x: 30, y: 4 }, { x: 22, y: 25 }),
+    slot: point({ x: 21, y: 12.35 }, { x: 22, y: 32.5 }),
   },
   {
     id: 'margo',
     name: 'Марго',
     color: 0x6f7682,
-    paddock: 'upper',
+    paddock: 'female',
     signal: 'fenceStare',
     signalHint: 'Марго подошла к ограждению и громко выдыхает — это она просится. Время есть, но не тяни.',
     signalLead: 11,
@@ -58,14 +62,14 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: false,
     bedtime: 840, // 22:00
     trust: 45,
-    start: { x: 24, y: 6 },
-    slot: { x: 15, y: 12.35 },
+    start: point({ x: 24, y: 6 }, { x: 32, y: 29 }),
+    slot: point({ x: 15, y: 12.35 }, { x: 31, y: 32.5 }),
   },
   {
     id: 'audrey',
     name: 'Одри',
     color: 0x9aa0a8,
-    paddock: 'upper',
+    paddock: 'female',
     signal: 'none',
     signalHint: 'Одри не подаёт сигнала. Её ловят только «погулять»: бак под неё, когда пузырь полон наполовину и больше (смотри осмотром, F).',
     signalLead: 0,
@@ -76,14 +80,14 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: false,
     bedtime: 780, // 21:00
     trust: 60,
-    start: { x: 18, y: 4 },
-    slot: { x: 9, y: 12.35 },
+    start: point({ x: 18, y: 4 }, { x: 42, y: 25 }),
+    slot: point({ x: 9, y: 12.35 }, { x: 40, y: 32.5 }),
   },
   {
     id: 'radja',
     name: 'Раджа',
     color: 0x5c5850,
-    paddock: 'lower',
+    paddock: 'male',
     signal: 'frontStomp',
     signalHint: 'Раджа, вожак, топнул ногой — самцы ждут не ждать. Бак под него!',
     signalLead: 6,
@@ -94,14 +98,14 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: false,
     bedtime: 900, // 23:00
     trust: 35,
-    start: { x: 30, y: 32 },
-    slot: { x: 21, y: 28.65 },
+    start: point({ x: 30, y: 32 }, { x: 68, y: 25 }),
+    slot: point({ x: 21, y: 28.65 }, { x: 68, y: 32.5 }),
   },
   {
     id: 'baron',
     name: 'Барон',
     color: 0x4c4a48,
-    paddock: 'lower',
+    paddock: 'male',
     signal: 'fenceStare',
     signalHint: 'Барон молча застыл у решётки и смотрит на тебя — тяжеловес просится по-своему.',
     signalLead: 12,
@@ -112,14 +116,14 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: false,
     bedtime: 870, // 22:30
     trust: 50,
-    start: { x: 25, y: 34 },
-    slot: { x: 15, y: 28.65 },
+    start: point({ x: 25, y: 34 }, { x: 78, y: 29 }),
+    slot: point({ x: 15, y: 28.65 }, { x: 78, y: 32.5 }),
   },
   {
     id: 'caesar',
     name: 'Цезарь',
     color: 0x84826c,
-    paddock: 'lower',
+    paddock: 'male',
     signal: 'none',
     signalHint: 'Цезарь — молодой задира: вечно в бассейне. Сигнала не подаёт, ловится «погулять».',
     signalLead: 0,
@@ -130,12 +134,12 @@ export const ELEPHANTS: ElephantProfile[] = [
     stereotypy: false,
     bedtime: 810, // 21:30
     trust: 55,
-    start: { x: 38, y: 40 },
-    slot: { x: 9, y: 28.65 },
+    start: point({ x: 38, y: 40 }, { x: 88, y: 25 }),
+    slot: point({ x: 9, y: 28.65 }, { x: 88, y: 32.5 }),
   },
 ];
 
 // Хобот дотягивается до вещей только в своём загоне
-export function paddockOfProfile(p: ElephantProfile): 0 | 1 {
-  return p.paddock === 'upper' ? 0 : 1;
+export function paddockOfProfile(p: ElephantProfile): Paddock {
+  return p.paddock;
 }

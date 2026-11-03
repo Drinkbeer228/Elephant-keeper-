@@ -1,7 +1,7 @@
 import { BALANCE } from '../data/balance';
-import { MAP, floorZoneOf, inPaddock, isHardFloor } from '../data/map';
+import { MAP, floorZoneOf, isHardFloor } from '../data/map';
 import { walkable as navWalkable } from './nav';
-import { updateTrucks } from './truck';
+import { deliveryAccessOpen, updateTrucks } from './truck';
 export { walkable } from './nav';
 import { availableAction, inspect } from './actions';
 import { dayPart, pace } from './clock';
@@ -135,7 +135,8 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint
   const sprintFactor = sprint ? BALANCE.player.sprintFactor : 1;
   const step = BALANCE.player.speed * playerSpeedFactor(state) * speedFactor * sprintFactor * Math.min(len, 1) * dtReal;
   const target = barrowPushed ? b : jackPushed ? j : null;
-  const w = (x: number, y: number) => navWalkable(x, y, state.gateOpen, false);
+  const navOptions = { gates: state.gates, deliveryOpen: deliveryAccessOpen(state) };
+  const w = (x: number, y: number) => navWalkable(x, y, navOptions);
   let off = target ? { x: target.x - p.x, y: target.y - p.y } : { x: 0, y: 0 };
   if (target) {
     const want = barrowOffset(p.facing);
@@ -147,12 +148,13 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint
     const tx = x + off.x;
     const ty = y + off.y;
     if (!w(tx, ty)) return false;
-    if (barrowPushed && inPaddock(x, y) !== inPaddock(tx, ty) && !crossesPaddockDoor(x, y, tx, ty, state.gateOpen)) return false;
     if (jackPushed && !isHardFloor(x + off.x, y + off.y)) return false;
     return true;
   };
   const x0 = p.x;
   const y0 = p.y;
+  const barrowX0 = b.x;
+  const barrowY0 = b.y;
   const zoneBefore = floorZoneOf(b.x, b.y);
   if (ok(p.x + nx * step, p.y)) p.x += nx * step;
   if (ok(p.x, p.y + ny * step)) p.y += ny * step;
@@ -166,7 +168,7 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint
     const blocked = len >= 0.01 && moved < step * 0.25;
     const jolt = {
       turn: turned && moved > 0.001, // резкий поворот на ходу
-      zone: floorZoneOf(b.x, b.y) !== zoneBefore || onThreshold(b.x, b.y),
+      zone: floorZoneOf(b.x, b.y) !== zoneBefore || onThreshold(b.x, b.y) || crossedThreshold(barrowX0, barrowY0, b.x, b.y),
       bump: blocked && !b.stuck,
       sprint, // спринт с грузом — тачка дребезжит сильнее
     };
@@ -174,18 +176,6 @@ function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint
     spillFromBarrow(state, moved, jolt);
   } else if (b.stuck) b.stuck = false;
   return { moving: moved > 0.001, turned };
-}
-
-function crossesPaddockDoor(x: number, y: number, tx: number, ty: number, gateOpen: boolean): boolean {
-  const crosses = (a: number, b: number, fence: number) => (a < fence) !== (b < fence);
-  const aligned = (a: number, b: number, range: { x0: number; x1: number }) =>
-    a > range.x0 + 0.3 && a < range.x1 - 0.3 && b > range.x0 + 0.3 && b < range.x1 - 0.3;
-  const upper = crosses(y, ty, MAP.fenceY);
-  const lower = crosses(y, ty, MAP.fenceY2);
-  if (upper && aligned(x, tx, MAP.door)) return true;
-  if (lower && aligned(x, tx, MAP.door2)) return true;
-  if (gateOpen && upper && aligned(x, tx, MAP.elephantGate)) return true;
-  return gateOpen && lower && aligned(x, tx, MAP.elephantGate2);
 }
 
 // Пороги дверей и сливные трапы — «неровности пола» для встряски
@@ -196,6 +186,14 @@ function onThreshold(x: number, y: number): boolean {
   for (const id of ['drain', 'drain2'] as const) {
     const d = MAP.stations[id];
     if (Math.abs(x - d.x) < d.w / 2 + 0.2 && Math.abs(y - d.y) < d.h / 2 + 0.2) return true;
+  }
+  return false;
+}
+
+function crossedThreshold(x0: number, y0: number, x1: number, y1: number): boolean {
+  for (const t of MAP.thresholds) {
+    const crossed = (y0 < t.y0 && y1 >= t.y0) || (y0 > t.y0 && y1 <= t.y0);
+    if (crossed && Math.max(x0, x1) >= t.x0 - 0.2 && Math.min(x0, x1) <= t.x1 + 0.2) return true;
   }
   return false;
 }

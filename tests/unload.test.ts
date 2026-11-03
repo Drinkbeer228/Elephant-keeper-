@@ -109,6 +109,10 @@ describe('разгрузка', () => {
     expect(s.supply.missed).toBe(false);
     expect(s.log.some((event) => event.text?.includes('Груз принят'))).toBe(true);
 
+    const buffered = s.supply.ground.map((pallet) => ({ id: pallet.id, cargo: pallet.cargo.map((unit) => ({ ...unit })) }));
+    advance(s, S.leaveAt + 1 - s.t);
+    expect(s.supply.ground.map((pallet) => ({ id: pallet.id, cargo: pallet.cargo }))).toEqual(buffered);
+
     const pallet = s.supply.ground[0];
     s.jack.pushed = true;
     s.jack.x = pallet.x;
@@ -117,6 +121,46 @@ describe('разгрузка', () => {
     expect(act(s)).toMatch(/^Поднять паллету на рохлю:/);
     expect(s.supply.ground).toHaveLength(3);
     expect(s.jack.cargo).toEqual(pallet.cargo);
+    expect(s.supply.ground.some((item) => item.id === pallet.id)).toBe(false);
+    expect(act(s)).not.toMatch(/^Поднять паллету на рохлю:/);
+    expect(s.jack.cargo).toEqual(pallet.cargo);
+  });
+
+  it('не теряет груз, если все физические места буфера заняты', () => {
+    const s = cleanShift();
+    advance(s, S.arriveAt + 0.5);
+    s.supply.ground = MAP.receivingSpots.map((spot) => ({
+      id: s.nextItemId++,
+      cargo: [{ kind: 'grain', qty: 1 }],
+      ...spot,
+    }));
+    atBort(s);
+
+    const action = availableAction(s)!;
+    const fullChoice = action.choices?.find((choice) => choice.label.startsWith('На площадку:'));
+    expect(fullChoice?.disabled).toBe(true);
+    expect(act(s, 'На площадку:')).toContain('буфер заполнен');
+    expect(s.supply.bays).toHaveLength(4);
+    expect(s.supply.ground).toHaveLength(MAP.receivingSpots.length);
+    expect(s.log.at(-1)?.text).toContain('Буферная площадка заполнена');
+  });
+
+  it('размещает новые паллеты только в свободных позициях без наложений', () => {
+    const s = cleanShift();
+    advance(s, S.arriveAt + 0.5);
+    atBort(s);
+
+    for (let i = 0; i < MAP.receivingSpots.length; i++) act(s, 'На площадку:');
+
+    expect(s.supply.ground.map(({ x, y }) => ({ x, y }))).toEqual(MAP.receivingSpots);
+    for (let i = 0; i < s.supply.ground.length; i++) {
+      for (let j = i + 1; j < s.supply.ground.length; j++) {
+        const separated =
+          Math.abs(s.supply.ground[i].x - s.supply.ground[j].x) >= MAP.palletFootprint.w ||
+          Math.abs(s.supply.ground[i].y - s.supply.ground[j].y) >= MAP.palletFootprint.h;
+        expect(separated).toBe(true);
+      }
+    }
   });
 
   it.each([

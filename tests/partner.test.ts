@@ -7,11 +7,13 @@ import { dist, pee } from '../src/sim/elephants';
 import { cellAt } from '../src/sim/floor';
 import { updateKitchen } from '../src/sim/feeding';
 import { updatePartner } from '../src/sim/partner';
+import type { State } from '../src/sim/types';
+import { route } from '../src/sim/nav';
 
 describe('напарник нижнего слоновника', () => {
   it('Раджа, Барон и Цезарь находятся в нижнем загоне со своими кормушкой и поилкой', () => {
     const s = createShift(21, { mess: false });
-    const males = ELEPHANTS.filter((profile) => profile.paddock === 'lower');
+    const males = ELEPHANTS.filter((profile) => profile.paddock === 'male');
 
     expect(males.map((profile) => profile.name)).toEqual(['Раджа', 'Барон', 'Цезарь']);
     expect(s.elephants.filter((e) => males.some((profile) => profile.id === e.id)).every((e) => inPaddock(e.x, e.y))).toBe(true);
@@ -24,11 +26,11 @@ describe('напарник нижнего слоновника', () => {
     const rajah = s.elephants.find((e) => e.id === 'radja')!;
     rajah.bladder = BALANCE.partner.bladderCare + 10;
     s.partner.timer = 0;
+    expect(route(s.partner, rajah, { gates: s.gates, deliveryOpen: false }).length).toBeGreaterThan(0);
 
     for (let i = 0; i < 600 && Math.hypot(s.partner.x - rajah.x, s.partner.y - rajah.y) > 1; i++) {
       updatePartner(s, 1 / 30, 1 / 30);
     }
-
     expect(s.partner.mode).toBe('toilet');
     expect(Math.hypot(s.partner.x - rajah.x, s.partner.y - rajah.y)).toBeLessThan(1);
   });
@@ -56,7 +58,7 @@ describe('напарник нижнего слоновника', () => {
 
     for (let i = 0; i < 300 && dist(s.partner, rajah) > 0.9; i++) updatePartner(s, 1 / 30, 1 / 30);
     expect(s.partner.mode).toBe('toilet');
-    expect(dist(s.partner, rajah)).toBeLessThan(1);
+    expect(dist(s.partner, rajah)).toBeLessThan(BALANCE.elephant.bucketRadius);
 
     pee(s, rajah);
     expect(s.partner.bucket).toBeGreaterThan(0);
@@ -74,18 +76,20 @@ describe('напарник нижнего слоновника', () => {
   it('убирает мокрое, расходует общий запас опилок и несёт сено из общего запаса', () => {
     const s = createShift(23, { mess: false });
     s.musthEventsRemaining = 0;
-    const wet = cellAt(s, 5, 30)!;
+    const wetX = MAP.bedding2.x;
+    const wetY = MAP.bedding2.y;
+    const wet = cellAt(s, wetX, wetY)!;
     s.cells[wet.cy][wet.cx] = { kind: 'wet', since: s.t };
-    s.partner.x = 5.5;
-    s.partner.y = 30.5;
+    s.partner.x = wetX + 0.5;
+    s.partner.y = wetY + 0.5;
     s.partner.mode = 'idle';
     s.partner.timer = 0;
 
     updatePartner(s, 1 / 30, 1 / 30);
-    expect(cellAt(s, 5, 30)!.cell.kind).toBe('bareWet');
+    expect(cellAt(s, wetX, wetY)!.cell.kind).toBe('bareWet');
     s.partner.timer = 0;
     updatePartner(s, 1 / 30, 1 / 30);
-    expect(cellAt(s, 5, 30)!.cell.kind).toBe('sawdust');
+    expect(cellAt(s, wetX, wetY)!.cell.kind).toBe('sawdust');
     expect(s.stock.sawdust).toBe(BALANCE.stockStart.sawdust - 1);
 
     s.partner.mode = 'idle';
@@ -100,6 +104,8 @@ describe('напарник нижнего слоновника', () => {
 
     s.partner.x = MAP.feeder2.x + 0.8;
     s.partner.y = MAP.feeder2.y - 1;
+    s.partner.path = [];
+    s.partner.pathTarget = null;
     updatePartner(s, 1 / 30, 1 / 30);
     expect(s.feederHay2).toBe(BALANCE.food.hayBale);
   });
@@ -147,15 +153,15 @@ describe('напарник нижнего слоновника', () => {
 
     advance(s, 0.5);
 
-    const males = s.elephants.filter((elephant) => ELEPHANTS.find((profile) => profile.id === elephant.id)?.paddock === 'lower');
+    const males = s.elephants.filter((elephant) => ELEPHANTS.find((profile) => profile.id === elephant.id)?.paddock === 'male');
     expect(males).toHaveLength(3);
     expect(males.every((elephant) => Object.values(elephant.traits).every((trait) => trait >= 0.8 && trait <= 1.4))).toBe(true);
     const aggressive = males.find((elephant) => elephant.musthTimer > 0)!;
     expect(aggressive.musthTimer).toBeGreaterThan(119);
     expect(aggressive.musthTimer).toBeLessThanOrEqual(180);
 
-    s.partner.x = 30;
-    s.partner.y = 36;
+    s.partner.x = MAP.complexes.male.rotation.x0 + 2;
+    s.partner.y = MAP.complexes.male.rotation.y0 + 2;
     s.partner.mode = 'idle';
     for (let i = 0; i < 1200 && inPaddock(s.partner.x, s.partner.y); i++) updatePartner(s, 1 / 30, 1 / 30);
     expect(s.partner.mode).toBe('flee');
@@ -166,14 +172,54 @@ describe('напарник нижнего слоновника', () => {
     const s = createShift(33, { mess: false });
     const rajah = s.elephants.find((elephant) => elephant.id === 'radja')!;
     rajah.musthTimer = 150;
-    rajah.x = 30;
-    rajah.y = 29;
-    s.player.x = 30;
-    s.player.y = MAP.fenceY2 - 0.5;
+    rajah.x = MAP.feeder2.x;
+    rajah.y = MAP.fenceY2 + 0.5;
+    s.player.x = MAP.paddock2.x0 - 0.5;
+    s.player.y = 40;
+    rajah.x = MAP.paddock2.x0 + 0.5;
+    rajah.y = 40;
 
     expect(availableAction(s)?.label).toBe('Бросить успокоительное лакомство Раджа через решётку');
     availableAction(s)!.run(s);
     expect(rajah.musthTimer).toBe(0);
     expect(s.player.pocketTreats).toBe(BALANCE.player.pocketStart - 1);
+  });
+
+  it('Димон резервирует буферную паллету, доставляет её на склад и не отдаёт игроку одновременно', () => {
+    const s = createShift(34, { mess: false });
+    const spot = MAP.receivingSpots[0];
+    const before = s.stock.grain;
+    s.supply.arrived = true;
+    s.supply.left = true;
+    const pallet: State['supply']['ground'][number] = {
+      id: s.nextItemId++,
+      cargo: [{ kind: 'grain', qty: 4 }],
+      ...spot,
+    };
+    s.supply.ground.push(pallet);
+    s.partner.x = spot.x - 0.4;
+    s.partner.y = spot.y;
+    s.partner.timer = 0;
+    s.partner.mode = 'idle';
+    s.jack.pushed = true;
+    s.jack.x = spot.x;
+    s.jack.y = spot.y;
+    s.player.x = spot.x - 0.5;
+    s.player.y = spot.y;
+
+    updatePartner(s, 1 / 30, 1 / 30);
+
+    expect(s.partner.supplyPalletId).toBe(pallet.id);
+    expect(pallet.reservedBy).toBe('partner');
+    expect(pallet.carriedBy).toBe('partner');
+    expect(availableAction(s)?.label).not.toMatch(/^Поднять паллету на рохлю:/);
+
+    for (let i = 0; i < 30 * 300 && s.supply.ground.length; i++) {
+      updatePartner(s, 1 / 30, 1 / 30);
+    }
+
+    expect(s.supply.ground).toHaveLength(0);
+    expect(s.partner.supplyPalletId).toBeNull();
+    expect(s.stock.grain).toBe(before + 4);
   });
 });

@@ -42,7 +42,7 @@ export class ElephantView {
       .text(0, 0, '', { fontFamily: FONT, fontSize: '6px', color: '#fce0a8', backgroundColor: '#000000', padding: { x: 2, y: 1 } })
       .setOrigin(0.5, 1)
       .setDepth(20001)
-      .setVisible(profile.paddock === 'lower');
+      .setVisible(profile.paddock === 'male');
   }
 
   update(e: Elephant, _s: State, time: number): void {
@@ -53,7 +53,7 @@ export class ElephantView {
     if (e.state === 'walk' && Math.abs(e.tx - e.x) > 0.05) this.facing = e.tx > e.x ? 1 : -1;
     else if (e.state === 'eatHay' || e.state === 'drink' || e.state === 'eatBasin') {
       // Цели — в своём загоне: кормушка, поилка, своё место для таза
-      const lower = this.profile.paddock === 'lower';
+      const lower = this.profile.paddock === 'male';
       const feeder = lower ? MAP.feeder2 : MAP.feeder;
       const trough = lower ? MAP.trough2 : MAP.trough;
       const target = e.state === 'eatHay' ? feeder.x : e.state === 'drink' ? trough.x : this.profile.slot.x;

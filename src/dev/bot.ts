@@ -3,8 +3,8 @@
 // Видит то же, что игрок с осмотром (пузырь, сено, вода), — то есть играет как опытный кипер.
 
 import { availableAction, tick, type Command, type State } from '../sim';
-import { route } from '../sim/nav';
-import { MAP, inPaddock, inReachZone } from '../data/map';
+import { route, walkable } from '../sim/nav';
+import { MAP, inPaddock, inPool, inReachZone } from '../data/map';
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS } from '../data/elephants';
 import { profileOf, bucketUnder } from '../sim/elephants';
@@ -13,7 +13,7 @@ import { isDark } from '../sim/clock';
 import { sawdustAbsorbed } from '../sim/floor';
 import { ITEM_NAMES, basinsOnRack } from '../sim/items';
 import { STOCK_LABELS } from '../sim/stock';
-import { supplyOpen } from '../sim/truck';
+import { deliveryAccessOpen, supplyOpen } from '../sim/truck';
 import type { CargoUnit, Elephant, Item } from '../sim/types';
 
 type P = { x: number; y: number };
@@ -29,13 +29,13 @@ interface Step {
 }
 
 // Бак и мешок паркуются в верхнем коридоре, подальше от станций и тачки
-const PARK_BUCKET = { x: 24.0, y: 15.2 };
-const PARK_BAG = { x: 26.0, y: 15.2 };
-const SAFE = { x: 30.0, y: 15.4 };
+const PARK_BUCKET = { x: 44.0, y: 49.5 };
+const PARK_BAG = { x: 26.0, y: 49.5 };
+const SAFE = { x: 30.0, y: 49.5 };
 // Откуда подходить к станциям: со стороны двери или прохода
 const st = MAP.stations;
 const AT = {
-  rack: { x: st.rack.x + st.rack.w / 2 + 0.6, y: 21.0 },
+  rack: { x: st.rack.x + st.rack.w / 2 + 0.6, y: st.rack.y },
   // Подход к рохле — с юга: с севера подсказку перебивает «Взять: …» с пола
   jack: { x: MAP.jackStart.x, y: MAP.jackStart.y + 0.4 },
   jackPark: { x: MAP.jackStart.x, y: MAP.jackStart.y + 0.4 },
@@ -53,7 +53,8 @@ const AT = {
   dump: { x: st.dump.x, y: st.dump.y - st.dump.h / 2 - 0.5 },
   drain: { x: st.drain.x, y: st.drain.y - 0.6 },
   valve: { x: st.valve.x, y: st.valve.y + 0.6 },
-  gate: { x: st.gate.x, y: MAP.fenceY + 0.9 },
+  femaleGate: { x: st.femaleGate.x, y: MAP.fenceY + 0.9 },
+  maleGate: { x: st.maleGate.x, y: MAP.fenceY + 0.9 },
   feeder: { x: MAP.feeder.x + 0.2, y: MAP.feeder.y + 1.0 },
 };
 
@@ -64,7 +65,15 @@ function d(a: P, b: P): number {
 export { route } from '../sim/nav';
 
 // Откуда брать вещь: у решётки — с дорожки сквозь прутья, внутри вольера — с места, снаружи — чуть ниже
-export function reachPoint(item: P): P {
+export function reachPoint(item: P, from?: P): P {
+  if (from) {
+    const poolIndex = MAP.pools.findIndex((_, i) => inPool(i, item.x, item.y));
+    if (poolIndex >= 0) {
+      const pool = MAP.pools[poolIndex];
+      const angle = Math.atan2(from.y - pool.y, from.x - pool.x);
+      return { x: pool.x + Math.cos(angle) * pool.rx * 1.12, y: pool.y + Math.sin(angle) * pool.ry * 1.12 };
+    }
+  }
   if (inPaddock(item.x, item.y) && item.y > MAP.fenceY - 0.6) return { x: item.x, y: MAP.fenceY + 0.35 };
   return { x: item.x, y: item.y + (inPaddock(item.x, item.y) ? 0 : 0.35) };
 }
@@ -73,8 +82,8 @@ function cellCenter(cx: number, cy: number): P {
   return { x: MAP.floor.x + cx + 0.5, y: MAP.floor.y + cy + 0.5 };
 }
 
-function insideClamp(p: P): P {
-  const k = MAP.paddock;
+function insideClamp(p: P, complex: 'female' | 'male' = 'female'): P {
+  const k = MAP.complexes[complex].active;
   return { x: Math.min(Math.max(p.x, k.x0 + 0.6), k.x1 - 0.6), y: Math.min(Math.max(p.y, k.y0 + 0.6), k.y1 - 0.5) };
 }
 
@@ -118,11 +127,12 @@ export class Bot {
     const s = this.s;
     this.stats.ticks++;
     if (s.phase !== 'shift') return [];
+    const unloading = supplyOpen(s) && s.supply.bays.length > 0;
 
     // Сигнал важнее всего: бросить текущее дело (кроме таза с едой в руках)
-    if (this.job !== 'toilet' && this.signalTarget() && s.player.held?.food == null) this.abort('preempt');
+    if (!unloading && this.job !== 'toilet' && this.signalTarget() && s.player.held?.food == null) this.abort('preempt');
     // Пора запаривать кашу — уборка подождёт
-    if (this.job && this.job !== 'toilet' && this.job !== 'meal' && this.kashaUrgent()) this.abort('kasha');
+    if (!unloading && this.job && this.job !== 'toilet' && this.job !== 'meal' && this.kashaUrgent()) this.abort('kasha');
     // Гудок: бросить затянувшуюся уборку — окно поставки ограничено (однократно)
     if (!this.hornDone && s.supply.arrived) {
       this.hornDone = true;
@@ -158,7 +168,7 @@ export class Bot {
     }
 
     // Подсказка уже нужная и цель рядом — жмём, не дожидаясь точного места (как человек)
-    const close = st.expect && !st.wait && d(p, target) < 1.0 && !!this.press(st.expect);
+    const close = st.expect && !st.wait && !!this.press(st.expect);
     if (d(p, target) > 0.25 && !close && !(this.pressed && st.done)) return this.move(target);
 
     if (st.wait) {
@@ -217,8 +227,13 @@ export class Bot {
       this.nudge--;
       return [{ type: 'move', dx: this.nudgeDir.x, dy: this.nudgeDir.y }];
     }
-    const w = route(p, target, supplyOpen(this.s))[0];
-    return [{ type: 'move', dx: w.x - p.x, dy: w.y - p.y }];
+    const path = route(p, target, { gates: this.s.gates, deliveryOpen: deliveryAccessOpen(this.s) });
+    if (!path.length) {
+      this.abort('unreachable');
+      return [];
+    }
+    const w = path[0];
+    return [{ type: 'move', dx: w.x - p.x, dy: w.y - p.y, sprint: !this.s.barrow.pushed && !this.s.jack.pushed }];
   }
 
   private start(job: string, steps: Step[]): void {
@@ -233,13 +248,19 @@ export class Bot {
 
   // Бот отвечает за верхний загон слоних; нижним занимается Димон
   private signalTarget(): Elephant | undefined {
-    return this.s.elephants.find((e) => profileOf(e).paddock === 'upper' && e.signalStarted !== undefined && e.state !== 'walkCommand' && !bucketUnder(this.s, e));
+    return this.s.elephants.find((e) => profileOf(e).paddock === 'female' && e.signalStarted !== undefined && e.state !== 'walkCommand' && !bucketUnder(this.s, e));
   }
 
   private choose(): void {
     const s = this.s;
     const held = s.player.held;
     const t = s.t;
+
+    // Убрать груз с борта важнее новой задачи: дальнейшая доставка не удерживает грузовик.
+    if (supplyOpen(s) && s.supply.bays.length > 0) {
+      const supply = this.supplyJob();
+      if (supply?.length) return this.start('supply', supply);
+    }
 
     const sig = this.signalTarget();
     if (sig) return this.start('toilet', this.toilet(sig));
@@ -250,7 +271,7 @@ export class Bot {
     if (meal) return this.start('meal', meal);
 
     const full = s.elephants
-      .filter((e) => profileOf(e).paddock === 'upper' && e.state !== 'sleep' && e.signalStarted === undefined && e.bladder >= 62)
+      .filter((e) => profileOf(e).paddock === 'female' && e.state !== 'sleep' && e.signalStarted === undefined && e.bladder >= 62)
       .sort((a, b) => b.bladder - a.bladder)[0];
     if (full) return this.start('toilet', this.toilet(full));
 
@@ -282,7 +303,8 @@ export class Bot {
     const supply = this.supplyJob();
     if (supply && supply.length) return this.start('supply', supply);
 
-    if (s.gateOpen) return this.start('gate', [...this.freeHands(), this.at('задвижка', AT.gate, /Закрыть задвижку/)]);
+    if (s.gates.female) return this.start('femaleGate', [...this.freeHands(), this.at('ворота', AT.femaleGate, /Закрыть ворота женского комплекса/)]);
+    if (s.gates.male) return this.start('maleGate', [...this.freeHands(), this.at('ворота', AT.maleGate, /Закрыть ворота мужского комплекса/)]);
     if (!s.valveOpen && s.trough < 40) return this.start('valveOpen', [...this.freeHands(), this.at('вентиль', AT.valve, /Открыть вентиль/)]);
     if (s.feederHay < 35) {
       return this.start('hay', [...this.freeHands(), this.at('сенник', AT.hay, /Взять тюк сена/), this.at('кормушка', AT.feeder, /Заложить сено/)]);
@@ -315,7 +337,7 @@ export class Bot {
   private take(item: Item, expect?: RegExp): Step {
     return {
       label: `взять ${item.kind}`,
-      to: () => (this.s.items.includes(item) ? reachPoint(item) : null),
+      to: () => (this.s.items.includes(item) ? reachPoint(item, this.s.player) : null),
       // Берём именно этот предмет: рядом может лежать другой, и «Взять» достанется ему
       expect: expect ?? new RegExp(`^Взять: ${ITEM_NAMES[item.kind].split(' ')[0]}`),
       done: () => this.s.player.held === item,
@@ -383,30 +405,83 @@ export class Bot {
   }
 
   private approach(e: Elephant): P {
-    return insideClamp({ x: e.x, y: e.y + 1.2 });
+    const paddock = profileOf(e).paddock;
+    const desired = insideClamp({ x: e.x, y: e.y + 1.2 }, paddock);
+    const options = { gates: this.s.gates, deliveryOpen: deliveryAccessOpen(this.s) };
+    if (walkable(desired.x, desired.y, options)) return desired;
+
+    const pool = MAP.pools.find((p) => ((e.x - p.x) / p.rx) ** 2 + ((e.y - p.y) / p.ry) ** 2 < 1);
+    if (pool) {
+      const angle = Math.atan2(this.s.player.y - pool.y, this.s.player.x - pool.x);
+      const edge = insideClamp(
+        { x: pool.x + Math.cos(angle) * pool.rx * 1.12, y: pool.y + Math.sin(angle) * pool.ry * 1.12 },
+        paddock,
+      );
+      if (walkable(edge.x, edge.y, options)) return edge;
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const angle = (i * Math.PI) / 4;
+      const candidate = insideClamp({ x: e.x + Math.cos(angle) * 1.4, y: e.y + Math.sin(angle) * 1.4 }, paddock);
+      if (walkable(candidate.x, candidate.y, options)) return candidate;
+    }
+    return desired;
   }
 
-  // Поставка: взять рохлю, снять поддоны с борта, развезти по складам
+  // Сначала освобождает борт на буфер, затем распределяет паллеты по складам.
   private supplyJob(): Step[] | null {
     const s = this.s;
     const sp = s.supply;
     const j = s.jack;
     const park = (): Step[] =>
       j.pushed ? [{ label: 'поставить рохлю', to: () => (j.pushed ? AT.jackPark : null), expect: /Поставить рохлю/, done: () => !j.pushed, timeout: 30 * 90 }] : [];
+    const takeJack = (): Step[] => j.pushed ? [] : [{
+      label: 'взять рохлю',
+      to: () => (j.pushed ? null : { x: j.x, y: j.y + 0.4 }),
+      expect: /Везти рохлю/,
+      done: () => j.pushed,
+      timeout: 30 * 90,
+    }];
     if (j.cargo) {
       // Рохля с грузом могла остаться стоять («бросить» в туалете): сначала взять её
-      const steps: Step[] = [];
-      if (!j.pushed) {
-        steps.push({
-          label: 'взять рохлю с грузом',
-          to: () => (j.pushed ? null : { x: j.x, y: j.y + 0.4 }),
-          expect: /Везти рохлю/,
-          done: () => j.pushed,
-          timeout: 30 * 90,
-        });
-      }
-      return [...this.freeHands(), ...steps.concat(this.deliverCargo(j.cargo))];
+      return [...this.freeHands(), ...takeJack(), ...this.deliverCargo(j.cargo)];
     }
+
+    if (sp.arrived && !sp.left && sp.bays.length) {
+      const bay = sp.bays[0];
+      const describe = bay.map((u) => STOCK_LABELS[u.kind]).join('.*');
+      const useBuffer = sp.ground.length < MAP.receivingSpots.length;
+      return [
+        ...this.freeHands(),
+        ...takeJack(),
+        {
+          label: useBuffer ? 'разгрузить на буфер' : 'забрать паллету с борта',
+          to: () => (j.cargo ? null : AT.unload),
+          expect: useBuffer ? /^На площадку:/ : new RegExp(`^${describe} `),
+          done: () => !sp.bays.includes(bay),
+          timeout: 30 * 120,
+        },
+      ];
+    }
+
+    const pallet = sp.ground.find((item) => !item.reservedBy && !item.carriedBy);
+    if (pallet) {
+      const describe = pallet.cargo.map((u) => STOCK_LABELS[u.kind]).join(' + ');
+      return [
+        ...this.freeHands(),
+        ...takeJack(),
+        {
+          label: `забрать паллету с буфера: ${describe}`,
+          to: () => (j.cargo || !sp.ground.some((item) => item.id === pallet.id && !item.reservedBy && !item.carriedBy)
+            ? null
+            : { x: pallet.x, y: pallet.y }),
+          expect: /^Поднять паллету на рохлю:/,
+          done: () => !sp.ground.some((item) => item.id === pallet.id) || !!j.cargo,
+          timeout: 30 * 120,
+        },
+      ];
+    }
+
     if (!sp.arrived || sp.left || !sp.bays.length) {
       // Борт пуст: рохля обязана вернуться в карман у кладовой, где бы её ни бросили.
       // Днём подождёт (срочнее еда и уборка), к вечеру — точно на место
@@ -427,14 +502,7 @@ export class Bot {
         { label: 'поставить рохлю на место', to: () => (j.pushed ? AT.jackPark : null), expect: /Поставить рохлю/, done: () => !j.pushed, timeout: 30 * 90 },
       ];
     }
-    const bay = sp.bays[0];
-    return [
-      // Руки должны быть свободны: с мешком в руках «Везти рохлю» не нажать
-      ...this.freeHands(),
-      // to() null только когда шаг завершён: иначе шаг пропускается без нажатия
-      { label: 'взять рохлю', to: () => (j.pushed ? null : AT.jack), expect: /Везти рохлю/, done: () => j.pushed, timeout: 30 * 90 },
-      { label: 'к борту', to: () => (j.cargo ? null : AT.unload), expect: new RegExp(`^${bay.map((u) => STOCK_LABELS[u.kind]).join('.*')} `), done: () => !!j.cargo, timeout: 30 * 120 },
-    ];
+    return [];
   }
 
   // Смешанный поддон сдаётся по частям: цель — точка сдачи первого не сданного вида
@@ -479,7 +547,7 @@ export class Bot {
       to: () => {
         if (s.player.held?.kind === 'bucket') return null;
         const b = bucket();
-        return b ? { x: b.x, y: b.y + (inPaddock(b.x, b.y) ? 0 : 0.35) } : null;
+        return b ? reachPoint(b, s.player) : null;
       },
       expect: /Взять: бак/,
       done: () => s.player.held?.kind === 'bucket',
@@ -510,7 +578,7 @@ export class Bot {
       label: 'забрать бак',
       to: () => {
         const b = s.items.find((i) => i.kind === 'bucket' && d(i, e) < 2.5) ?? s.items.find((i) => i.kind === 'bucket' && inPaddock(i.x, i.y));
-        return b ? { x: b.x, y: b.y } : null;
+        return b ? reachPoint(b, s.player) : null;
       },
       expect: /Взять: бак/,
       done: () => s.player.held?.kind === 'bucket',
@@ -540,11 +608,11 @@ export class Bot {
     const s = this.s;
     const k = s.kitchen;
     // На стеллаже стоят тазы с едой — разнести по одному тем, кому этого приёма ещё не дали
-    const full = basinsOnRack(s).filter((b) => b.food && b.owner && profileOf(s.elephants.find((e) => e.id === b.owner)!).paddock === 'upper');
+    const full = basinsOnRack(s).filter((b) => b.food && b.owner);
     const meal = full[0]?.meal;
     if (meal) {
       const hungry = s.elephants.filter(
-        (e) => profileOf(e).paddock === 'upper' && s.meals[meal][e.id] === null && full.some((basin) => basin.owner === e.id),
+        (e) => s.meals[meal][e.id] === null && full.some((basin) => basin.owner === e.id),
       );
       if (hungry.length) {
         const steps: Step[] = [...this.freeHands()];
@@ -564,7 +632,7 @@ export class Bot {
           steps.push({
             label: `слот ${nm}`,
             // Таз ставят у решётки: кипер стоит в коридоре, до слота — через прутья
-            to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: MAP.fenceY + 0.4 } : null),
+            to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: sl.y } : null),
             expect: new RegExp(`для ${nm}`),
             done: () => s.meals[meal][e.id] !== null,
           });
@@ -655,15 +723,20 @@ export class Bot {
   // Уборка — только верхний загон: нижним занимается Димон
   private cleaning(): [string, Step[]] | null {
     const s = this.s;
+    const active = MAP.complexes.female.active;
+    const inFemaleActive = (p: P) => p.x >= active.x0 && p.x < active.x1 && p.y >= active.y0 && p.y < active.y1;
     const cells: { kind: string; p: P }[] = [];
     s.cells.forEach((row, cy) => {
-      if (cy < MAP.paddock.y0 || cy >= MAP.fenceY) return; // коридоры и нижний загон — не его дело
-      row.forEach((c, cx) => cells.push({ kind: c.kind === 'sawdust' && sawdustAbsorbed(s, c) ? 'absorbed' : c.kind, p: cellCenter(cx, cy) }));
+      if (cy < active.y0 || cy >= active.y1) return; // lower paddock belongs to Dimon
+      row.forEach((c, cx) => {
+        const p = cellCenter(cx, cy);
+        if (inFemaleActive(p)) cells.push({ kind: c.kind === 'sawdust' && sawdustAbsorbed(s, c) ? 'absorbed' : c.kind, p });
+      });
     });
     const awayFromElephants = (p: P) => !s.elephants.some((e) => d(e, p) < 1.0);
 
-    if (s.dung.some((x) => x.y < MAP.fenceY)) {
-      const piles = s.dung.filter((x) => x.y < MAP.fenceY).map((x) => ({ x: x.x, y: x.y }));
+    const piles = s.dung.filter((pile) => inFemaleActive(pile)).map(({ x, y }) => ({ x, y }));
+    if (piles.length) {
       // Немного куч — набегом с совком: в отсек, потом высыпать в контейнер. Много — с мешком
       if (piles.length <= BALANCE.items.scoopCapacity) return ['dung', this.scooped(piles)];
       return ['dung', this.bagged('scoop', piles, /Убрать навоз в мешок/)];
@@ -711,7 +784,7 @@ export class Bot {
     steps.push(...this.toolSteps(tool));
     const room = cap - (existing && d(existing, bagSpot) <= reach ? existing.fill ?? 0 : 0);
     for (const p of near.slice(0, room)) {
-      steps.push({ label: `${tool} → мешок`, to: () => (s.player.held?.kind === tool ? p : null), expect, timeout: 30 * 6 });
+      steps.push({ label: `${tool} → мешок`, to: () => (s.player.held?.kind === tool ? p : null), expect, timeout: 30 * 12 });
     }
     steps.push(...this.putAwayLater(tool));
     steps.push({
@@ -737,7 +810,7 @@ export class Bot {
     const s = this.s;
     const steps: Step[] = [...this.freeHands(), ...this.toolSteps('scoop')];
     for (const p of targets.sort((a, b) => a.x - b.x)) {
-      steps.push({ label: 'совок → отсек', to: () => (s.player.held?.kind === 'scoop' && s.dung.some((d) => d.x === p.x && d.y === p.y) ? p : null), expect: /Убрать навоз в (совок|тачку|мешок)/, timeout: 30 * 6 });
+      steps.push({ label: 'совок → отсек', to: () => (s.player.held?.kind === 'scoop' && s.dung.some((d) => d.x === p.x && d.y === p.y) ? p : null), expect: /Убрать навоз в (совок|тачку|мешок)/, timeout: 30 * 12 });
     }
     // Совок — домой: высыпать, вымыть, на стойку. Что в руках, смотрим по ходу, а не при составлении плана
     const scoop = () => (s.player.held?.kind === 'scoop' ? s.player.held : null);
@@ -790,7 +863,7 @@ export class Bot {
       );
     }
     for (const p of targets) {
-      steps.push({ label: `${tool} → клетка`, to: () => (s.player.held?.kind === tool ? p : null), expect, timeout: 30 * 6 });
+      steps.push({ label: `${tool} → клетка`, to: () => (s.player.held?.kind === tool ? p : null), expect, timeout: 30 * 12 });
     }
     if (tool === 'sawdust') steps.push(...this.putAway(() => s.player.held));
     else steps.push({ label: 'положить', to: () => (s.player.held?.kind === tool ? SAFE : null), expect: /^Положить/, done: () => !s.player.held });

@@ -7,6 +7,7 @@ import { cellAt, footHarm, isWet, wetAround } from './floor';
 import { reachableItems } from './items';
 import { chance, randomRange } from './rng';
 import { takeStock } from './stock';
+import { isOutdoorWalkable, routeForAnimal } from './nav';
 import type { Elephant, ElephantState, Item, State } from './types';
 
 const E = BALANCE.elephant;
@@ -20,21 +21,22 @@ export function dist(a: { x: number; y: number }, b: { x: number; y: number }): 
 }
 
 // Где слон гуляет: свой загон целиком, подстилка и трава
-function boundsOf(e: Elephant): { x0: number; y0: number; x1: number; y1: number } {
-  const p = profileOf(e).paddock === 'upper' ? MAP.paddock : MAP.paddock2;
+function boundsOf(e: Elephant, state: State): { x0: number; y0: number; x1: number; y1: number } {
+  const group = profileOf(e).paddock;
+  const p = state.gates[group] ? MAP.complexes[group].bounds : MAP.complexes[group].active;
   return { x0: p.x0 + 0.7, y0: p.y0 + 0.7, x1: p.x1 - 0.7, y1: p.y1 - 0.6 };
 }
 
-function clampInside(e: Elephant, x: number, y: number): { x: number; y: number } {
-  const b = boundsOf(e);
+function clampInside(state: State, e: Elephant, x: number, y: number): { x: number; y: number } {
+  const b = boundsOf(e, state);
   return {
     x: Math.min(Math.max(x, b.x0), b.x1),
     y: Math.min(Math.max(y, b.y0), b.y1),
   };
 }
 
-function walkTo(e: Elephant, x: number, y: number, next: ElephantState): void {
-  const p = clampInside(e, x, y);
+function walkTo(state: State, e: Elephant, x: number, y: number, next: ElephantState): void {
+  const p = clampInside(state, e, x, y);
   e.tx = p.x;
   e.ty = p.y;
   e.state = 'walk';
@@ -48,19 +50,19 @@ function sleepingAt(state: State, e: Elephant): boolean {
 
 // Свои поилка и кормушка: у слоних — верхние, у самцов — нижние
 function troughOf(e: Elephant): { x: number; y: number } {
-  return profileOf(e).paddock === 'upper' ? MAP.trough : MAP.trough2;
+  return profileOf(e).paddock === 'female' ? MAP.trough : MAP.trough2;
 }
 
 function feederOf(e: Elephant): { x: number; y: number } {
-  return profileOf(e).paddock === 'upper' ? MAP.feeder : MAP.feeder2;
+  return profileOf(e).paddock === 'female' ? MAP.feeder : MAP.feeder2;
 }
 
 function feederHayOf(state: State, e: Elephant): number {
-  return profileOf(e).paddock === 'upper' ? state.feederHay : state.feederHay2;
+  return profileOf(e).paddock === 'female' ? state.feederHay : state.feederHay2;
 }
 
 function drinkTrough(state: State, e: Elephant, amount: number): void {
-  if (profileOf(e).paddock === 'upper') state.trough = Math.max(0, state.trough - amount);
+  if (profileOf(e).paddock === 'female') state.trough = Math.max(0, state.trough - amount);
   else state.trough2 = Math.max(0, state.trough2 - amount);
 }
 
@@ -71,7 +73,7 @@ export function updateElephants(state: State, dt: number, dtReal: number): void 
 
 function startMusthEvents(state: State): void {
   if (!state.musthEventsRemaining || state.t < state.musthNextAt) return;
-  const males = state.elephants.filter((e) => profileOf(e).paddock === 'lower' && e.musthTimer <= 0);
+  const males = state.elephants.filter((e) => profileOf(e).paddock === 'male' && e.musthTimer <= 0);
   if (!males.length) return;
   const e = males[Math.floor(randomRange(state, 0, males.length))];
   e.musthTimer = randomRange(state, 120, 180);
@@ -111,7 +113,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
   if (e.bladder >= 100 && e.signalStarted === undefined) startSignal(state, e, p);
   trample(state, e);
 
-  if (e.musthTimer > 0 && p.paddock === 'lower') {
+  if (e.musthTimer > 0 && p.paddock === 'male') {
     const target = inPaddock(state.player.x, state.player.y) && state.player.y > MAP.fenceY2
       ? state.player
       : state.partner;
@@ -128,16 +130,30 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
 
   switch (e.state) {
     case 'walk': {
-      const d = dist(e, { x: e.tx, y: e.ty });
       const step = E.speed * dtReal;
-      if (d <= step || d < 0.05) {
-        e.x = e.tx;
-        e.y = e.ty;
-        arrive(state, e, p);
-      } else {
-        e.x += ((e.tx - e.x) / d) * step;
-        e.y += ((e.ty - e.y) / d) * step;
+      let waypoint = { x: e.tx, y: e.ty };
+      const length = Math.hypot(e.tx - e.x, e.ty - e.y);
+      const samples = Math.ceil(length / 0.25);
+      const blockedDirectly = Array.from({ length: samples }, (_, i) => i + 1).some((i) =>
+        !isOutdoorWalkable(e.x + ((e.tx - e.x) * i) / samples, e.y + ((e.ty - e.y) * i) / samples, p.paddock, state.gates),
+      );
+      if (blockedDirectly) {
+        const path = routeForAnimal(e, waypoint, p.paddock, state.gates);
+        if (!path.length) {
+          e.state = 'idle';
+          e.timer = 1;
+          break;
+        }
+        waypoint = path[0];
       }
+      const wx = waypoint.x - e.x;
+      const wy = waypoint.y - e.y;
+      const wd = Math.hypot(wx, wy);
+      const nx = wd <= step ? wx : (wx / wd) * step;
+      const ny = wd <= step ? wy : (wy / wd) * step;
+      if (isOutdoorWalkable(e.x + nx, e.y, p.paddock, state.gates)) e.x += nx;
+      if (isOutdoorWalkable(e.x, e.y + ny, p.paddock, state.gates)) e.y += ny;
+      if (Math.hypot(e.tx - e.x, e.ty - e.y) < 0.05) arrive(state, e, p);
       break;
     }
     case 'signal':
@@ -177,7 +193,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     case 'eatHay': {
       const hay = feederHayOf(state, e);
       const eat = Math.min(E.hayFeederPerMinute * dt, hay);
-      if (profileOf(e).paddock === 'upper') state.feederHay -= eat;
+      if (profileOf(e).paddock === 'female') state.feederHay -= eat;
       else state.feederHay2 -= eat;
       const before = e.hunger;
       e.hunger = clamp(e.hunger - E.hayEatPerMinute * dt);
@@ -193,7 +209,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
       e.bladder = Math.min(100, e.bladder + (before - e.thirst) * E.drinkToBladder);
       drinkTrough(state, e, E.troughPerMinute * dt);
       e.timer -= dt;
-      const water = profileOf(e).paddock === 'upper' ? state.trough : state.trough2;
+      const water = profileOf(e).paddock === 'female' ? state.trough : state.trough2;
       if (e.timer <= 0 || e.thirst < 5 || water <= 0) decide(state, e);
       break;
     }
@@ -256,8 +272,8 @@ function startSignal(state: State, e: Elephant, p: ElephantProfile): void {
   emit(state, { kind: 'info', text: `${p.name} просится`, elephantId: e.id });
   if (p.signal === 'fenceStare') {
     // Стойка у решётки: у верхнего загона решётка снизу, у нижнего — сверху
-    const y = p.paddock === 'upper' ? MAP.fenceY - 0.6 : MAP.fenceY2 + 0.6;
-    walkTo(e, e.x, y, 'signal');
+    const y = MAP.fenceY - 0.6;
+    walkTo(state, e, e.x, y, 'signal');
   } else {
     e.state = 'signal';
     e.timer = p.signalLead;
@@ -368,7 +384,7 @@ function arrive(state: State, e: Elephant, p: ElephantProfile): void {
 
 function nearestPool(e: Elephant): number {
   // Слон купается в бассейне своего загона: верхний — 0, нижний — 1
-  return profileOf(e).paddock === 'upper' ? 0 : 1;
+  return profileOf(e).paddock === 'female' ? 0 : 1;
 }
 
 function ownBasin(state: State, e: Elephant): Item | undefined {
@@ -411,7 +427,7 @@ function bedSpot(state: State, e: Elephant): { x: number; y: number } | null {
       if (c.kind !== 'straw') return;
       const x = MAP.floor.x + cx + 0.5;
       const y = MAP.floor.y + cy + 0.5;
-      const b = boundsOf(e);
+      const b = boundsOf(e, state);
       if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) return; // только свой загон
       const dd = Math.hypot(x - e.x, y - e.y);
       if (dd > 3 || dd >= bestD) return;
@@ -428,28 +444,29 @@ export function decide(state: State, e: Elephant): void {
   const p = profileOf(e);
   e.pool = undefined;
   const basin = ownBasin(state, e);
-  if (basin) return walkTo(e, basin.x, basin.y - 0.6, 'eatBasin');
+  if (basin) return walkTo(state, e, basin.x, basin.y - 0.6, 'eatBasin');
   const trough = troughOf(e);
-  const water = p.paddock === 'upper' ? state.trough : state.trough2;
-  if (e.thirst > 60 && water > 5) return walkTo(e, trough.x - 0.4, trough.y + (p.paddock === 'upper' ? 0.9 : -0.9), 'drink');
+  const water = p.paddock === 'female' ? state.trough : state.trough2;
+  if (e.thirst > 60 && water > 5) return walkTo(state, e, trough.x - 0.4, trough.y, 'drink');
   const hungry = sleepingAt(state, e) ? 70 : 45;
   const feeder = feederOf(e);
-  if (e.hunger > hungry && feederHayOf(state, e) > 0) return walkTo(e, feeder.x + 0.3, feeder.y + (p.paddock === 'upper' ? 0.9 : -0.9), 'eatHay');
+  if (e.hunger > hungry && feederHayOf(state, e) > 0) return walkTo(state, e, feeder.x + 0.3, feeder.y + 0.3, 'eatHay');
   if (sleepingAt(state, e)) {
     // Ложится на самое сухое место поблизости: сухая подстилка к ночи — забота о ногах
     const spot = bedSpot(state, e);
-    if (spot && dist(spot, e) > 0.4) return walkTo(e, spot.x, spot.y, 'sleep');
+    if (spot && dist(spot, e) > 0.4) return walkTo(state, e, spot.x, spot.y, 'sleep');
     return lieDown(state, e, p);
   }
   if (e.boredom >= 35 && !meadowUnpleasant(state, e) && chance(state, 0.25)) {
+    const bounds = MAP.complexes[p.paddock].bounds;
     const tree = MAP.meadowTrees
-      .filter((point) => point.y >= (p.paddock === 'upper' ? MAP.paddock.y0 : MAP.paddock2.y0) && point.y < (p.paddock === 'upper' ? MAP.paddock.y1 : MAP.paddock2.y1))
+      .filter((point) => point.y >= bounds.y0 && point.y < bounds.y1)
       .sort((a, b) => dist(a, e) - dist(b, e))[0];
-    if (tree) return walkTo(e, tree.x, tree.y, 'scratch');
+    if (tree) return walkTo(state, e, tree.x, tree.y, 'scratch');
   }
   if (e.boredom >= 30 && !meadowUnpleasant(state, e) && chance(state, 0.18)) {
     const tire = state.tires.find((item) => item.paddock === p.paddock);
-    if (tire && tire.flightLeft <= 0) return walkTo(e, tire.x, tire.y - 0.6, 'play');
+    if (tire && tire.flightLeft <= 0) return walkTo(state, e, tire.x, tire.y - 0.6, 'play');
   }
   if (e.boredom >= E.swayBoredom && p.stereotypy) {
     e.state = 'sway';
@@ -460,24 +477,24 @@ export function decide(state: State, e: Elephant): void {
   // Днём от скуки — купание в своём бассейне
   if (!isNight(state) && e.boredom >= BALANCE.pool.batheBoredom && !meadowUnpleasant(state, e) && chance(state, Math.min(1, BALANCE.pool.batheChance * 6))) {
     const pool = nearestPool(e);
-    return walkTo(e, MAP.pools[pool].x + randomRange(state, -1.5, 1.5), MAP.pools[pool].y + randomRange(state, -1, 1), 'bathe');
+    return walkTo(state, e, MAP.pools[pool].x + randomRange(state, -1.5, 1.5), MAP.pools[pool].y + randomRange(state, -1, 1), 'bathe');
   }
   if (e.boredom >= E.reachBoredom) {
     const target = reachableItems(state).sort((a, b) => dist(a, e) - dist(b, e))[0];
     if (target) {
       e.targetItem = target.id;
-      return walkTo(e, target.x, target.y - 0.8, 'reach');
+      return walkTo(state, e, target.x, target.y - 0.8, 'reach');
     }
   }
   if (chance(state, 0.6)) {
-    const b = boundsOf(e);
+    const b = boundsOf(e, state);
     let x = randomRange(state, b.x0, b.x1);
     let y = randomRange(state, b.y0, b.y1);
     for (let i = 0; i < 6 && state.dung.some((d) => Math.hypot(d.x - x, d.y - y) < 1.4); i++) {
       x = randomRange(state, b.x0, b.x1);
       y = randomRange(state, b.y0, b.y1);
     }
-    walkTo(e, x, y, 'idle');
+    walkTo(state, e, x, y, 'idle');
   } else {
     e.state = 'idle';
     e.timer = randomRange(state, 3, 8);
@@ -485,8 +502,10 @@ export function decide(state: State, e: Elephant): void {
 }
 
 function meadowUnpleasant(state: State, e: Elephant): boolean {
-  const p = profileOf(e).paddock === 'upper' ? MAP.paddock : MAP.paddock2;
-  const meadowX = MAP.bedding.x + MAP.bedding.cols;
+  const group = profileOf(e).paddock;
+  const p = MAP.complexes[group].bounds;
+  const bedding = group === 'female' ? MAP.bedding : MAP.bedding2;
+  const meadowX = bedding.x + bedding.cols;
   let dung = state.dung.filter((pile) => pile.x >= meadowX && pile.x < p.x1 && pile.y >= p.y0 && pile.y < p.y1).length;
   state.cells.forEach((row, cy) =>
     row.forEach((cell, cx) => {
@@ -495,7 +514,7 @@ function meadowUnpleasant(state: State, e: Elephant): boolean {
       if (cell.kind === 'dung' && x >= meadowX && x < p.x1 && y >= p.y0 && y < p.y1) dung++;
     }),
   );
-  const pool = profileOf(e).paddock === 'upper' ? 0 : 1;
+  const pool = group === 'female' ? 0 : 1;
   return dung >= 5 || state.pools[pool].dirty >= BALANCE.pool.murkDirt;
 }
 

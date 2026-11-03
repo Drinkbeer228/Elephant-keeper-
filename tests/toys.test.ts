@@ -11,16 +11,16 @@ describe('игрушка-покрышка', () => {
     expect(distance).toBeGreaterThanOrEqual(4);
     expect(distance).toBeLessThanOrEqual(7);
 
-    state.player.x = 10.4;
-    state.player.y = 5;
-    const held = { id: state.nextItemId++, kind: 'bucket' as const, x: 10.4, y: 5, droppedAt: state.t };
+    state.player.x = 30.4;
+    state.player.y = 26;
+    const held = { id: state.nextItemId++, kind: 'bucket' as const, x: 30.4, y: 26, droppedAt: state.t };
     state.player.held = held;
-    Object.assign(tire, { x: 10, y: 5, vx: 10, vy: 0, flightLeft: 0.1, flightDuration: 0.1, hit: false });
+    Object.assign(tire, { x: 30, y: 26, vx: 10, vy: 0, flightLeft: 0.1, flightDuration: 0.1, hit: false });
 
     tick(state, 0.1);
 
     expect(state.player.knockdownTimer).toBe(2);
-    expect(state.player.x).toBeLessThan(10.4);
+    expect(state.player.x).toBeLessThan(30.4);
     expect(state.player.held).toBeNull();
     expect(state.items).toContain(held);
     expect(availableAction(state)).toBeNull();

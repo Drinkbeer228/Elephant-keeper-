@@ -58,7 +58,7 @@ export function throwTire(state: State, tire: Tire): void {
 }
 
 function keepInsidePaddock(tire: Tire): void {
-  const bounds = tire.paddock === 'upper' ? MAP.paddock : MAP.paddock2;
+  const bounds = tire.paddock === 'female' ? MAP.paddock : MAP.paddock2;
   const x = Math.min(bounds.x1 - 0.5, Math.max(bounds.x0 + 0.5, tire.x));
   const y = Math.min(bounds.y1 - 0.5, Math.max(bounds.y0 + 0.5, tire.y));
   if (x !== tire.x || y !== tire.y) {
@@ -110,7 +110,7 @@ function moveBack(state: State, target: { x: number; y: number }, dx: number, dy
   for (let distance = 1.8; distance >= 0.2; distance -= 0.2) {
     const x = origin.x + dx * distance;
     const y = origin.y + dy * distance;
-    if (walkable(x, y, state.gateOpen) && !MAP.pools.some((_, i) => {
+    if (walkable(x, y, { gates: state.gates }) && !MAP.pools.some((_, i) => {
       const p = MAP.pools[i];
       return ((x - p.x) / p.rx) ** 2 + ((y - p.y) / p.ry) ** 2 < 1;
     })) {
