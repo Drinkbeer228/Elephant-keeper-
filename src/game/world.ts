@@ -111,6 +111,12 @@ export class WorldScene extends Phaser.Scene {
     // Зум: колесо мыши плавно, Tab / Z — рабочий план ↔ общий план всей карты
     window.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('keydown', this.onKey);
+    // При уничтожении сцены (рестарт/пересоздание игры) убираем слушатели за собой,
+    // иначе новые копии сцены навешают дубли на то же окно
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('wheel', this.onWheel);
+      window.removeEventListener('keydown', this.onKey);
+    });
     void document.fonts.load('8px "Press Start 2P"').finally(() => {
       loadTextures(this);
       this.build();

@@ -5,6 +5,11 @@ import { WorldScene, type FrameResult } from './game/world';
 import { OverlayScene } from './game/overlay';
 import '@fontsource/press-start-2p';
 import { Hud } from './ui/hud';
+import { setSpriteSources } from './ui/icons';
+import { barrowUrl, itemUrl, portraitUrl, vegUrl } from './game/textures';
+
+// Спрайты для интерфейса подставляет игровой слой — UI не импортирует textures напрямую
+setSpriteSources({ itemUrl, portraitUrl, vegUrl, barrowUrl });
 
 const params = new URLSearchParams(location.search);
 let state: State = createShift(Number(params.get('seed')) || Date.now() % 1_000_000);

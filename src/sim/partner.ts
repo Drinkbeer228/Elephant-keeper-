@@ -2,7 +2,7 @@ import { BALANCE } from '../data/balance';
 import { MAP, inPaddock } from '../data/map';
 import { ELEPHANTS } from '../data/elephants';
 import { dist } from './elephants';
-import { emit } from './events';
+import { emit, LOG_LIMIT } from './events';
 import { cleared, sawdustAbsorbed, setCell } from './floor';
 import { basinsOnRack, freeBasinSpot } from './items';
 import { kashaDue, prepareMealBasins, startKasha } from './feeding';
@@ -496,6 +496,7 @@ export function updatePartner(state: State, dt: number, dtReal: number): void {
       'Димон: самцы сено умяли в два счёта.',
     ];
     state.log.push({ kind: 'info', text: lines[Math.floor(randomRange(state, 0, lines.length))] });
+    if (state.log.length > LOG_LIMIT) state.log.splice(0, state.log.length - LOG_LIMIT);
   }
 
   // Между делами — короткая пауза, потом выбирает новое
