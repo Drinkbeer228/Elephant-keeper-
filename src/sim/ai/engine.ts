@@ -80,10 +80,11 @@ export function canInterrupt(defs: Record<ElephantState, AiStateDef>, e: Elephan
 /**
  * Применить намерение: exit старого узла → смена состояния → цели/next → enter нового узла.
  * now — игровое время для учёта fsm.since/committedUntil.
- * Возвращает true, если состояние СМЕНИЛОСЬ (или цель — 'walk': её задаёт bridge),
- * false если переход остался внутри текущего узла ('self') — тогда узел продолжает
- * тикать в этом же подшаге. Так один шаг движка воспроизводит цепочки старых switch
- * (timer→decide→walkTo, arrive→decide и т.д.) без изменения порядка вызовов RNG.
+ * Цель 'self' — служебная: узел сам выполнил работу (старый кейс switch уже изменил
+ * e.state/e.timer напрямую или остался в себе). Здесь ведётся только учёт fsm-метаданных:
+ * если узел сменился — last/transitions/since/priority/commit пересчитываются, если
+ * остался — since не двигается. Ничего из этого не читается симуляцией в инкременте 2,
+ * поэтому golden-прогон побитово совпадает со старым switch.
  */
 export function applyIntent(
   registry: AiRegistry,
@@ -92,15 +93,31 @@ export function applyIntent(
   e: Elephant,
   intent: Intent,
   now: number,
-): boolean {
-  if (intent.target === 'self') return false; // узел сам обновил таймеры — остаёмся в нём
+): void {
   const defs = registry.defs;
   const from = e.state;
+  const fsm = ensureFsm(e);
+
+  if (intent.target === 'self') {
+    // Делегат уже всё сделал ДО вызова applyIntent (from устарел): сверяем
+    // фактическое состояние с pendingFrom, который stepElephant выставил до тика.
+    const prev = fsm.pendingFrom ?? from;
+    fsm.pendingFrom = undefined;
+    if (e.state !== prev) {
+      fsm.last = prev;
+      fsm.transitions += 1;
+      fsm.since = now;
+      fsm.currentPriority = defs[e.state]?.priority ?? 0;
+      const d = defs[e.state];
+      fsm.committedUntil = d?.interrupt === 'finish' ? now + (intent.minCommit ?? DEFAULT_MIN_COMMIT) : undefined;
+    }
+    return;
+  }
+
   const fromDef = defs[from];
   if (fromDef?.exit) fromDef.exit(ctxFor(e));
 
   const target = intent.target;
-  const fsm = ensureFsm(e);
   fsm.last = from;
   fsm.transitions += 1;
   fsm.since = now;
@@ -121,15 +138,19 @@ export function applyIntent(
   behavior.enter(state, e, intent);
   const toDef = defs[target];
   if (toDef?.enter) toDef.enter(ctxFor(e));
-  return true;
 }
 
 /**
  * Один подшаг слона через движок: tick узла (delegate в rules), при отсутствии
- * намерения — явные transitions, затем fallback по истечении timer. Если переход
- * сменил состояние, новый узел тут же тикает в этом же подшаге — ровно как старый
- * switch, где fall-through вёл себя как немедленный вход в новое состояние.
- * maxSteps — страховка от бесконечных self-петель (в старом коде таких нет).
+ * намерения — явные transitions, затем fallback по истечении timer.
+ *
+ * Семантика инкремента 2 («перенос 1-в-1»): tick-функции в rules — это исходные
+ * кейсы старого switch, они мутируют слона сами (decide/arrive/pee/walkTo) и
+ * возвращают 'self'. Движок НЕ повторяет тики в одном подшаге — ровно как старый
+ * код: одно обращение к слону за подшаг. Цепочка «проснулся → idle → решил → walk»
+ * растянута по подшагам так же, как в эталоне (golden-трассировка).
+ * transitions/fallback остаются доступными для декларативных узлов будущих
+ * инкрементов (ассессмент, прерывания) — сейчас реестр их не объявляет.
  */
 export function stepElephant(
   registry: AiRegistry,
@@ -137,24 +158,25 @@ export function stepElephant(
   ctx: TickCtx,
   e: Elephant,
   now: number,
-  maxSteps = 8,
 ): void {
-  for (let i = 0; i < maxSteps; i++) {
-    const def = registry.defs[e.state];
-    if (!def) return;
-    let intent = def.tick ? behavior.tick(ctx, e, def) : null;
-    if (!intent && def.transitions) {
-      for (const tr of def.transitions) {
-        if (tr.when(ctxFor(e))) {
-          intent = typeof tr.to === 'function' ? tr.to() : tr.to;
-          break;
-        }
+  const def = registry.defs[e.state];
+  if (!def) return;
+  const fsm = ensureFsm(e);
+  fsm.pendingFrom = e.state; // чтобы ветка 'self' увидела, менял ли делегат состояние
+  const intent = def.tick ? behavior.tick(ctx, e, def) : null;
+  if (intent) {
+    applyIntent(registry, behavior, ctx.state, e, intent, now);
+    return;
+  }
+  if (def.transitions) {
+    for (const tr of def.transitions) {
+      if (tr.when(ctxFor(e))) {
+        applyIntent(registry, behavior, ctx.state, e, typeof tr.to === 'function' ? tr.to() : tr.to, now);
+        return;
       }
     }
-    if (!intent && def.fallback && e.timer <= 0) intent = def.fallback();
-    if (!intent) return; // остались в состоянии до следующего подшага
-    if (!applyIntent(registry, behavior, ctx.state, e, intent, now)) return; // self — узел уже всё сделал
   }
+  if (def.fallback && e.timer <= 0) applyIntent(registry, behavior, ctx.state, e, def.fallback(), now);
 }
 
 /** Совместимость со старым вызовом: одиночный проход без chain-повтора. */

@@ -85,6 +85,8 @@ export interface Elephant {
     transitions: number; // сколько раз менял состояние за смену
     currentPriority?: number; // приоритет активного узла (для гистерезиса прерываний)
     committedUntil?: number; // до какого времени узел 'finish' нельзя прерывать
+    /** Служебное: состояние ДО тика делегата (для учёта 'self'-переходов). Не сериализуется. */
+    pendingFrom?: string;
   };
   hunger: number;
   thirst: number;
