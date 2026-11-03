@@ -14,8 +14,37 @@ import { cleanShift, el } from './helpers';
 
 const ctx = (): LoadContext => ({ mapId: MAP_ID, cols: MAP.floor.cols, rows: MAP.floor.rows });
 
+// Посимвольная каноническая строка СОСТОЯНИЯ: тот же конвейер, что canonicalizeForJson
+// в save.ts (undefined -> null, Infinity -> null + sidecar-карта путей), но без header.
+// Затем каждое null-заглушечное значение из sidecar подставляется обратно настоящим
+// числом по своему пути ('tires.0.cooldown'). Без подмены два разных «никогда-значения»
+// (Infinity vs 1e9) дали бы одинаковый null и тест ловил бы ложное совпадение.
 function canonStr(s: State): string {
-  return serializeSave(s, MAP_ID, { cols: MAP.floor.cols, rows: MAP.floor.rows });
+  const nonFinite: Record<string, number> = {};
+  function canon(value: unknown, path: string): unknown {
+    if (value === undefined) return null;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        nonFinite[path] = value;
+        return null;
+      }
+      return value;
+    }
+    if (Array.isArray(value)) return value.map((item, i) => canon(item, `${path}.${i}`));
+    if (value !== null && typeof value === 'object') {
+      const src = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(src).sort()) out[key] = canon(src[key], `${path}.${key}`);
+      return out;
+    }
+    return value;
+  }
+  let out = JSON.stringify(canon(s as unknown as Record<string, unknown>, 'state'));
+  for (const [path, value] of Object.entries(nonFinite)) {
+    const rel = path.replace(/^state\./, '');
+    out = out.replace(`"${rel}":null`, `"${rel}":${String(value)}`);
+  }
+  return out;
 }
 
 // Прогон смены на несколько игровых часов с командами движения — состояние «оживает»:
@@ -25,9 +54,10 @@ function liveShift(seed = 7): State {
   for (let i = 0; i < 300; i++) {
     tick(s, 1 / 30, [{ type: 'move', dx: Math.sin(i * 0.21), dy: Math.cos(i * 0.17), sprint: false }]);
   }
-  // И предмет в руках — проверить восстановление ссылочной идентичности held ↔ items[]
+  // И предмет в руках — проверить восстановление ссылочной идентичности held ↔ items[].
+  // Семантика движка (drop() в actions.ts): во время переноски предмет остаётся В
+  // массиве items[] (иначе его некуда «положить» обратно), а held — ссылка на него.
   const fork = s.items.find((it) => it.kind === 'fork')!;
-  s.items = s.items.filter((it) => it !== fork);
   s.player.held = fork;
   return s;
 }
@@ -83,7 +113,7 @@ describe('save/load: round-trip', () => {
       tick(restored, 1 / 30, []);
     }
     expect(restored.rng).toBe(original.rng);
-    expect(JSON.stringify(restored)).toBe(canonStr(original));
+    expect(canonStr(restored)).toBe(canonStr(original));
   });
 
   it('advance() после загрузки продолжает смену корректно', () => {
@@ -94,7 +124,7 @@ describe('save/load: round-trip', () => {
     advance(a, 90);
     advance(bRes.state, 90);
     expect(bRes.state.t).toBe(a.t);
-    expect(JSON.stringify(bRes.state)).toBe(canonStr(a));
+    expect(canonStr(bRes.state)).toBe(canonStr(a));
   });
 
   it('Infinity в musthNextAt проходит через null и восстанавливается', () => {

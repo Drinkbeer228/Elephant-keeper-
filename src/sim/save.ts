@@ -198,33 +198,39 @@ function finishLoad(raw: Record<string, unknown>, ctx: LoadContext): LoadResult 
 }
 
 // Возврат чисел вне JSON из sidecar-карты по путям 'state.a.b' (Infinity).
-// Сегмент 'state' отбрасывается; пути вроде 'state.tires.female.cooldown' спускаются
-// через массивы по совпадению element.id === сегмент ('female').
+// Сегмент 'state' отбрасывается; пути содержат индексы массивов ('tires.0.cooldown'),
+// спуск — по числовому индексу, для ручных сейвов допустим и матчинг element.id.
 // Значения в sidecar лежат строками ('Infinity', '-Infinity', 'NaN' или обычное число),
 // т.к. JSON.stringify не переносит не-конечные числа как числа.
 function reviveNumbers(map: Record<string, number> | undefined, state: State): void {
-  if (!map) return;
-  for (const [path, raw] of Object.entries(map)) {
-    const value = typeof raw === 'number' ? raw : parseNonFinite(String(raw));
-    if (value === undefined) continue;
-    const parts = path.split('.');
-    if (parts[0] === 'state') parts.shift();
-    setPath(state as unknown as Record<string, unknown>, parts, value);
+  // held-ссылку восстанавливаем ВСЕГДА (см. ниже), даже если sidecar пуст:
+  // JSON сериализует ссылку player.held -> items[] как два независимых дубликата.
+  // Infinity из sidecar возвращаем в состояние до структурной проверки.
+  if (map) {
+    for (const [path, raw] of Object.entries(map)) {
+      const value = typeof raw === 'number' ? raw : parseNonFinite(String(raw));
+      if (value === undefined) continue;
+      const parts = path.split('.');
+      if (parts[0] === 'state') parts.shift();
+      setPath(state as unknown as Record<string, unknown>, parts, value);
+    }
   }
 
-  // held игрока в State — ссылка на элемент items[] (drop() сравнивает по идентичности).
-  // JSON превращает ссылку в копию: ищем предмет по id и подменяем ссылку. Копия held
-  // содержит ровно те же перечислимые поля, что и живой предмет (undefined-ключи с
-  // обеих сторон отброшены форматом одинаково), поэтому deepEqual не ломается.
+  // held игрока в State — ССЫЛКА на элемент items[] (во время переноски предмет
+  // остаётся в массиве; drop() кладёт его обратно по той же ссылке). JSON
+  // сериализует ссылку как ДВА независимых дубликата. Восстановление инвертирует
+  // запись: держим в items[] тот же объект, что и в player.held, иначе после
+  // загрузки drop() вернул бы в мир «другой» предмет, а изменения held (например,
+  // наполненный совок) потерялись бы.
   const held = state.player.held;
   if (!held) return;
-  const found = state.items.find((i) => i.id === held.id);
-  if (found) {
-    state.player.held = found;
+  const idx = state.items.findIndex((i) => i.id === held.id);
+  if (idx >= 0) {
+    state.player.held = state.items[idx];
   } else {
-    // Фоллбэк: предмета нет в items[] (в живом состоянии так быть не может — held
-    // исключён из массива только во время переноски, а при drop возвращается).
-    // Оставляем копию как есть — повторный save даёт ту же строку.
+    // Фоллбэк для повреждённых/ручных сейвов: предмета нет в items[] — возвращаем
+    // копию из player.held в массив, чтобы семантика «held ⊂ items» восстановилась.
+    state.items.push(held);
   }
 }
 
@@ -248,7 +254,11 @@ function setPath(doc: Record<string, unknown>, parts: string[], value: number): 
 }
 
 function descend(container: unknown, segment: string): unknown {
-  if (Array.isArray(container)) return container.find((el) => isRecord(el) && String(el.id) === segment);
+  if (Array.isArray(container)) {
+    const byIndex = Number(segment);
+    if (Number.isInteger(byIndex) && byIndex >= 0 && byIndex < container.length) return container[byIndex];
+    return container.find((e) => isRecord(e) && String(e.id) === segment);
+  }
   if (isRecord(container)) return (container as Record<string, unknown>)[segment];
   return undefined;
 }
