@@ -10,6 +10,13 @@ export function supplyOpen(state: State): boolean {
   return state.supply.arrived && !state.supply.left;
 }
 
+export function acceptSupplyIfUnloaded(state: State): void {
+  const sp = state.supply;
+  if (!sp.arrived || sp.left || sp.bays.length) return;
+  sp.left = true;
+  emit(state, { kind: 'good', text: 'Груз принят. Водитель уехал, паллеты оставлены на площадке.' });
+}
+
 // Общий кадр машин: мусоровоз живёт в updateContainer, поставка — здесь.
 // Приехала → «гудок» и поддоны в борту; водитель ждёт у борта; в конце окна уехала
 export function updateTrucks(state: State): void {

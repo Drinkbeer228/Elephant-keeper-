@@ -13,6 +13,7 @@ import { finishShift } from './handover';
 import { updateItems } from './items';
 import { barrowOffset, spillFromBarrow, updateBalance, updateBarrowRisk, updateContainer } from './barrow';
 import { updatePartner } from './partner';
+import { updateToys } from './toys';
 import type { Command, ShiftEvent, State } from './types';
 
 // Один кадр игры: dtReal — реальные секунды с прошлого кадра
@@ -78,6 +79,7 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   const before = dayPart(state.t);
   state.t += dt;
   updateElephants(state, dt, dtReal);
+  updateToys(state, dt, dtReal);
   updatePartner(state, dt, dtReal);
   updateItems(state, dt);
   updateBarrowRisk(state, dt);
@@ -116,6 +118,7 @@ export function playerSpeedFactor(state: State): number {
 // Кипер идёт; толкаемое (тачка или рохля) катится перед ним. Рохля — только по твёрдому полу.
 // Спринт (Shift): быстрее, но с гружёной тачкой дребезжит и сыплет на поворотах и стыках покрытий
 function movePlayer(state: State, dx: number, dy: number, dtReal: number, sprint: boolean): { moving: boolean; turned: boolean } {
+  if (state.player.knockdownTimer > 0) return { moving: false, turned: false };
   const len = Math.hypot(dx, dy);
   if (len < 0.01) return { moving: false, turned: false };
   const p = state.player;

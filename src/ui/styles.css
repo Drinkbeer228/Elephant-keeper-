@@ -60,6 +60,7 @@ body {
 #hud button,
 #hud .stick,
 #hud .checklist,
+#hud .schedule,
 #hud .overlay,
 #hud .inspect,
 #hud .toast {
@@ -84,6 +85,7 @@ svg {
 .panel,
 .toast,
 .checklist,
+.schedule,
 .inspect,
 .card {
   background: var(--win);
@@ -520,6 +522,94 @@ svg {
   color: var(--white);
 }
 
+/* ——— распорядок смены ——— */
+
+.schedule {
+  position: absolute;
+  right: 10px;
+  top: calc(145px + var(--safe-t));
+  width: min(340px, calc(100% - 20px));
+  max-height: min(58vh, 480px);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+
+.schedule-toggle {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  font: 9px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.schedule-toggle span {
+  color: var(--muted);
+}
+
+.schedule-rows {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+
+.schedule.collapsed {
+  width: auto;
+  max-height: none;
+  padding: 6px;
+}
+
+.schedule.collapsed .schedule-rows {
+  display: none;
+}
+
+.schedule-row {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 4px;
+  color: var(--grey);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+.schedule-row b {
+  flex: none;
+  color: var(--muted);
+}
+
+.schedule-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-row strong {
+  color: var(--white);
+  font-size: 7px;
+}
+
+.schedule-row.done,
+.schedule-row.done b,
+.schedule-row.done strong {
+  color: var(--green-light);
+}
+
+.schedule-row.active,
+.schedule-row.active b,
+.schedule-row.active strong {
+  color: var(--gold);
+}
+
 /* ——— низ: подсказка действия и кнопки ——— */
 
 .bottom {
@@ -665,10 +755,13 @@ svg {
 .card {
   padding: 18px 22px 20px;
   width: min(640px, 100%);
-  max-height: 100%;
-  overflow: auto;
-  font-size: 10px;
-  line-height: 1.8;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-size: 9px;
+  line-height: 1.55;
+  padding: 10px 14px 12px;
 }
 
 .card.small {
@@ -688,6 +781,26 @@ svg {
   background: var(--sky);
   color: var(--white);
   border-color: var(--white);
+}
+
+.intro-body,
+.report-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.poster > .btn {
+  flex: none;
+  margin-top: 6px;
+}
+
+.poster .intro-body > p,
+.poster .intro-body .rules,
+.poster .intro-body .keys {
+  padding: 7px 9px;
 }
 
 .poster .marquee {
@@ -821,6 +934,15 @@ kbd {
 
 .report .phrase {
   margin: 10px 0 6px;
+}
+
+.report-body {
+  width: 100%;
+}
+
+.report > .btn {
+  flex: none;
+  margin-top: 4px;
 }
 
 .report table {

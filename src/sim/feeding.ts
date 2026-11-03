@@ -48,6 +48,27 @@ export function startKasha(state: State): boolean {
   return true;
 }
 
+const ELEPHANT_ORDER = ['pretty', 'margo', 'audrey', 'radja', 'baron', 'caesar'];
+
+export function prepareMealBasins(state: State, food: 'kasha' | 'veg'): number {
+  const portions = food === 'kasha' ? state.kitchen.kasha.portions : state.kitchen.veg.portions;
+  const clean = state.items.filter(
+    (item) =>
+      item.kind === 'basin' &&
+      !item.food &&
+      !item.dirty &&
+      MAP.basinSpots.some((spot) => Math.hypot(item.x - spot.x, item.y - spot.y) <= 0.3),
+  );
+  const count = Math.min(portions, clean.length, ELEPHANT_ORDER.length);
+  const meal = food === 'kasha' ? state.kitchen.kasha.meal : 'dinner';
+  clean.slice(0, count).forEach((basin, i) => Object.assign(basin, { food, meal, owner: ELEPHANT_ORDER[i] }));
+  if (food === 'kasha') {
+    state.kitchen.kasha.portions -= count;
+    if (state.kitchen.kasha.portions === 0) state.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
+  } else state.kitchen.veg.portions -= count;
+  return count;
+}
+
 export function allServedDinner(state: State): boolean {
   return allServed(state, 'dinner');
 }
@@ -113,7 +134,7 @@ export function updateKitchen(state: State, dt: number): void {
   const k = state.kitchen.kasha;
   if (k.status === 'cooking' && state.t >= k.readyAt) {
     k.status = 'ready';
-    k.portions = 3;
+    k.portions = 6;
     emit(state, { kind: 'good', text: 'Каша готова: разложи по тазам на стеллаже и разнеси по одному.' });
   }
   if (state.t >= S.kasha1 - 60) hint(state, 'kasha1', 'Скоро 13:00: каша запаривается 20 минут. Иди на кормовую.');

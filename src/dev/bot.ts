@@ -540,26 +540,26 @@ export class Bot {
     const s = this.s;
     const k = s.kitchen;
     // На стеллаже стоят тазы с едой — разнести по одному тем, кому этого приёма ещё не дали
-    const full = basinsOnRack(s).filter((b) => b.food);
+    const full = basinsOnRack(s).filter((b) => b.food && b.owner && profileOf(s.elephants.find((e) => e.id === b.owner)!).paddock === 'upper');
     const meal = full[0]?.meal;
     if (meal) {
       const hungry = s.elephants.filter(
-        (e) => profileOf(e).paddock === 'upper' && s.meals[meal][e.id] === null && !s.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food),
+        (e) => profileOf(e).paddock === 'upper' && s.meals[meal][e.id] === null && full.some((basin) => basin.owner === e.id),
       );
       if (hungry.length) {
         const steps: Step[] = [...this.freeHands()];
-        for (const e of hungry.slice(0, full.length)) {
+        for (const e of hungry) {
           const sl = profileOf(e).slot;
           const nm = profileOf(e).name;
           steps.push({
             label: 'взять таз с едой',
             to: () => {
               if (s.player.held) return null;
-              const b = basinsOnRack(s).find((x) => x.food);
+              const b = basinsOnRack(s).find((x) => x.food && x.meal === meal && x.owner === e.id);
               return b ? { x: b.x + 0.5, y: b.y } : null;
             },
-            expect: /^Взять: таз с /,
-            done: () => !!s.player.held?.food,
+            expect: new RegExp(`^Взять: таз с .* для ${nm}$`),
+            done: () => !!s.player.held?.food && s.player.held.owner === e.id,
           });
           steps.push({
             label: `слот ${nm}`,

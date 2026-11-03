@@ -37,6 +37,19 @@ describe('карта-комплекс', () => {
     expect(walkable(10.7, 24)).toBe(true); // южная дверь дежурки — в нижний коридор
   });
 
+  it('у каждой комнаты открыты двери в оба коридора и маршрут между ними', () => {
+    for (const room of Object.values(MAP.rooms)) {
+      const north = MAP.thresholds.find((t) => t.y0 === room.y0 && (t.x0 + t.x1) / 2 > room.x0 && (t.x0 + t.x1) / 2 < room.x1)!;
+      const south = MAP.thresholds.find((t) => t.y0 === room.y1 && (t.x0 + t.x1) / 2 > room.x0 && (t.x0 + t.x1) / 2 < room.x1)!;
+      const from = { x: (north.x0 + north.x1) / 2, y: room.y0 - 0.3 };
+      const to = { x: (south.x0 + south.x1) / 2, y: room.y1 + 0.3 };
+
+      expect(walkable(from.x, room.y0 + 0.2), `${room.label}: north doorway`).toBe(true);
+      expect(walkable(to.x, room.y1 - 0.2), `${room.label}: south doorway`).toBe(true);
+      expect(route(from, to).at(-1), `${room.label}: route through room`).toEqual(to);
+    }
+  });
+
   it('лесополоса — граница, вольер начинается после неё', () => {
     expect(inPaddock(5, 5)).toBe(true);
     expect(walkable(4.6, 5)).toBe(true);
@@ -71,6 +84,9 @@ describe('карта-комплекс', () => {
     expect(inReachZone(15, MAP.fenceY)).toBe(true);
     expect(inReachZone(15, MAP.fenceY2 - 0.5)).toBe(true);
     expect(inReachZone(15, MAP.fenceY2 + 0.5)).toBe(false);
+    expect(inPaddock(MAP.stations.valve.x, MAP.stations.valve.y)).toBe(false);
+    expect(inPaddock(MAP.stations.valve2.x, MAP.stations.valve2.y)).toBe(false);
+    expect(MAP.stations.valve.y - MAP.fenceY).toBeCloseTo(MAP.fenceY2 - MAP.stations.valve2.y);
     expect(MAP.road.x0).toBe(56);
     expect(MAP.road.y1).toBe(MAP.h);
   });

@@ -125,6 +125,20 @@ function straw(): Sprite {
   return s;
 }
 
+function tire(): Sprite {
+  const s = new Sprite(20, 16);
+  s.fill(ellipse(10, 8, 7.5, 7.5), '#080808');
+  s.fill(ellipse(10, 8, 5.2, 5.2), '#3c3c40');
+  s.fill(ellipse(10, 8, 3.2, 3.2), '#080808');
+  for (const [x, y] of [[4, 4], [10, 2], [16, 4], [4, 12], [10, 14], [16, 12]]) {
+    s.set(x, y, '#7c7c84');
+    s.set(x + 1, y, '#2c2c30');
+  }
+  s.set(5, 4, '#bcbcbc');
+  s.set(14, 5, '#bcbcbc');
+  return s;
+}
+
 // Ведро для опилок: красное; полное — горка опилок, пустое — тёмное дно
 function sawdust(full = true): Sprite {
   const s = new Sprite(16, 16);
@@ -324,6 +338,7 @@ export function itemSprites(): Record<string, Sprite> {
     'item-bag': bag(false),
     'item-bag-full': bag(true),
     'item-hay': hay(),
+    tire: tire(),
     'item-straw': straw(),
     'item-basket': basket('empty'),
     'item-basket-raw': basket('raw'),
@@ -351,4 +366,3 @@ export function itemSprites(): Record<string, Sprite> {
     'fx-star': grid(['..k..', '.kyk.', 'kyyyk', '.kyk.', '..k..'], { k: C.k, y: C.goldLight }),
   };
 }
-

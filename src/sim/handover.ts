@@ -8,6 +8,7 @@ import { profileOf } from './elephants';
 import type { MealId, State } from './types';
 
 const H = BALANCE.handover;
+const PLAYER_ELEPHANTS = (state: State) => state.elephants.filter((e) => profileOf(e).paddock === 'upper');
 
 export interface Report {
   score: number;
@@ -71,7 +72,7 @@ export const HANDOVER_CHECKS: { id: HandoverCheckId; label: string; ok: (s: Stat
   {
     id: 'standing',
     label: 'Все трое на ногах, без хромоты',
-    ok: (s) => !s.elephants.some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold),
+    ok: (s) => !PLAYER_ELEPHANTS(s).some((e) => e.footDebt - e.footDebtStart >= BALANCE.footDebt.limpThreshold),
   },
   { id: 'water', label: 'Вода в поилке', ok: (s) => s.trough >= H.troughMin },
   { id: 'hay', label: 'Сено в кормушке', ok: (s) => s.feederHay >= H.hayMin },
@@ -112,13 +113,14 @@ export function finishShift(state: State): Report {
   const checklist = HANDOVER_CHECKS.map((c) => ({ id: c.id, label: c.label, ok: c.ok(state) }));
   const remarks: string[] = [];
   if (stinkSources(state).length >= 5) remarks.push('Мухи и вонь');
-  if (state.elephants.some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
+  if (PLAYER_ELEPHANTS(state).some((e) => e.lyingInWet)) remarks.push('Слониха лежала в мокром');
   if (state.items.some((i) => i.kind === 'bag' && (i.fill ?? 0) > 0)) remarks.push('Мешки не вывезены');
   if (state.supply.missed) remarks.push('Груз не принят');
   if (state.dutyLight) remarks.push('Дежурный свет не выключен');
   if (state.litter.length >= 6) remarks.push('Сор на дорожке');
 
-  const pees = state.elephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
+  const playerElephants = PLAYER_ELEPHANTS(state);
+  const pees = playerElephants.map((e) => ({ name: profileOf(e).name, ...e.tally }));
   const inBucket = pees.reduce((s, p) => s + p.inBucket, 0);
   const total = inBucket + pees.reduce((s, p) => s + p.missed, 0);
   const bucketRate = total ? inBucket / total : 1;
@@ -127,13 +129,13 @@ export function finishShift(state: State): Report {
   const mealIds: MealId[] = ['kasha1', 'kasha2', 'dinner'];
   const meals = mealIds.map((m) => ({
     label: MEAL_LABELS[m],
-    statuses: state.elephants.map((e) => ({ name: profileOf(e).name, status: mealStatus(state, m, e.id) })),
+    statuses: playerElephants.map((e) => ({ name: profileOf(e).name, status: mealStatus(state, m, e.id) })),
   }));
   const mealPoints = meals.flatMap((m) => m.statuses).map((s) => (s.status === 'ok' ? 1 : s.status === 'late' ? 0.5 : 0));
   const mealScore = mealPoints.reduce<number>((a, b) => a + b, 0) / mealPoints.length;
 
   const losses = [...state.stats.broken, ...Array(state.stats.basinsLost).fill('таз')];
-  const footDebt = state.elephants.map((e) => ({ name: profileOf(e).name, debt: Math.round(e.footDebt - e.footDebtStart) }));
+  const footDebt = playerElephants.map((e) => ({ name: profileOf(e).name, debt: Math.round(e.footDebt - e.footDebtStart) }));
   const avgDebt = footDebt.reduce((s, f) => s + f.debt, 0) / footDebt.length;
 
   const parts = {
@@ -199,4 +201,3 @@ function phraseFor(parts: Record<string, number>, losses: number): string {
 export function whyText(key: keyof typeof WHY): string {
   return WHY[key];
 }
-

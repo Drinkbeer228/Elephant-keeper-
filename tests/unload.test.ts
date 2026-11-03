@@ -56,18 +56,26 @@ describe('разгрузка', () => {
     const g0 = s.stock.grain;
     const f0 = s.stock.fruit;
     stand(s, 'stove');
+    s.jack.x = MAP.stations.stove.x;
+    s.jack.y = MAP.stations.stove.y;
     expect(act(s)).toBe('Сдать груз: Зерно (4)');
     expect(s.stock.grain).toBe(g0 + 4);
     expect(s.jack.cargo).toEqual([{ kind: 'fruit', qty: 6 }]);
     stand(s, 'vegRack');
+    s.jack.x = MAP.stations.vegRack.x;
+    s.jack.y = MAP.stations.vegRack.y;
     expect(act(s)).toBe('Сдать груз: Фрукты (6)');
     expect(s.stock.fruit).toBe(f0 + 6);
     expect(s.jack.cargo).toBeNull();
 
     s.jack.cargo = [{ kind: 'veg', qty: 3 }];
+    s.jack.x = MAP.stations.stove.x;
+    s.jack.y = MAP.stations.stove.y;
     stand(s, 'stove');
     expect(availableAction(s)?.label).toBe('Поставить рохлю (Овощи)');
     stand(s, 'vegRack');
+    s.jack.x = MAP.stations.vegRack.x;
+    s.jack.y = MAP.stations.vegRack.y;
     expect(availableAction(s)?.label).toBe('Сдать груз: Овощи (3)');
     expect(act(s)).toBe('Сдать груз: Овощи (3)');
     expect(s.stock.veg).toBe(BALANCE.stockStart.veg + 3);
@@ -84,5 +92,51 @@ describe('разгрузка', () => {
     s.supply.bays = [];
     advance(s, S.leaveAt - s.t + 1);
     expect(s.supply.missed).toBe(false);
+  });
+
+  it('снимает все четыре паллеты на площадку и отпускает грузовик', () => {
+    const s = cleanShift();
+    advance(s, S.arriveAt + 0.5);
+    atBort(s);
+
+    for (let i = 0; i < 4; i++) {
+      expect(act(s, 'На площадку:')).toMatch(/^На площадку:/);
+    }
+
+    expect(s.supply.bays).toHaveLength(0);
+    expect(s.supply.ground).toHaveLength(4);
+    expect(s.supply.left).toBe(true);
+    expect(s.supply.missed).toBe(false);
+    expect(s.log.some((event) => event.text?.includes('Груз принят'))).toBe(true);
+
+    const pallet = s.supply.ground[0];
+    s.jack.pushed = true;
+    s.jack.x = pallet.x;
+    s.jack.y = pallet.y;
+    at(s, pallet.x - 0.5, pallet.y);
+    expect(act(s)).toMatch(/^Поднять паллету на рохлю:/);
+    expect(s.supply.ground).toHaveLength(3);
+    expect(s.jack.cargo).toEqual(pallet.cargo);
+  });
+
+  it.each([
+    ['grain', 'stove'],
+    ['veg', 'vegRack'],
+    ['fruit', 'vegRack'],
+    ['hay', 'hay'],
+    ['straw', 'straw'],
+    ['sawdust', 'sawdust'],
+  ] as const)('сдаёт груз %s у соответствующей точки склада', (kind, station) => {
+    const s = cleanShift();
+    const before = s.stock[kind];
+    s.jack.pushed = true;
+    s.jack.cargo = [{ kind, qty: 1 }];
+    s.jack.x = MAP.stations[station].x;
+    s.jack.y = MAP.stations[station].y;
+    at(s, s.jack.x - 0.6, s.jack.y);
+
+    expect(act(s)).toBe(`Сдать груз: ${kind === 'grain' ? 'Зерно' : kind === 'veg' ? 'Овощи' : kind === 'fruit' ? 'Фрукты' : kind === 'hay' ? 'Сено' : kind === 'straw' ? 'Солома' : 'Опилки'} (1)`);
+    expect(s.stock[kind]).toBe(before + 1);
+    expect(s.jack.cargo).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
-import { MAP } from '../data/map';
+import { MAP, inPaddock } from '../data/map';
 import { isNight } from './clock';
 import { emit, hint } from './events';
 import { cellAt, footHarm, isWet, wetAround } from './floor';
@@ -65,7 +65,19 @@ function drinkTrough(state: State, e: Elephant, amount: number): void {
 }
 
 export function updateElephants(state: State, dt: number, dtReal: number): void {
+  startMusthEvents(state);
   for (const e of state.elephants) updateOne(state, e, dt, dtReal);
+}
+
+function startMusthEvents(state: State): void {
+  if (!state.musthEventsRemaining || state.t < state.musthNextAt) return;
+  const males = state.elephants.filter((e) => profileOf(e).paddock === 'lower' && e.musthTimer <= 0);
+  if (!males.length) return;
+  const e = males[Math.floor(randomRange(state, 0, males.length))];
+  e.musthTimer = randomRange(state, 120, 180);
+  state.musthEventsRemaining--;
+  state.musthNextAt = state.musthEventsRemaining ? state.t + randomRange(state, 360, 600) : Number.POSITIVE_INFINITY;
+  emit(state, { kind: 'bad', text: `${profileOf(e).name} впал в муст! Димон, за решётку!`, elephantId: e.id });
 }
 
 function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void {
@@ -74,10 +86,11 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
   const f = night ? E.nightNeedsFactor : 1;
   const asleep = e.state === 'sleep';
 
-  e.hunger = clamp(e.hunger + E.hungerPerMinute * f * dt);
+  e.musthTimer = Math.max(0, e.musthTimer - dtReal);
+  e.hunger = clamp(e.hunger + E.hungerPerMinute * e.traits.appetite * f * dt);
   e.thirst = clamp(e.thirst + E.thirstPerMinute * p.thirstFactor * f * dt);
   e.bladder = Math.min(100, e.bladder + p.bladderPerMinute * (night ? E.nightBladderFactor : 1) * dt);
-  e.bowel += E.bowelPerMinute * 100 * f * dt;
+  e.bowel += E.bowelPerMinute * 100 * e.traits.messiness * f * dt;
   if (!asleep) {
     const begFactor = 1 + E.begTreatBoredomRate * e.begTreats;
     e.boredom = clamp(e.boredom + E.boredomPerMinute * p.boredomFactor * begFactor * dt);
@@ -97,6 +110,21 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
 
   if (e.bladder >= 100 && e.signalStarted === undefined) startSignal(state, e, p);
   trample(state, e);
+
+  if (e.musthTimer > 0 && p.paddock === 'lower') {
+    const target = inPaddock(state.player.x, state.player.y) && state.player.y > MAP.fenceY2
+      ? state.player
+      : state.partner;
+    if (inPaddock(target.x, target.y) && target.y > MAP.fenceY2) {
+      e.tx = target.x;
+      e.ty = target.y;
+      e.state = 'walk';
+      e.next = 'idle';
+    } else {
+      e.state = 'idle';
+      e.timer = 0.1;
+    }
+  }
 
   switch (e.state) {
     case 'walk': {
@@ -122,7 +150,7 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
       const pool = e.pool ?? 0;
       const ps = state.pools[pool];
       e.wetness = Math.min(100, e.wetness + BALANCE.pool.wetPerMinute * dt);
-      e.boredom = clamp(e.boredom + (ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
+      e.boredom = clamp(e.boredom + (meadowUnpleasant(state, e) || ps.dirty >= BALANCE.pool.murkDirt ? 0 : BALANCE.pool.wetBoredom) * dt);
       if (ps.dirty >= BALANCE.pool.murkDirt) e.footDebt += BALANCE.pool.dirtyHarm * dt;
       ps.dirty = Math.min(100, ps.dirty + dt * 0.15);
       if (chance(state, BALANCE.pool.poopChance * dt)) {
@@ -132,6 +160,17 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
         emit(state, { kind: 'bad', text: `${p.name} сходил в бассейн — вода мутная, нужен сачок.` });
       }
       e.timer -= dt;
+      if (e.timer <= 0) decide(state, e);
+      break;
+    }
+    case 'scratch':
+      e.boredom = clamp(e.boredom - (meadowUnpleasant(state, e) ? 0 : 0.55) * dt);
+      e.timer -= dt;
+      if (e.timer <= 0) decide(state, e);
+      break;
+    case 'play': {
+      e.timer -= dt;
+      if (!meadowUnpleasant(state, e)) e.boredom = clamp(e.boredom - 0.12 * dt);
       if (e.timer <= 0) decide(state, e);
       break;
     }
@@ -300,6 +339,14 @@ function arrive(state: State, e: Elephant, p: ElephantProfile): void {
       e.pool = nearestPool(e);
       e.timer = randomRange(state, BALANCE.pool.batheMinutes[0], BALANCE.pool.batheMinutes[1]);
       break;
+    case 'play':
+      e.state = 'play';
+      e.timer = randomRange(state, 4, 10);
+      break;
+    case 'scratch':
+      e.state = 'scratch';
+      e.timer = randomRange(state, 5, 10);
+      break;
     case 'eatBasin':
       if (ownBasin(state, e)) {
         e.state = 'eatBasin';
@@ -394,6 +441,16 @@ export function decide(state: State, e: Elephant): void {
     if (spot && dist(spot, e) > 0.4) return walkTo(e, spot.x, spot.y, 'sleep');
     return lieDown(state, e, p);
   }
+  if (e.boredom >= 35 && !meadowUnpleasant(state, e) && chance(state, 0.25)) {
+    const tree = MAP.meadowTrees
+      .filter((point) => point.y >= (p.paddock === 'upper' ? MAP.paddock.y0 : MAP.paddock2.y0) && point.y < (p.paddock === 'upper' ? MAP.paddock.y1 : MAP.paddock2.y1))
+      .sort((a, b) => dist(a, e) - dist(b, e))[0];
+    if (tree) return walkTo(e, tree.x, tree.y, 'scratch');
+  }
+  if (e.boredom >= 30 && !meadowUnpleasant(state, e) && chance(state, 0.18)) {
+    const tire = state.tires.find((item) => item.paddock === p.paddock);
+    if (tire && tire.flightLeft <= 0) return walkTo(e, tire.x, tire.y - 0.6, 'play');
+  }
   if (e.boredom >= E.swayBoredom && p.stereotypy) {
     e.state = 'sway';
     e.timer = 20;
@@ -401,7 +458,7 @@ export function decide(state: State, e: Elephant): void {
     return;
   }
   // Днём от скуки — купание в своём бассейне
-  if (!isNight(state) && e.boredom >= BALANCE.pool.batheBoredom && chance(state, Math.min(1, BALANCE.pool.batheChance * 6))) {
+  if (!isNight(state) && e.boredom >= BALANCE.pool.batheBoredom && !meadowUnpleasant(state, e) && chance(state, Math.min(1, BALANCE.pool.batheChance * 6))) {
     const pool = nearestPool(e);
     return walkTo(e, MAP.pools[pool].x + randomRange(state, -1.5, 1.5), MAP.pools[pool].y + randomRange(state, -1, 1), 'bathe');
   }
@@ -425,6 +482,21 @@ export function decide(state: State, e: Elephant): void {
     e.state = 'idle';
     e.timer = randomRange(state, 3, 8);
   }
+}
+
+function meadowUnpleasant(state: State, e: Elephant): boolean {
+  const p = profileOf(e).paddock === 'upper' ? MAP.paddock : MAP.paddock2;
+  const meadowX = MAP.bedding.x + MAP.bedding.cols;
+  let dung = state.dung.filter((pile) => pile.x >= meadowX && pile.x < p.x1 && pile.y >= p.y0 && pile.y < p.y1).length;
+  state.cells.forEach((row, cy) =>
+    row.forEach((cell, cx) => {
+      const x = MAP.floor.x + cx + 0.5;
+      const y = MAP.floor.y + cy + 0.5;
+      if (cell.kind === 'dung' && x >= meadowX && x < p.x1 && y >= p.y0 && y < p.y1) dung++;
+    }),
+  );
+  const pool = profileOf(e).paddock === 'upper' ? 0 : 1;
+  return dung >= 5 || state.pools[pool].dirty >= BALANCE.pool.murkDirt;
 }
 
 // Лакомство — только за бак: доверие растёт, скуки меньше. Тратит фрукт из запаса

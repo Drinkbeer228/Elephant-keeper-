@@ -39,7 +39,7 @@ export class Hud {
   introOpen = true;
 
   constructor(root: HTMLElement, input: Input, private cb: HudCallbacks) {
-    const portraits = ELEPHANTS.map((p) => `<img src="${portraitIcon(p.id)}" alt="${p.name}">`).join('');
+    const portraits = ELEPHANTS.filter((p) => p.paddock === 'upper').map((p) => `<img src="${portraitIcon(p.id)}" alt="${p.name}">`).join('');
     root.innerHTML = `
       <div class="top">
         <div class="clock panel">
@@ -52,6 +52,10 @@ export class Hud {
         <button class="icon panel" data-el="pauseBtn" aria-label="Пауза">${ICON.pause}</button>
       </div>
       <div class="held panel" data-el="held"></div>
+      <section class="schedule panel" data-el="schedule">
+        <button class="schedule-toggle" data-el="scheduleToggle" aria-expanded="true">📋 Распорядок смены <span>J</span></button>
+        <div class="schedule-rows" data-el="scheduleRows"></div>
+      </section>
       <div class="balance panel hidden" data-el="balance">
         <span>БАЛАНС</span>
         <div class="bar"><i data-el="needle"></i></div>
@@ -82,18 +86,20 @@ export class Hud {
           <div class="marquee"></div>
           <p class="kicker">Цирк на гастролях · суточное дежурство</p>
           <h1>Дежурный кипер</h1>
-          <div class="portraits">${portraits}</div>
-          <p>Ты заступаешь на сутки при трёх слонихах — <b>Претти</b>, <b>Марго</b> и <b>Одри</b>. Утром сменщик примет у тебя слоновник и будет придираться.</p>
-          <ol class="rules">
+          <div class="intro-body">
+            <div class="portraits">${portraits}</div>
+            <p>Ты заступаешь на сутки при трёх слонихах — <b>Претти</b>, <b>Марго</b> и <b>Одри</b>. Утром сменщик примет у тебя слоновник и будет придираться.</p>
+            <ol class="rules">
             <li><b>Смена идёт сразу.</b> Утром сменщик примет вольер по чек-листу: ворота, вода, сено, инвентарь на стойке, тачка и рохля на местах, тазы, чистота.</li>
-            <li><b>Запасы не бесконечны.</b> Зерно, овощи, фрукты, сено, солома и опилки расходуются — следи за строкой сверху. Утром (с 09:15) к задней двери кормовой подаёт грузовик: гудок — выноси рохлю, снимай поддоны и развоз по складам. Не успел к 11:30 — груз уехал.</li>
+            <li><b>Запасы не бесконечны.</b> Зерно, овощи, фрукты, сено, солома и опилки расходуются — следи за строкой сверху. Утром (с 09:15) грузовик подаёт к воротам: разгрузи паллеты на рохлю или на площадку и развези по складам. Не успел к 11:30 — груз уехал.</li>
             <li><b>Туалет.</b> Смотри на слоних: у каждой свой знак — топот, стойка у решётки. Успей подставить бак — иначе мокрая подстилка и больные ноги. Угости за бак (это тратит фрукты!), бак вылей в решётку слива. Одри не предупреждает: веди её «погулять».</li>
             <li><b>Пол.</b> Мокрое — вилами, потом опилки (ведро — у кучи под навесом); впитали — метлой до пола, сверху солома. Навоз — совком, сразу: в его отсек, в тачку или мешок. Сор с тачки на дорожке — метлой.</li>
             <li><b>Корм.</b> Каша в 13:00 и 17:00 (на каждую уходит зерно). Ужин к 19:00: с 14:00 овощи со стеллажа в корзину, замочить и промыть на мойке, почистить и нарезать у стола. Разложи по тазам на стеллаже, носи по одному; пустые — стопкой на мойку и обратно.</li>
             <li><b>Ночь.</b> В вольере темно: включи дежурный свет у двери дежурки, утром выключи.</li>
             <li><b>Тачка и рохля.</b> Тачка возит инвентарь, опилки, солому, тюки и мусор (три тюка и больше качаются: Q / E). Рохля — только по твёрдому полу: дорожка, комнаты, асфальт. С тяжёлым в руках идёшь медленнее — катай тележку.</li>
-          </ol>
-          <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd>/<kbd>E</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd>/<kbd>E</kbd> равновесие тачки · <kbd>P</kbd> пауза</p>
+            </ol>
+            <p class="keys"><kbd>WASD</kbd> ходить · <kbd>Space</kbd>/<kbd>E</kbd> действие · <kbd>F</kbd> осмотр · <kbd>Q</kbd>/<kbd>E</kbd> равновесие тачки · <kbd>P</kbd> пауза · <kbd>J</kbd> распорядок</p>
+          </div>
           <button class="btn primary big" data-el="introBtn">Заступить на смену</button>
         </div>
       </div>
@@ -112,6 +118,7 @@ export class Hud {
     tap('inspectBtn', () => input.push('inspect'));
     tap('pauseBtn', () => input.push('pause'));
     tap('introBtn', () => this.closeIntro());
+    tap('scheduleToggle', () => this.toggleSchedule());
     tap('resumeBtn', () => this.togglePause());
     this.els.inspect.addEventListener('pointerdown', () => this.els.inspect.classList.add('hidden'));
     // Чистка овощей: дефект нажимают пальцем или мышью; стрелки выбирают, Space режет (через main)
@@ -123,6 +130,10 @@ export class Hud {
     });
     tap('prepClose', () => this.cb.prepClose());
     window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyJ' && !e.repeat) {
+        e.preventDefault();
+        this.toggleSchedule();
+      }
       if (this.els.prep.classList.contains('hidden')) return;
       const dir = e.code === 'ArrowLeft' || e.code === 'KeyA' ? -1 : e.code === 'ArrowRight' || e.code === 'KeyD' ? 1 : 0;
       if (dir) this.moveSel(dir);
@@ -222,6 +233,38 @@ export class Hud {
       .join('');
   }
 
+  private scheduleCollapsed = false;
+  private lastScheduleMinute = -1;
+
+  private toggleSchedule(): void {
+    this.scheduleCollapsed = !this.scheduleCollapsed;
+    this.els.schedule.classList.toggle('collapsed', this.scheduleCollapsed);
+    this.els.scheduleToggle.setAttribute('aria-expanded', String(!this.scheduleCollapsed));
+  }
+
+  private renderSchedule(t: number): void {
+    const minute = Math.floor(t);
+    if (minute === this.lastScheduleMinute) return;
+    this.lastScheduleMinute = minute;
+    const rows = [
+      { start: 0, end: 75, time: '08:00–09:15', text: 'Проверить поилку, убрать ночной навоз, насыпать сено' },
+      { start: 75, end: 210, time: '09:15–11:30', text: 'Снять 4 паллеты у ворот и развезти на склады' },
+      { start: 300, end: 360, time: '13:00', text: 'Запарить зерно в котле, раздать 3 таза слонихам' },
+      { start: 360, end: 510, time: '14:00–16:30', text: 'Набрать, помыть, нарезать овощи; убрать подстилку и почистить бассейн' },
+      { start: 540, end: 600, time: '17:00', text: 'Вечерняя каша' },
+      { start: 660, end: 720, time: '19:00', text: 'Овощной ужин: раздать тазы' },
+      { start: 720, end: 780, time: '20:00', text: 'Включить дежурный свет' },
+      { start: 1320, end: 1440, time: '06:00–08:00', text: 'Выключить свет, вернуть инвентарь, тачку и рохлю, вывезти мусор' },
+    ];
+    this.els.scheduleRows.innerHTML = rows
+      .map((row) => {
+        const done = minute >= row.end;
+        const active = minute >= row.start && minute < row.end;
+        return `<div class="schedule-row${done ? ' done' : active ? ' active' : ''}"><b>${done ? '✓' : active ? '●' : '○'}</b><span><strong>${row.time}</strong>${row.text}</span></div>`;
+      })
+      .join('');
+  }
+
   hideInspect(): void {
     this.els.inspect.classList.add('hidden');
   }
@@ -271,6 +314,7 @@ export class Hud {
     this.els.dayBar.style.width = `${Math.min(100, (s.t / BALANCE.time.shiftEnd) * 100)}%`;
 
     const chips = s.elephants
+      .filter((e) => profileOf(e).paddock === 'upper')
       .map((e) => {
         const p = profileOf(e);
         const alarm = e.signalStarted !== undefined;
@@ -335,6 +379,7 @@ export class Hud {
     this.els.hint.classList.toggle('empty', !action);
     this.els.actionBtn.classList.toggle('ready', !!action && !action.disabled);
     this.renderPrep(s);
+    this.renderSchedule(s.t);
 
     if (s.phase === 'report' && s.report && !this.reportShown) {
       this.reportShown = true;

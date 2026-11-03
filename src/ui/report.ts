@@ -12,6 +12,7 @@ export function renderReport(r: Report): string {
       <div class="marquee"></div>
       <p class="kicker">08:00 · сдача смены</p>
       <h1>Табель дежурства</h1>
+      <div class="report-body">
       <div class="stars">${stars}</div>
       <p class="score">${r.score} из 100</p>
       <p class="phrase">${r.phrase}</p>
@@ -28,6 +29,7 @@ export function renderReport(r: Report): string {
           .join('')}</td></tr>
         <tr><th>Замечания</th><td>${r.remarks.length ? r.remarks.map((x) => `<div>${x}</div>`).join('') : 'нет'}</td></tr>
       </table>
+      </div>
       <button class="btn primary big" data-restart>Ещё смена</button>
     </div>`;
 }

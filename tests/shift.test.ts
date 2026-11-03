@@ -25,6 +25,16 @@ describe('смена и сдача', () => {
     expect(r.checklist.every((c) => c.ok)).toBe(true);
   });
 
+  it('табель игрока содержит только трёх слоних', () => {
+    const report = finishShift(cleanShift());
+    const playerNames = ['Претти', 'Марго', 'Одри'];
+
+    expect(report.pees.map((elephant) => elephant.name)).toEqual(playerNames);
+    expect(report.footDebt.map((elephant) => elephant.name)).toEqual(playerNames);
+    expect(report.meals.every((meal) => meal.statuses.map((elephant) => elephant.name).join(',') === playerNames.join(','))).toBe(true);
+    expect(JSON.stringify(report)).not.toMatch(/Раджа|Барон|Цезарь/);
+  });
+
   it.each([
     ['gate', (s: State): unknown => (s.gateOpen = true)],
     ['paddockClear', (s: State): unknown => addItem(s, 'bucket', 5, 5)],

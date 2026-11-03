@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createShift } from '../src/sim';
+import { advance, availableAction, createShift } from '../src/sim';
 import { BALANCE } from '../src/data/balance';
 import { ELEPHANTS } from '../src/data/elephants';
 import { MAP, inPaddock } from '../src/data/map';
+import { dist, pee } from '../src/sim/elephants';
+import { cellAt } from '../src/sim/floor';
 import { updateKitchen } from '../src/sim/feeding';
 import { updatePartner } from '../src/sim/partner';
 
@@ -40,5 +42,138 @@ describe('напарник нижнего слоновника', () => {
 
     expect(s.trough2).toBe(50 + BALANCE.food.troughFill * 2);
     expect(s.trough).toBe(80);
+  });
+
+  it('подставляет бак под самца и выливает полный бак в слив мойки', () => {
+    const s = createShift(22, { mess: false });
+    s.musthEventsRemaining = 0;
+    const rajah = s.elephants.find((elephant) => elephant.id === 'radja')!;
+    rajah.signalStarted = s.t;
+    s.partner.x = rajah.x + 4;
+    s.partner.y = rajah.y;
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+
+    for (let i = 0; i < 300 && dist(s.partner, rajah) > 0.9; i++) updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.partner.mode).toBe('toilet');
+    expect(dist(s.partner, rajah)).toBeLessThan(1);
+
+    pee(s, rajah);
+    expect(s.partner.bucket).toBeGreaterThan(0);
+    expect(rajah.tally.inBucket).toBe(1);
+
+    s.partner.bucket = 40;
+    s.partner.x = MAP.stations.drain.x;
+    s.partner.y = MAP.stations.drain.y - 1;
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.partner.bucket).toBe(0);
+  });
+
+  it('убирает мокрое, расходует общий запас опилок и несёт сено из общего запаса', () => {
+    const s = createShift(23, { mess: false });
+    s.musthEventsRemaining = 0;
+    const wet = cellAt(s, 5, 30)!;
+    s.cells[wet.cy][wet.cx] = { kind: 'wet', since: s.t };
+    s.partner.x = 5.5;
+    s.partner.y = 30.5;
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(cellAt(s, 5, 30)!.cell.kind).toBe('bareWet');
+    s.partner.timer = 0;
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(cellAt(s, 5, 30)!.cell.kind).toBe('sawdust');
+    expect(s.stock.sawdust).toBe(BALANCE.stockStart.sawdust - 1);
+
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+    s.partner.x = MAP.stations.hay.x;
+    s.partner.y = MAP.stations.hay.y - 1.2;
+    s.feederHay2 = 0;
+    const hay = s.stock.hay;
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.partner.mode).toBe('hayCarry');
+    expect(s.stock.hay).toBe(hay - 1);
+
+    s.partner.x = MAP.feeder2.x + 0.8;
+    s.partner.y = MAP.feeder2.y - 1;
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.feederHay2).toBe(BALANCE.food.hayBale);
+  });
+
+  it('готовит шесть овощных тазов и сам доставляет порции самцам', () => {
+    const s = createShift(24, { mess: false });
+    s.musthEventsRemaining = 0;
+    s.kitchen.veg.portions = 6;
+    s.partner.x = MAP.stations.kitchen.x;
+    s.partner.y = MAP.stations.kitchen.y + 1.2;
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.kitchen.veg.portions).toBe(0);
+    expect(s.items.filter((item) => item.kind === 'basin' && item.food === 'veg')).toHaveLength(6);
+
+    for (let i = 0; i < 5000 && s.meals.dinner.radja === null; i++) updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.meals.dinner.radja).not.toBeNull();
+    expect(s.items.some((item) => item.kind === 'basin' && item.owner === 'radja' && item.food === 'veg')).toBe(true);
+  });
+
+  it('открывает нижний вентиль при пустой поилке и закрывает на полной', () => {
+    const s = createShift(21, { mess: false });
+    s.musthEventsRemaining = 0;
+    s.trough2 = 0;
+    s.partner.x = MAP.stations.valve2.x;
+    s.partner.y = MAP.stations.valve2.y - 1;
+    s.partner.timer = 0;
+
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.valve2Open).toBe(true);
+
+    s.trough2 = BALANCE.partner.troughMax;
+    s.partner.mode = 'idle';
+    s.partner.timer = 0;
+    updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.valve2Open).toBe(false);
+  });
+
+  it('самцы получают случайные черты, а Димон уходит за решётку при мустe', () => {
+    const s = createShift(32, { mess: false });
+    s.musthEventsRemaining = 1;
+    s.musthNextAt = 0;
+
+    advance(s, 0.5);
+
+    const males = s.elephants.filter((elephant) => ELEPHANTS.find((profile) => profile.id === elephant.id)?.paddock === 'lower');
+    expect(males).toHaveLength(3);
+    expect(males.every((elephant) => Object.values(elephant.traits).every((trait) => trait >= 0.8 && trait <= 1.4))).toBe(true);
+    const aggressive = males.find((elephant) => elephant.musthTimer > 0)!;
+    expect(aggressive.musthTimer).toBeGreaterThan(119);
+    expect(aggressive.musthTimer).toBeLessThanOrEqual(180);
+
+    s.partner.x = 30;
+    s.partner.y = 36;
+    s.partner.mode = 'idle';
+    for (let i = 0; i < 1200 && inPaddock(s.partner.x, s.partner.y); i++) updatePartner(s, 1 / 30, 1 / 30);
+    expect(s.partner.mode).toBe('flee');
+    expect(inPaddock(s.partner.x, s.partner.y)).toBe(false);
+  });
+
+  it('кипер может прекратить муст лакомством из коридора', () => {
+    const s = createShift(33, { mess: false });
+    const rajah = s.elephants.find((elephant) => elephant.id === 'radja')!;
+    rajah.musthTimer = 150;
+    rajah.x = 30;
+    rajah.y = 29;
+    s.player.x = 30;
+    s.player.y = MAP.fenceY2 - 0.5;
+
+    expect(availableAction(s)?.label).toBe('Бросить успокоительное лакомство Раджа через решётку');
+    availableAction(s)!.run(s);
+    expect(rajah.musthTimer).toBe(0);
+    expect(s.player.pocketTreats).toBe(BALANCE.player.pocketStart - 1);
   });
 });

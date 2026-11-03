@@ -121,17 +121,6 @@ const TENT_X = px(MAP.bedding.x + MAP.bedding.cols);
 const TENT2_Y0 = px(MAP.bedding2.y);
 const TENT2_Y1 = px(MAP.bedding2.y + MAP.bedding2.rows);
 
-// Кирпич в духе NES: оранжевый, чёрные швы вразбежку, светлая кромка сверху
-function brick(s: Sprite, x0: number, y0: number, x1: number, y1: number): void {
-  for (let y = y0; y <= y1; y++)
-    for (let x = x0; x <= x1; x++) {
-      const row = Math.floor((y - y0) / 3);
-      const seam = (y - y0) % 3 === 2 || (x + (row % 2) * 4) % 8 === 0;
-      s.set(x, y, y === y0 ? C.orangeLight : seam ? C.k : C.orange);
-    }
-  for (let x = x0; x <= x1; x++) s.set(x, y1 + 1, C.k);
-}
-
 // Асфальт: тёмно-серый с крошкой
 function asphalt(s: Sprite, r: () => number, inside: (x: number, y: number) => boolean): void {
   s.fill(inside, '#3c3c40');
@@ -222,16 +211,24 @@ export function background(cloud: Sprite): Sprite {
   s.fill((x, y) => grass(x, y) && Math.abs(y - (FENCE_Y1 - 10)) < 8 && (x + y) % 3 === 0, '#c88c4c');
   s.fill((x, y) => grass(x, y) && Math.abs(y - (FENCE_Y2 + 10)) < 8 && (x + y) % 3 === 0, '#c88c4c');
 
-  // Бассейны на лугах: песчаный ободок и вода (мерцание и мусор рисует сцена)
+  // Бассейны на лугах: сплошная голубая вода и заметный песчано-каменный бортик
   for (const p of MAP.pools) {
     const cx = px(p.x);
     const cy = px(p.y);
     const rx = px(p.rx);
     const ry = px(p.ry);
-    s.fill(ellipse(cx, cy, rx + 6, ry + 6), '#e8c878'); // ободок-бертма
-    s.fill(ellipse(cx, cy, rx, ry), C.blueDark);
-    s.fill(ellipse(cx, cy, rx - 3, ry - 3), C.blue);
-    s.fill(ellipse(cx - rx / 4, cy - ry / 4, rx / 3, ry / 4), C.blueLight);
+    s.fill(ellipse(cx, cy, rx + 10, ry + 9), '#8c5418');
+    s.fill(ellipse(cx, cy, rx + 7, ry + 6), '#e8c878');
+    s.fill(ellipse(cx, cy, rx + 3, ry + 2), '#c88c4c');
+    s.fill(ellipse(cx, cy, rx, ry), '#2890d8');
+    s.fill(ellipse(cx, cy, rx - 3, ry - 3), '#48b8f8');
+    s.fill(ellipse(cx - rx / 4, cy - ry / 4, rx / 3, ry / 4), '#a4e8ff');
+    for (let k = 0; k < 26; k++) {
+      const angle = (k / 26) * Math.PI * 2;
+      const x = Math.round(cx + Math.cos(angle) * (rx + 5));
+      const y = Math.round(cy + Math.sin(angle) * (ry + 4));
+      s.set(x, y, k % 2 ? '#f8e0a0' : '#9c9ca0');
+    }
   }
 
   // Коридоры и двор: бетон
@@ -306,6 +303,7 @@ export function background(cloud: Sprite): Sprite {
   };
   mark(MAP.stations.dump.x, MAP.stations.dump.y, MAP.stations.dump.w, MAP.stations.dump.h);
   mark(MAP.stations.unload.x, MAP.stations.unload.y, MAP.stations.unload.w, MAP.stations.unload.h);
+  mark(MAP.stations.receiving.x, MAP.stations.receiving.y, MAP.stations.receiving.w, MAP.stations.receiving.h);
 
   // Лесополоса слева — граница территории: тёмная зелень и кроны
   s.fill((x) => x < FOREST_X, '#004000');
@@ -339,11 +337,12 @@ export function background(cloud: Sprite): Sprite {
       s.set(px(x) + 1, px(y), i % 2 ? C.red : C.white);
     }
   });
-
-  // Стены построек — кирпич
-  for (const w of MAP.walls) {
-    if (w.y0 === w.y1) brick(s, px(w.x0) - 2, px(w.y0) - 3, px(w.x1) + 1, px(w.y0) + 1);
-    else brick(s, px(w.x0) - 2, px(w.y0) - 3, px(w.x0) + 2, px(w.y1));
+  MAP.meadowTrees.forEach((point, i) => tree(s, px(point.x), px(point.y), 301 + i));
+  for (const [x, y, seed] of [
+    [28, 7.5, 401], [32, 8.8, 402], [49, 6, 403], [28, 34, 404], [33, 43, 405], [49, 35, 406],
+  ] as const) {
+    if (seed % 2) rock(s, px(x), px(y), seed);
+    else bush(s, px(x), px(y), seed);
   }
 
   // Перила дороги — серая труба на столбиках вдоль двора
@@ -422,9 +421,9 @@ function lightAt(x: number, y: number, duty: boolean): number {
   }
   const lampGlowAt = (l: { x: number; y: number }, scale = 1): number => {
     const d = Math.hypot(x - l.x * CELL, (y - (l.y + 0.7) * CELL) * 1.4) / scale;
-    return d < 14 ? 0.75 : d < 22 ? (checker ? 0.75 : 0.45) : d < 30 ? (checker ? 0.45 : 0.15) : 0;
+    return d < 16 ? 0.95 : d < 38 ? 0.72 : d < 56 ? 0.46 : d < 72 ? 0.2 : 0;
   };
-  for (const l of LAMPS) light = Math.max(light, lampGlowAt(l));
+  for (const l of LAMPS) light = Math.max(light, lampGlowAt(l, 2.4));
   for (const l of CEILING) light = Math.max(light, lampGlowAt(l, 1.2));
   if (duty) {
     for (const p of [MAP.paddock, MAP.paddock2]) {
@@ -443,7 +442,7 @@ export function nightOverlay(duty: boolean): HTMLCanvasElement {
 
 // Тёплый отсвет ламп поверх ночи
 export function lampGlow(duty: boolean): HTMLCanvasElement {
-  return paint(C.goldLight, (x, y) => 0.16 * lightAt(x, y, duty));
+  return paint(C.goldLight, (x, y) => 0.2 * lightAt(x, y, duty));
 }
 
 function paint(color: string, alpha: (x: number, y: number) => number): HTMLCanvasElement {

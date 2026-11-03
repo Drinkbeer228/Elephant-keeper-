@@ -56,6 +56,7 @@ export class WorldScene extends Phaser.Scene {
   private dung = new Map<number, Phaser.GameObjects.Image>();
   private litter = new Map<number, Phaser.GameObjects.Image>();
   private poolFloats = new Map<number, Phaser.GameObjects.Image>();
+  private tireImgs = new Map<string, Phaser.GameObjects.Image>();
   private elephants: ElephantView[] = [];
   private keeper!: KeeperView;
   private partner!: Phaser.GameObjects.Image;
@@ -85,6 +86,7 @@ export class WorldScene extends Phaser.Scene {
   private horn!: Phaser.GameObjects.Text;
   private jackImg!: Phaser.GameObjects.Image;
   private palletImg!: Phaser.GameObjects.Image;
+  private groundPalletImgs = new Map<number, Phaser.GameObjects.Image>();
   private driverImg!: Phaser.GameObjects.Image;
   private stink!: Phaser.GameObjects.Graphics;
   private lightSwitch!: Phaser.GameObjects.Image;
@@ -201,6 +203,7 @@ export class WorldScene extends Phaser.Scene {
         this.cellKeys[cy].push('');
       }
     }
+    this.drawRoomWalls();
     // Тень от шатра на песок обоих загонов: шахматка, как в старых играх
     const shade = this.add.graphics().setDepth(-880);
     shade.fillStyle(0x000000, 0.28);
@@ -281,6 +284,7 @@ export class WorldScene extends Phaser.Scene {
     const sy = MAP.stations.unload.y * TILE;
     this.supplyTruck = this.img((MAP.road.x0 + 1.4) * TILE, sy, 'truck-supply', sy).setVisible(false);
     this.horn = this.tag('', (MAP.stations.unload.x + 2.4) * TILE, sy - 46 * PX).setVisible(false).setColor('#fcfcfc').setBackgroundColor('#d82800');
+    this.tag('ПРИЁМКА · 4 ПАЛЛЕТЫ', MAP.stations.receiving.x * TILE, (MAP.stations.receiving.y + 1.35) * TILE);
     // Рохля с поддоном: катится за кипером, стоит на своём бетонном пятачке
     const jy = MAP.jackStart.y * TILE;
     this.jackImg = this.img(MAP.jackStart.x * TILE, jy, 'jack', jy);
@@ -353,6 +357,41 @@ export class WorldScene extends Phaser.Scene {
     this.prev.tallies = JSON.stringify(s.elephants.map((e) => e.tally));
   }
 
+  private drawRoomWalls(): void {
+    const brick = (x: number, y: number, width: number, height: number, depth: number): void => {
+      const g = this.add.graphics().setDepth(depth);
+      g.fillStyle(0x000000).fillRect(x, y, width, height);
+      g.fillStyle(0xe87820).fillRect(x + PX, y + PX, width - 2 * PX, height - 2 * PX);
+      g.fillStyle(0xffc060).fillRect(x + PX, y + PX, width - 2 * PX, PX);
+      g.fillStyle(0x9c4018);
+      for (let row = y + 4 * PX; row < y + height - PX; row += 9 * PX) {
+        g.fillRect(x + PX, row, width - 2 * PX, PX);
+      }
+      g.fillStyle(0x000000);
+      for (let joint = x + 8 * PX; joint < x + width - PX; joint += 24 * PX) {
+        g.fillRect(joint, y + PX, PX, 3 * PX);
+      }
+    };
+
+    for (const wall of MAP.walls) {
+      if (wall.y0 === wall.y1) {
+        brick(wall.x0 * TILE - 2 * PX, wall.y0 * TILE - 3 * PX, (wall.x1 - wall.x0) * TILE + 3 * PX, 5 * PX, wall.y0 * TILE);
+        continue;
+      }
+
+      for (let y = wall.y0; y < wall.y1; y += 0.5) {
+        const segmentHeight = Math.min(0.5, wall.y1 - y) * TILE;
+        brick(
+          wall.x0 * TILE - 2 * PX,
+          y * TILE - 3 * PX,
+          5 * PX,
+          segmentHeight + 3 * PX,
+          (y + segmentHeight / (2 * TILE)) * TILE,
+        );
+      }
+    }
+  }
+
   // Пул спрайтов запаса: сколько единиц в stock — столько видно (физические склады)
   private stockImgs: Record<string, Phaser.GameObjects.Image[]> = {};
 
@@ -360,6 +399,8 @@ export class WorldScene extends Phaser.Scene {
     const row = (key: string, tex: string, pts: [number, number][]) => {
       this.stockImgs[key] = pts.map(([x, y]) => this.img(x * TILE, y * TILE, tex, y * TILE));
     };
+    const stack = (x: number, y: number, count: number): [number, number][] =>
+      Array.from({ length: count }, (_, i) => [x + (i % 4) * 0.55, y - Math.floor(i / 4) * 0.38]);
     // Кормовая: мешки зерна у южной стены, овощи у стеллажа, фрукты рядом
     row('grain', 'unit-sack', [
       [24.7, 23.4], [25.1, 23.4], [25.5, 23.4], [25.9, 23.4],
@@ -372,23 +413,26 @@ export class WorldScene extends Phaser.Scene {
       [30.0, 22.5], [30.5, 22.5], [31.0, 22.5], [30.2, 22.1], [30.7, 22.1], [31.2, 22.1],
     ]);
     // Сенник: тюки сена вдоль южной стены, охапки соломы у северной
-    row('hay', 'deco-bale', [
-      [36.2, 23.3], [36.9, 23.3], [37.6, 23.3], [38.3, 23.3],
-      [36.5, 22.9], [37.2, 22.9], [37.9, 22.9], [38.6, 22.9],
-    ]);
-    row('straw', 'litter-straw', [
-      [33.9, 19.4], [34.4, 19.4], [34.9, 19.4], [34.1, 19.0], [34.6, 19.0], [35.1, 19.0], [34.3, 18.6], [34.8, 18.6],
-    ]);
+    row('hay', 'deco-bale', stack(36.2, 23.3, 16));
+    row('straw', 'litter-straw', stack(33.9, 19.4, 16));
     // Опилочник: горки опилок у ларя
-    row('sawdust', 'litter-sawdust', [
-      [46.5, 22.6], [47.0, 22.6], [47.5, 22.6], [48.0, 22.6], [46.7, 22.2], [47.2, 22.2], [47.7, 22.2], [48.2, 22.2],
-    ]);
+    row('sawdust', 'litter-sawdust', stack(46.5, 22.6, 16));
+    for (const [kind, x, y] of [
+      ['hay', 37.5, 21.3],
+      ['straw', 34.6, 20.7],
+      ['sawdust', 47.6, 20.8],
+    ] as const) {
+      this.stockEmptyTags[kind] = this.tag('ПУСТО', x * TILE, y * TILE).setVisible(false);
+    }
   }
+
+  private stockEmptyTags: Partial<Record<'hay' | 'straw' | 'sawdust', Phaser.GameObjects.Text>> = {};
 
   private drawStock(s: State): void {
     for (const k of Object.keys(this.stockImgs) as (keyof State['stock'])[]) {
       const show = Math.min(s.stock[k], this.stockImgs[k].length);
       this.stockImgs[k].forEach((im, i) => im.setVisible(i < show));
+      if (k === 'hay' || k === 'straw' || k === 'sawdust') this.stockEmptyTags[k]?.setVisible(s.stock[k] <= 0);
     }
   }
 
@@ -403,6 +447,7 @@ export class WorldScene extends Phaser.Scene {
     this.drawDung(s);
     this.drawLitter(s);
     this.drawPools(s, t);
+    this.drawTires(s);
     this.drawFence(s);
     this.drawStations(s);
     s.elephants.forEach((e, i) => this.elephants[i].update(e, s, t));
@@ -501,11 +546,11 @@ export class WorldScene extends Phaser.Scene {
       // Муть: тёмный слой поверх воды
       if (ps.dirty > 5) g.fillStyle(0x2c5830, Math.min(0.55, ps.dirty / 160)).fillEllipse(cx, cy, rx * 2 - 10, ry * 2 - 10);
       // Мерцание: короткие блики, бегущие по воде
-      for (let k = 0; k < 5; k++) {
+      for (let k = 0; k < 7; k++) {
         const phase = (t * 0.5 + k * 0.23) % 1;
         const x = cx - rx / 2 + phase * rx;
         const y = cy - ry / 2 + ((k * 37) % 100) / 100 * ry;
-        g.fillStyle(0xffffff, 0.35).fillRect(Math.round(x), Math.round(y), 8, 3);
+        g.fillStyle(0xb9f4ff, 0.9).fillRect(Math.round(x), Math.round(y), 10, 3);
       }
     });
     // Плавающий навоз
@@ -522,6 +567,19 @@ export class WorldScene extends Phaser.Scene {
         im.destroy();
         this.poolFloats.delete(id);
       }
+    }
+  }
+
+  private drawTires(s: State): void {
+    for (const tire of s.tires) {
+      let image = this.tireImgs.get(tire.id);
+      if (!image) {
+        image = this.img(tire.x * TILE, tire.y * TILE, 'tire', tire.y * TILE);
+        this.tireImgs.set(tire.id, image);
+      }
+      const progress = tire.flightDuration > 0 ? 1 - tire.flightLeft / tire.flightDuration : 0;
+      const arc = tire.flightLeft > 0 ? Math.sin(progress * Math.PI) * 1.4 * TILE : 0;
+      image.setPosition(tire.x * TILE, tire.y * TILE - arc).setDepth(tire.y * TILE + 2).setRotation(tire.flightLeft > 0 ? progress * Math.PI * 2 : 0);
     }
   }
 
@@ -647,6 +705,22 @@ export class WorldScene extends Phaser.Scene {
     if (j.cargo?.length) {
       this.palletImg.setTexture(`pallet-${j.cargo[0].kind}`).setPosition(Math.round(j.x * TILE), jy - 8 * PX).setVisible(true);
     } else this.palletImg.setVisible(false);
+    const groundIds = new Set<number>();
+    for (const pallet of sp.ground) {
+      groundIds.add(pallet.id);
+      let image = this.groundPalletImgs.get(pallet.id);
+      if (!image) {
+        image = this.img(pallet.x * TILE, pallet.y * TILE, `pallet-${pallet.cargo[0].kind}`, pallet.y * TILE);
+        this.groundPalletImgs.set(pallet.id, image);
+      }
+      image.setTexture(`pallet-${pallet.cargo[0].kind}`).setPosition(pallet.x * TILE, pallet.y * TILE).setDepth(pallet.y * TILE);
+    }
+    for (const [id, image] of this.groundPalletImgs) {
+      if (!groundIds.has(id)) {
+        image.destroy();
+        this.groundPalletImgs.delete(id);
+      }
+    }
   }
 
   private drawContainer(s: State, dt: number): void {
@@ -675,8 +749,16 @@ export class WorldScene extends Phaser.Scene {
     const moved = Math.hypot(px - this.partnerLast.x, py - this.partnerLast.y);
     this.partnerLast = { x: px, y: py };
     const frame = moved > 0.3 ? `keeper-${1 + (Math.floor(t * 6) % 2)}` : 'keeper-0';
-    this.partner.setTexture(frame).setFlipX(p.facing.x < 0).setPosition(px, py).setDepth(py + 1);
-    this.partnerTag.setPosition(px, py - 30 * PX).setDepth(20000);
+    this.partner
+      .setTexture(frame)
+      .setFlipX(p.facing.x < 0)
+      .setPosition(px, py)
+      .setRotation(p.knockdownTimer > 0 ? Math.PI / 2 : 0)
+      .setDepth(py + 1);
+    this.partnerTag
+      .setText(p.knockdownTimer > 0 ? 'ДИМОН 💫' : p.mode === 'flee' ? 'ДИМОН · МУСТ!' : 'ДИМОН')
+      .setPosition(px, py - 30 * PX)
+      .setDepth(20000);
   }
 
   private effects(s: State): void {

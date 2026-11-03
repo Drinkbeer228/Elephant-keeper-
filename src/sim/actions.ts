@@ -1,4 +1,5 @@
 import { BALANCE } from '../data/balance';
+import { ELEPHANTS } from '../data/elephants';
 import { MAP, inPaddock, nearStation, poolEdgeDist, stationDist, type StationId } from '../data/map';
 import { dist, pocketTreat, profileOf, treat, walkCommand, bucketUnder } from './elephants';
 import { emit } from './events';
@@ -9,7 +10,7 @@ import { addToContainer, barrowNear, barrowRoom, callTruck, containerShare, dump
 import { clockText, isDark } from './clock';
 import { newItem } from './state';
 import { giveStock, STOCK_LABELS, takeStock, takeStockUpTo } from './stock';
-import { supplyOpen } from './truck';
+import { acceptSupplyIfUnloaded, supplyOpen } from './truck';
 import type { CargoKind, Elephant, Item, State, Tool } from './types';
 
 export interface ActionOption {
@@ -27,6 +28,7 @@ function near(state: State, id: Parameters<typeof nearStation>[0]): boolean {
 
 function nearestElephant(state: State, maxDist = REACH + BALANCE.elephant.radius): Elephant | undefined {
   return state.elephants
+    .filter((e) => profileOf(e).paddock === 'upper')
     .filter((e) => dist(e, state.player) <= maxDist)
     .sort((a, b) => dist(a, state.player) - dist(b, state.player))[0];
 }
@@ -91,7 +93,14 @@ function putOnRack(item: Item): { x: number; y: number } | null {
 
 function takeFromFloor(state: State): ActionOption | null {
   const p = state.player;
-  const near = state.items.filter((i) => dist(i, p) <= 1.1).sort((a, b) => dist(a, p) - dist(b, p));
+  const near = state.items
+    .filter((i) => {
+      if (i.kind !== 'basin' || !i.owner) return true;
+      const owner = state.elephants.find((e) => e.id === i.owner);
+      return !owner || profileOf(owner).paddock === 'upper';
+    })
+    .filter((i) => dist(i, p) <= 1.1)
+    .sort((a, b) => dist(a, p) - dist(b, p));
   if (!near.length) return null;
   const take = (item: Item): ActionOption => ({
     label: `Взять: ${itemLabel(item)}`,
@@ -108,7 +117,11 @@ function takeFromFloor(state: State): ActionOption | null {
 
 export function itemLabel(item: Item): string {
   if (item.kind === 'basin') {
-    if (item.food) return item.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
+    if (item.food) {
+      const food = item.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
+      const owner = ELEPHANTS.find((profile) => profile.id === item.owner);
+      return owner ? `${food} для ${owner.name}` : food;
+    }
     const n = 1 + (item.nested?.length ?? 0);
     const dirty = item.dirty || item.nested?.some((b) => b.dirty);
     if (n === 1) return dirty ? 'грязный таз' : 'чистый таз';
@@ -123,14 +136,34 @@ export function itemLabel(item: Item): string {
 }
 
 export function availableAction(state: State): ActionOption | null {
-  if (state.phase === 'report') return null;
+  if (state.phase === 'report' || state.player.knockdownTimer > 0) return null;
   const p = state.player;
   const held = p.held;
+
+  const calming = musthTreatAction(state);
+  if (calming) return calming;
 
   const praised = state.elephants.find((e) => dist(e, p) <= 2.6 && state.t <= e.praiseUntil);
   // Фруктов нет — угощать нечем, пункта не показываем
   if (praised && state.stock.fruit > 0) {
     return { label: `Угостить ${profileOf(praised).name} (за бак)`, run: (s) => treat(s, praised) };
+  }
+
+  function musthTreatAction(state: State): ActionOption | null {
+    const p = state.player;
+    if (p.pocketTreats <= 0 || p.y < MAP.fenceY2 - 2 || p.y >= MAP.fenceY2 || inPaddock(p.x, p.y)) return null;
+    const e = state.elephants.find(
+      (el) => profileOf(el).paddock === 'lower' && el.musthTimer > 0 && dist(el, p) <= 3,
+    );
+    if (!e) return null;
+    return {
+      label: `Бросить успокоительное лакомство ${profileOf(e).name} через решётку`,
+      run: (s) => {
+        s.player.pocketTreats--;
+        e.musthTimer = 0;
+        emit(s, { kind: 'good', text: `${profileOf(e).name} поймал лакомство. Приступ муста прекратился.`, elephantId: e.id });
+      },
+    };
   }
 
   if (state.barrow.pushed) return pushAction(state);
@@ -401,9 +434,10 @@ function heldAction(state: State, held: Item): ActionOption {
     case 'basin':
       if (held.food) {
         const target = state.elephants
+          .filter((e) => profileOf(e).paddock === 'upper')
           .map((e) => ({ e, slot: profileOf(e).slot }))
           .filter(({ slot }) => dist(slot, p) <= REACH + 0.3)
-          .filter(({ e }) => !state.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food))[0];
+          .filter(({ e }) => e.id === held.owner && !state.items.some((i) => i.kind === 'basin' && i.owner === e.id && i.food))[0];
         if (target) {
           const name = profileOf(target.e).name;
           const food = held.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
@@ -500,22 +534,20 @@ function heldAction(state: State, held: Item): ActionOption {
       break;
     case 'hay':
       // Кормушки обоих загонов: у слоних — верхняя, у самцов — нижняя
-      if (dist(MAP.feeder, p) <= 1.8 || dist(MAP.feeder2, p) <= 1.8) {
+      if (dist(MAP.feeder, p) <= 1.8) {
         return {
           label: 'Заложить сено в кормушку',
           run: (s) => {
-            const lower = dist(MAP.feeder, p) > 1.8;
-            if (lower) s.feederHay2 = Math.min(100, s.feederHay2 + BALANCE.food.hayBale);
-            else s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale);
+            s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale);
             s.player.held = null;
           },
         };
       }
-      if (inPaddock(p.x, p.y)) {
+      if (inPaddock(p.x, p.y) && p.y < MAP.fenceY) {
         return {
           label: 'Бросить тюк — задобрить',
           run: (s) => {
-            s.elephants.forEach((e) => {
+            s.elephants.filter((e) => profileOf(e).paddock === 'upper').forEach((e) => {
               if (dist(e, p) <= 5) e.boredom = Math.max(0, e.boredom + BALANCE.elephant.hayTossBoredom);
             });
             s.feederHay = Math.min(100, s.feederHay + BALANCE.food.hayBale / 2);
@@ -806,7 +838,7 @@ function jackPushAction(state: State): ActionOption {
   const cargo = state.jack.cargo;
   // Смешанный поддон сдаётся по частям: у точки каждого вида своя сдача
   if (cargo?.length) {
-    const next = cargo.find((u) => near(state, DROP[u.kind]));
+    const next = cargo.find((u) => nearStation(DROP[u.kind], state.jack.x, state.jack.y, BALANCE.player.stationReach));
     if (next) {
       return {
         label: `Сдать груз: ${STOCK_LABELS[next.kind]} (${next.qty})`,
@@ -819,6 +851,18 @@ function jackPushAction(state: State): ActionOption {
       };
     }
   } else {
+    const pallet = state.supply.ground.find((item) => Math.hypot(item.x - state.jack.x, item.y - state.jack.y) <= 1.4);
+    if (pallet) {
+      return {
+        label: `Поднять паллету на рохлю: ${pallet.cargo.map((u) => STOCK_LABELS[u.kind]).join(' + ')}`,
+        run: (s) => {
+          const next = s.supply.ground.find((item) => item.id === pallet.id);
+          if (!next || s.jack.cargo) return;
+          s.supply.ground = s.supply.ground.filter((item) => item.id !== next.id);
+          s.jack.cargo = next.cargo.map((unit) => ({ ...unit }));
+        },
+      };
+    }
     // Толкаешь пустую рохлю у борта: снять поддон или оставить рохлю — одним меню
     const unload = unloadMenu(state);
     if (unload?.choices) {
@@ -842,19 +886,49 @@ function unloadMenu(state: State): ActionOption | null {
   if (!supplyOpen(state) || !near(state, 'unload')) return null;
   const j = state.jack;
   if (j.cargo?.length) return blocked('Сначала сдай этот груз — рохля одна');
-  if (dist(j, state.player) > BALANCE.jack.reach) return null;
   if (!state.supply.bays.length) return blocked('Борт пуст — всё принято');
+  const jackAvailable = dist(j, state.player) <= BALANCE.jack.reach;
+  const receive = MAP.stations.receiving;
+  const palletSpots = [
+    { x: receive.x - 0.8, y: receive.y - 0.55 },
+    { x: receive.x + 0.3, y: receive.y - 0.55 },
+    { x: receive.x - 0.8, y: receive.y + 0.45 },
+    { x: receive.x + 0.3, y: receive.y + 0.45 },
+  ];
   return {
-    label: 'Снять на рохлю…',
-    choices: state.supply.bays.map((bay) => ({
-      label: bay.map((u) => `${STOCK_LABELS[u.kind]} ${u.qty}`).join(' + '),
-      run: (s) => {
-        s.supply.bays = s.supply.bays.filter((b) => b !== bay);
-        s.jack.cargo = bay.map((u) => ({ ...u }));
-        const names = bay.map((u) => STOCK_LABELS[u.kind].toLowerCase()).join(' и ');
-        emit(s, { kind: 'info', text: `Поддон на рохле: ${names}.` });
-      },
-    })),
+    label: 'Снять паллету с борта…',
+    choices: state.supply.bays.flatMap((bay) => {
+      const describe = bay.map((u) => `${STOCK_LABELS[u.kind]} ${u.qty}`).join(' + ');
+      const choices: ActionOption[] = [];
+      if (jackAvailable) {
+        choices.push({
+          label: describe,
+          run: (s) => {
+            const index = s.supply.bays.indexOf(bay);
+            if (index < 0 || s.jack.cargo?.length) return;
+            s.supply.bays.splice(index, 1);
+            s.jack.cargo = bay.map((u) => ({ ...u }));
+            const names = bay.map((u) => STOCK_LABELS[u.kind].toLowerCase()).join(' и ');
+            emit(s, { kind: 'info', text: `Поддон на рохле: ${names}.` });
+            acceptSupplyIfUnloaded(s);
+          },
+        });
+      }
+      if (supplyOpen(state)) {
+        choices.push({
+          label: `На площадку: ${describe}`,
+          run: (s) => {
+            const index = s.supply.bays.indexOf(bay);
+            if (index < 0) return;
+            s.supply.bays.splice(index, 1);
+            const spot = palletSpots[s.supply.ground.length];
+            if (spot) s.supply.ground.push({ id: s.nextItemId++, cargo: bay.map((u) => ({ ...u })), ...spot });
+            acceptSupplyIfUnloaded(s);
+          },
+        });
+      }
+      return choices;
+    }),
     run: () => undefined,
   };
 }
@@ -950,12 +1024,13 @@ function fillBasins(state: State, food: 'kasha' | 'veg'): ActionOption {
   const clean = basinsOnRack(state).filter((b) => !b.food && !b.dirty);
   const what = food === 'kasha' ? 'Каша' : 'Ужин';
   if (!clean.length) return blocked(`${what} готов${food === 'kasha' ? 'а' : ''}, но чистых тазов на стеллаже нет — вымой и поставь`, 'basinCrushed');
-  const n = Math.min(portions, clean.length);
+  const n = Math.min(portions, clean.length, 6);
   return {
     label: `Разложить ${food === 'kasha' ? 'кашу' : 'ужин'} по тазам (${n})`,
     run: (s) => {
       const meal = food === 'kasha' ? s.kitchen.kasha.meal! : 'dinner';
-      clean.slice(0, n).forEach((b) => Object.assign(b, { food, meal }));
+      const order = ['pretty', 'margo', 'audrey', 'radja', 'baron', 'caesar'];
+      clean.slice(0, n).forEach((b, i) => Object.assign(b, { food, meal, owner: order[i] }));
       if (food === 'kasha') {
         s.kitchen.kasha.portions -= n;
         if (s.kitchen.kasha.portions === 0) s.kitchen.kasha = { status: 'idle', readyAt: 0, portions: 0, meal: null };
@@ -989,7 +1064,7 @@ function tableAction(state: State): ActionOption {
     return {
       label: 'Нарезать ужин',
       run: (s) => {
-        s.kitchen.veg.portions = 3;
+        s.kitchen.veg.portions = 6;
         table.veg = undefined;
         emit(s, { kind: 'good', text: 'Ужин нарезан: три порции — разложи по тазам.' });
       },

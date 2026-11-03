@@ -16,7 +16,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     phase: 'shift',
     t: 0,
     nextItemId: 1,
-    player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 }, pocketTreats: BALANCE.player.pocketStart },
+    player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 }, pocketTreats: BALANCE.player.pocketStart, knockdownTimer: 0 },
     elephants: ELEPHANTS.map(createElephant),
     // Сетка пола на весь мир: солома в песочных зонах, трава на лугах, бетон вне загонов
     cells: Array.from({ length: MAP.floor.rows }, (_, cy) =>
@@ -37,6 +37,12 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     trough2: 80,
     valve2Open: false,
     pools: MAP.pools.map(() => ({ dirty: 0, floats: [] })),
+    tires: [
+      { id: 'upper', paddock: 'upper', x: 28, y: 8, vx: 0, vy: 0, flightLeft: 0, flightDuration: 0, cooldown: 0, hit: false },
+      { id: 'lower', paddock: 'lower', x: 28, y: 37, vx: 0, vy: 0, flightLeft: 0, flightDuration: 0, cooldown: 0, hit: false },
+    ],
+    musthEventsRemaining: 0,
+    musthNextAt: Number.POSITIVE_INFINITY,
     partner: {
       x: MAP.playerStart.x + 2.5,
       y: 26.4,
@@ -48,6 +54,8 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       timer: 2,
       path: [],
       pathTarget: null,
+      foodBasin: null,
+      knockdownTimer: 0,
     },
     dutyLight: false,
     lastOverflow: 0,
@@ -73,6 +81,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
       left: false,
       missed: false,
       bays: [],
+      ground: [],
       driver: { x: MAP.stations.unload.x + 2.2, y: MAP.stations.unload.y, wp: 0, said: false, babbleAt: 0 },
     },
     container: { fill: 0, doorClosed: false, ramp: false, truckAt: null, truckLeftAt: null },
@@ -97,6 +106,18 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     prep: null,
     report: null,
   };
+
+  for (const elephant of state.elephants) {
+    if (ELEPHANTS.find((p) => p.id === elephant.id)?.paddock === 'lower') {
+      elephant.traits = {
+        appetite: randomInt(state, 80, 140) / 100,
+        messiness: randomInt(state, 80, 140) / 100,
+        aggression: randomInt(state, 80, 140) / 100,
+      };
+    }
+  }
+  state.musthEventsRemaining = randomInt(state, 1, 2);
+  state.musthNextAt = randomInt(state, 150, 360);
 
   const spots = MAP.rackSpots;
   addItem(state, 'bucket', spots.bucket.x, spots.bucket.y, { liters: 0, dirty: false });
@@ -144,6 +165,8 @@ function createElephant(p: (typeof ELEPHANTS)[number]): Elephant {
     lastCell: '',
     tally: { inBucket: 0, missed: 0, dung: 0 },
     wetness: 0,
+    traits: { appetite: 1, messiness: 1, aggression: 1 },
+    musthTimer: 0,
   };
 }
 
