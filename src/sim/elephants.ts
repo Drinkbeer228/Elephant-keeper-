@@ -1,7 +1,7 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
 import { MAP, inPaddock, inReachZone } from '../data/map';
-import { attachRegistry, stepElephant } from './ai/engine';
+import { attachRegistry, ensureFsm, stepElephant } from './ai/engine';
 import { elephantBehavior, registerSimBridge } from './ai/rules';
 import { ELEPHANT_AI_REGISTRY } from './ai/states';
 import { isNight } from './clock';
@@ -75,7 +75,11 @@ function drinkTrough(state: State, e: Elephant, amount: number): void {
   else state.trough2 = Math.max(0, state.trough2 - amount);
 }
 
+// Единственная точка входа слонов в симуляцию: её вызывает stepSim (tick.ts) на каждом
+// подшаге — и game-loop через tick(), и «перемотка» через advance(). Здесь же подключается
+// FSM-мост: до registerSimBridge движок не знает tick-функции состояний и молчит.
 export function updateElephants(state: State, dt: number, dtReal: number): void {
+  attachFsmBridge();
   startMusthEvents(state);
   for (const e of state.elephants) updateOne(state, e, dt, dtReal);
 }
@@ -92,6 +96,7 @@ function startMusthEvents(state: State): void {
 }
 
 function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void {
+  ensureFsm(e); // FSM-учёт (since/transitions) создаётся на первом же тике слона
   const p = profileOf(e);
   const night = isNight(state);
   const f = night ? E.nightNeedsFactor : 1;
@@ -137,16 +142,19 @@ function updateOne(state: State, e: Elephant, dt: number, dtReal: number): void 
     }
   }
 
-  // FSM-движок (инкремент 2): один подшаг слона через stepElephant. Tick-функции
-  // узлов — исходные кейсы старого switch (см. мост ниже): та же арифметика
-  // таймеров, те же вызовы decide/arrive/pee в том же порядке RNG. Если переход
-  // сменил узел, движок тут же тикает новый узел в этом же подшаге — как старый
-  // код, где timer→decide→walkTo происходил одним махом (проверка tests/fsm.test.ts).
+  // FSM-движок (инкремент 2): единственный исполнитель поведенческого тика слона —
+  // старого switch в updateOne больше нет. Tick-функции узлов — исходные кейсы
+  // switch (см. мост ниже): та же арифметика таймеров, те же вызовы decide/arrive/pee
+  // в том же порядке RNG. Цепочка переходов внутри подшага ограничена глубиной 2
+  // (engine.ts: MAX_TRANSITION_DEPTH) — как старый код, где timer→decide→walkTo
+  // происходил одним махом, и без риска бесконечного цикла (проверка tests/fsm.test.ts).
   stepElephant(ELEPHANT_AI_REGISTRY, elephantBehavior, { state, dt, dtReal }, e, state.t);
 }
 
-// Возвращает 'self': старый кейс сам выставил e.state/e.timer (или остался в
-// состоянии) — движок не применяет смену узла и завершает подшаг.
+// Возвращает 'self': старый кейс сам выставил e.state/e.timer напрямую (decide/pee/
+// finishBasin). Движок сверяет учёт fsm-метаданных по факту смены узла; если состояние
+// изменилось — новый узел получает первый шаг в этом же подшаге (bounded chain ≤ 2),
+// если нет — подшаг завершён.
 function afterDecide(): Intent {
   return { target: 'self' };
 }
@@ -155,10 +163,22 @@ function afterDecide(): Intent {
 // Мост sim → ai (реестр FSM). Tick-функции ниже — исходное поведение из
 // старого switch updateOne, перенесено без единой правки логики; диспетчер
 // прерываний к этому циклу ещё НЕ подключён (инкремент 4).
+//
+// Регистрация отложена до первого updateElephants и однократна: tick-функции
+// объявлены в этом модуле и обращаются к его функциям (arrive/pee/decide) через
+// замыкания, поэтому в момент вызова они гарантированно инициализированы.
+// Модульная инициализация этого делать не может: при загрузке тестов порядок
+// импортов таков, что stepSim/tick уже вызывает updateElephants раньше, чем
+// выполняется хвост этого файла, — мост оставался пустым и движок молчал.
 // ----------------------------------------------------------------------------
 
-attachRegistry(ELEPHANT_AI_REGISTRY);
-registerSimBridge({
+let bridgeAttached = false;
+
+function attachFsmBridge(): void {
+  if (bridgeAttached) return;
+  bridgeAttached = true;
+  attachRegistry(ELEPHANT_AI_REGISTRY);
+  registerSimBridge({
   profileOf,
   walkTick(state, e, dtReal) {
     const p = profileOf(e);
@@ -279,7 +299,8 @@ registerSimBridge({
   arriveNow(state, e) {
     arrive(state, e, profileOf(e));
   },
-});
+  });
+}
 
 // Свежий навоз слоны обходят. Залежавшийся — затаптывают и разносят следами по подстилке.
 // На траве куча так и лежит: затаптывать некуда, её убирают совком
