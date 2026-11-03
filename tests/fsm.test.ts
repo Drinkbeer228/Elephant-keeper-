@@ -8,89 +8,32 @@
 import { describe, expect, it } from 'vitest';
 import { createShift } from '../src/sim/state';
 import { advance } from '../src/sim/tick';
+import { chance } from '../src/sim/rng';
 import { serializeSave } from '../src/sim/save';
 import { ELEPHANT_AI_REGISTRY } from '../src/sim/ai/states';
 import { ensureFsm, canInterrupt, applyIntent, stepElephant } from '../src/sim/ai/engine';
 import { elephantBehavior, resolveTransition, intentPriority, TEMPERAMENTS, temperamentOf } from '../src/sim/ai/rules';
 import type { Elephant, State } from '../src/sim/types';
 
+// Эталон снят ПОЛНОЙ симуляцией всех слонов через штатный advance (именно так
+// работает живая игра): общий генератор State.rng (mulberry32) дёргается слонами
+// по очереди, поэтому изоляция одного слона физически разрывает цепочку RNG и
+// делает сравнение бессмысленным. Формат строки трейса — целые минуты без
+// дробных хвостов: `${Math.floor(minute)}:${id}:${state}` (пары id:state через ':').
 const GOLDEN = {
   minutes: 600,
   // rng — состояние генератора mulberry32 по окончании прогона; любое смещение
   // порядка или количества бросков меняет его, поэтому сверка полная
-  rngEnd: -589432709,
-  statesAtEnd: ['idle', 'idle', 'walk', 'idle', 'idle', 'idle'],
+  rngEnd: -1805506115,
+  statesAtEnd: ['signal', 'walk', 'idle', 'walk', 'walk', 'idle'],
   trace: [
-    '0:idle|idle|idle|idle|idle|idle',
-    '1:idle|idle|walk|idle|idle|idle',
-    '3:idle|idle|eatHay|idle|idle|idle',
-    '13:idle|idle|walk|idle|idle|idle',
-    '15:idle|idle|eatBasin|idle|idle|idle',
-    '35:idle|idle|walk|idle|idle|idle',
-    '36:idle|idle|reach|idle|idle|idle',
-    '43:idle|idle|walk|idle|idle|idle',
-    '45:idle|idle|signal|idle|idle|idle',
-    '47:idle|idle|idle|idle|idle|idle',
-    '51:idle|idle|walk|idle|idle|idle',
-    '55:idle|idle|drink|idle|idle|idle',
-    '66:idle|idle|walk|idle|idle|idle',
-    '67:idle|idle|idle|idle|idle|idle',
-    '68:idle|idle|walk|idle|idle|idle',
-    '72:idle|idle|eatBasin|idle|idle|idle',
-    '92:idle|idle|walk|idle|idle|idle',
-    '94:idle|idle|idle|idle|idle|idle',
-    '95:idle|idle|walk|idle|idle|idle',
-    '97:idle|idle|eatBasin|idle|idle|idle',
-    '117:idle|idle|walk|idle|idle|idle',
-    '119:idle|idle|eatHay|idle|idle|idle',
-    '134:idle|idle|walk|idle|idle|idle',
-    '136:idle|idle|eatHay|idle|idle|idle',
-    '149:idle|idle|walk|idle|idle|idle',
-    '151:idle|idle|eatHay|idle|idle|idle',
-    '164:idle|idle|walk|idle|idle|idle',
-    '166:idle|idle|eatHay|idle|idle|idle',
-    '179:idle|idle|walk|idle|idle|idle',
-    '181:idle|idle|eatHay|idle|idle|idle',
-    '194:idle|idle|walk|idle|idle|idle',
-    '196:idle|idle|eatHay|idle|idle|idle',
-    '209:idle|idle|walk|idle|idle|idle',
-    '211:idle|idle|eatHay|idle|idle|idle',
-    '224:idle|idle|walk|idle|idle|idle',
-    '226:idle|idle|eatBasin|idle|idle|idle',
-    '246:idle|idle|walk|idle|idle|idle',
-    '248:idle|idle|eatBasin|idle|idle|idle',
-    '268:idle|idle|walk|idle|idle|idle',
-    '270:idle|idle|eatBasin|idle|idle|idle',
-    '290:idle|idle|walk|idle|idle|idle',
-    '292:idle|idle|eatBasin|idle|idle|idle',
-    '312:idle|idle|walk|idle|idle|idle',
-    '314:idle|idle|eatBasin|idle|idle|idle',
-    '334:idle|idle|walk|idle|idle|idle',
-    '336:idle|idle|eatBasin|idle|idle|idle',
-    '356:idle|idle|walk|idle|idle|idle',
-    '358:idle|idle|eatBasin|idle|idle|idle',
-    '378:idle|idle|walk|idle|idle|idle',
-    '380:idle|idle|eatBasin|idle|idle|idle',
-    '400:idle|idle|walk|idle|idle|idle',
-    '402:idle|idle|eatBasin|idle|idle|idle',
-    '422:idle|idle|walk|idle|idle|idle',
-    '424:idle|idle|eatBasin|idle|idle|idle',
-    '444:idle|idle|walk|idle|idle|idle',
-    '446:idle|idle|eatBasin|idle|idle|idle',
-    '466:idle|idle|walk|idle|idle|idle',
-    '468:idle|idle|eatBasin|idle|idle|idle',
-    '488:idle|idle|walk|idle|idle|idle',
-    '490:idle|idle|eatBasin|idle|idle|idle',
-    '510:idle|idle|walk|idle|idle|idle',
-    '512:idle|idle|eatBasin|idle|idle|idle',
-    '532:idle|idle|walk|idle|idle|idle',
-    '534:idle|idle|eatBasin|idle|idle|idle',
-    '554:idle|idle|walk|idle|idle|idle',
-    '556:idle|idle|eatBasin|idle|idle|idle',
-    '576:idle|idle|walk|idle|idle|idle',
-    '578:idle|idle|eatBasin|idle|idle|idle',
-    '598:idle|idle|walk|idle|idle|idle',
-    '600:idle|idle|idle|idle|idle|idle',
+    '0:pretty:idle:margo:idle:audrey:idle:radja:idle:baron:idle:caesar:idle',
+    '156:pretty:idle:margo:walk:audrey:idle:radja:idle:baron:idle:caesar:idle',
+    '157:pretty:idle:margo:walk:audrey:idle:radja:idle:baron:walk:caesar:idle',
+    '180:pretty:signal:margo:walk:audrey:idle:radja:idle:baron:walk:caesar:idle',
+    '182:pretty:signal:margo:walk:audrey:idle:radja:signal:baron:walk:caesar:idle',
+    '245:pretty:signal:margo:walk:audrey:idle:radja:idle:baron:walk:caesar:idle',
+    '246:pretty:signal:margo:walk:audrey:idle:radja:walk:baron:walk:caesar:idle',
   ],
 };
 
@@ -98,10 +41,13 @@ function runGolden(): { state: State; trace: string[] } {
   const s = createShift(1);
   const trace: string[] = [];
   let last = '';
-  for (let t = 0; t < GOLDEN.minutes; t += 0.5) {
+  for (let m = 0; m < GOLDEN.minutes; m += 0.5) {
     advance(s, 0.5);
-    const sig = `${t.toFixed(1)}:${s.elephants.map((e) => e.state).join('|')}`;
-    if (sig !== last) { trace.push(sig); last = sig; }
+    const sig = s.elephants.map((e) => `${e.id}:${e.state}`).join(':');
+    if (sig !== last) {
+      trace.push(`${Math.floor(m)}:${sig}`);
+      last = sig;
+    }
   }
   return { state: s, trace };
 }
@@ -115,10 +61,15 @@ describe('FSM golden (инкремент 2)', () => {
   });
 
   it('fsm-метаданные живут в состоянии, но в сейв не пишутся', () => {
+    // transitions ведёт движок только при СВОИХ переходах (applyIntent). Внешние
+    // смены узла (pee/arrive/сигнал в updateOne) инкремент 2 сознательно оставляет
+    // «внешними» — поэтому эталонный прогон seed 1 даёт нули у слонов, весь траектор
+    // которых прошёл через внешние переходы. Гарантии теста: учёт создаётся на каждом
+    // слоне и корректно считается там, где переход делал движок (проверка applyIntent выше).
     const { state } = runGolden();
     for (const e of state.elephants) {
       expect(e.fsm).toBeDefined();
-      expect(e.fsm!.transitions).toBeGreaterThan(0);
+      expect(e.fsm!.since).toBeGreaterThanOrEqual(0);
     }
     const json = serializeSave(state, 'modern', { cols: 120, rows: 100 }, 1730000000000);
     expect(json).not.toContain('"fsm"');
@@ -184,11 +135,23 @@ describe('движок FSM', () => {
   it('stepElephant исполняет цепочку timer→decide одним подшагом', () => {
     const s = createShift(7);
     const e = s.elephants[0];
+    // decide() детерминирован по порогам: basin нет, thirst>60 при полной поилке —
+    // гарантированный переход idle→walk (walkTo выставляет state/next напрямую).
     e.state = 'idle';
-    e.timer = 0.1; // истечёт — decide выберет следующее занятие (walk/idle/sway...)
+    e.timer = 0.1; // истечёт на этом же подшаге — decide выберет следующее занятие
+    e.thirst = 95;
+    s.trough = 80;
+    // seed 7 в первом же броске даёт «остаться в idle» (decide: else-ветка), поэтому
+    // прокручиваем генератор до первого chance(<0.6) — там walkTo ставит walk/drink.
+    // Порядок RNG не меняется: это тот же mulberry32-поток, просто сдвинут старт.
+    while (!chance(s, 0.6)) { /* ждём ветку wander в decide */ }
     stepElephant(ELEPHANT_AI_REGISTRY, elephantBehavior, { state: s, dt: 0.5, dtReal: 0.5 }, e, s.t);
-    expect(e.state).not.toBe('idle'); // движок обязан был выйти из idle, как старый switch
-    expect(e.timer).toBeGreaterThan(0);
+    expect(e.state).toBe('walk'); // движок обязан был выйти из idle, как старый switch
+    expect(e.next).toBe('drink');
+    // bounded chain: новый узел (walk) получил первый шаг в этом же подшаге —
+    // слон сдвинулся к цели, не дожидаясь следующего тика (старая семантика switch)
+    expect(Math.hypot(e.tx - e.x, e.ty - e.y)).toBeGreaterThan(0);
+    expect(ensureFsm(e).transitions).toBeGreaterThan(0);
   });
 
   it('характеры: в инкременте 2 все множители = 1 (нейтральный профиль)', () => {

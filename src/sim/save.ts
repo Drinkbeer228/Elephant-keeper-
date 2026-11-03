@@ -115,7 +115,7 @@ function canonicalizeForJson(value: unknown, path: string, nonFinite: Record<str
     // сохраняет порядок записи. Сортировка делает формат независимым от порядка вставки,
     // и повторный save всегда побайтово совпадает с первым.
     for (const key of Object.keys(src).sort()) {
-      if (RUNTIME_ONLY_FIELDS.has(key)) continue; // aiDt/aiDtReal — только для живого цикла
+      if (RUNTIME_ONLY_FIELDS.has(key) || key === 'fsm') continue; // aiDt/aiDtReal и fsm-учёт — только для живого цикла, в сейв не пишутся
       out[key] = canonicalizeForJson(src[key], `${path}.${key}`, nonFinite);
     }
     return out;
