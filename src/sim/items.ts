@@ -1,5 +1,6 @@
 import { BALANCE } from '../data/balance';
 import { MAP, inPaddock, inReachZone } from '../data/map';
+import { dist } from './elephants';
 import { emit } from './events';
 import { chance } from './rng';
 import { addItem } from './state';
@@ -22,10 +23,6 @@ export const ITEM_NAMES: Record<Item['kind'], string> = {
   net: 'длинный сачок',
 };
 
-function d(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
 // Вещи, до которых слониха может дотянуться
 export function reachableItems(state: State): Item[] {
   return state.items.filter((i) => i.kind !== 'basin' && (inPaddock(i.x, i.y) || inReachZone(i.x, i.y)));
@@ -35,7 +32,7 @@ function inUse(state: State, item: Item): boolean {
   // Бак, под которым сейчас кто-то писает, не трогают
   return (
     item.kind === 'bucket' &&
-    state.elephants.some((e) => e.signalStarted !== undefined && d(e, item) <= BALANCE.elephant.bucketRadius)
+    state.elephants.some((e) => e.signalStarted !== undefined && dist(e, item) <= BALANCE.elephant.bucketRadius)
   );
 }
 
@@ -48,8 +45,8 @@ export function updateItems(state: State, dt: number): void {
     if (!inPaddock(item.x, item.y) && !inReachZone(item.x, item.y)) continue;
     if (state.t - item.droppedAt < I.breakGrace || inUse(state, item)) continue;
     const near = state.elephants
-      .filter((e) => e.state !== 'sleep' && d(e, item) <= I.reachDistance)
-      .sort((a, b) => d(a, item) - d(b, item))[0];
+      .filter((e) => e.state !== 'sleep' && dist(e, item) <= I.reachDistance)
+      .sort((a, b) => dist(a, item) - dist(b, item))[0];
     if (!near) continue;
     const focus = near.state === 'reach' && near.targetItem === item.id ? 5 : 1;
     const p = I.breakBase * (1 - near.trust / 100) * (0.5 + near.boredom / 200) * focus;
@@ -80,15 +77,15 @@ function updateBasin(state: State, basin: Item, dt: number): void {
 
 // Тазы на стеллаже в кормовой: стоят на своих местах
 export function basinsOnRack(state: State): Item[] {
-  return state.items.filter((i) => i.kind === 'basin' && MAP.basinSpots.some((p) => d(i, p) <= 0.3));
+  return state.items.filter((i) => i.kind === 'basin' && MAP.basinSpots.some((p) => dist(i, p) <= 0.3));
 }
 
 export function freeBasinSpot(state: State): { x: number; y: number } | null {
-  return MAP.basinSpots.find((p) => !state.items.some((i) => i.kind === 'basin' && d(i, p) <= 0.3)) ?? null;
+  return MAP.basinSpots.find((p) => !state.items.some((i) => i.kind === 'basin' && dist(i, p) <= 0.3)) ?? null;
 }
 
 export function openBagNear(state: State, x: number, y: number): Item | undefined {
   return state.items
-    .filter((i) => i.kind === 'bag' && (i.fill ?? 0) < I.bagCapacity && d(i, { x, y }) <= I.bagReach)
-    .sort((a, b) => d(a, { x, y }) - d(b, { x, y }))[0];
+    .filter((i) => i.kind === 'bag' && (i.fill ?? 0) < I.bagCapacity && dist(i, { x, y }) <= I.bagReach)
+    .sort((a, b) => dist(a, { x, y }) - dist(b, { x, y }))[0];
 }

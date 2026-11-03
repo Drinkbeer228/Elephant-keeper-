@@ -1,10 +1,9 @@
 import { BALANCE } from '../data/balance';
 import { ELEPHANTS, type ElephantProfile } from '../data/elephants';
-import { MAP, inPaddock } from '../data/map';
+import { MAP, inPaddock, inReachZone } from '../data/map';
 import { isNight } from './clock';
 import { emit, hint } from './events';
 import { cellAt, footHarm, isWet, wetAround } from './floor';
-import { reachableItems } from './items';
 import { chance, randomRange } from './rng';
 import { takeStock } from './stock';
 import { isOutdoorWalkable, routeForAnimal } from './nav';
@@ -12,12 +11,18 @@ import type { Elephant, ElephantState, Item, State } from './types';
 
 const E = BALANCE.elephant;
 
-export function profileOf(e: Elephant): ElephantProfile {
-  return ELEPHANTS.find((p) => p.id === e.id)!;
-}
-
+// Единый хелпер расстояния для всей симуляции (ранее был продублирован в barrow.ts и items.ts)
 export function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// Вещи, до которых слониха может дотянуться — живёт здесь, чтобы не делать круговой импорт items ↔ elephants
+function reachableItems(state: State): Item[] {
+  return state.items.filter((i) => i.kind !== 'basin' && (inPaddock(i.x, i.y) || inReachZone(i.x, i.y)));
+}
+
+export function profileOf(e: Elephant): ElephantProfile {
+  return ELEPHANTS.find((p) => p.id === e.id)!;
 }
 
 // Где слон гуляет: свой загон целиком, подстилка и трава

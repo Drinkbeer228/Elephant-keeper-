@@ -11,7 +11,7 @@ import { chance, randomRange } from './rng';
 import { giveStock, STOCK_LABELS, takeStock } from './stock';
 import { callTruck } from './barrow';
 import { deliveryAccessOpen } from './truck';
-import type { Elephant, State } from './types';
+import type { Elephant, PartnerMode, State } from './types';
 
 const P = BALANCE.partner;
 const K = BALANCE.container;
@@ -21,7 +21,7 @@ const K = BALANCE.container;
 // копит мусор в своей тачке и вывозит его в общий бак у дороги.
 
 interface Job {
-  mode: string;
+  mode: PartnerMode;
   target: () => { x: number; y: number } | null;
   done: (s: State) => boolean;
 }

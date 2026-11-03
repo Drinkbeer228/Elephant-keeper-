@@ -204,6 +204,34 @@ export interface Supply {
   driver: Driver;
 }
 
+// Текущее дело Димона: строгий union вместо string — опечатка в режиме теперь ловится компилятором.
+// '' — начальное значение до первого решения напарника.
+export type PartnerMode =
+  | ''
+  | 'idle'
+  | 'toilet'
+  | 'basinPick'
+  | 'basinCarry'
+  | 'basinCollect'
+  | 'basinWash'
+  | 'basinReturn'
+  | 'supplyPick'
+  | 'supplyCarry'
+  | 'dumpBucket'
+  | 'mealPrep'
+  | 'mealCook'
+  | 'dung'
+  | 'fork'
+  | 'sawdust'
+  | 'broom'
+  | 'straw'
+  | 'hayTake'
+  | 'hayCarry'
+  | 'valve'
+  | 'dumpWaste'
+  | 'recovering'
+  | 'flee';
+
 // Димон — второй дежурный кипер (ИИ-напарник): сам обслуживает нижний загон самцов
 export interface Partner {
   x: number;
@@ -211,7 +239,7 @@ export interface Partner {
   facing: { x: number; y: number };
   bucket: number; // литров в его баке
   waste: number; // единиц мусора в его тачке
-  mode: string; // текущее дело (для отладки и тестов)
+  mode: PartnerMode; // текущее дело (для отладки и тестов)
   babbleAt: number; // следующая реплика
   timer: number; // пауза до следующего решения, минут
   path: { x: number; y: number }[];
