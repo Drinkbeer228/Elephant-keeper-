@@ -22,7 +22,14 @@ export type ItemKind =
   | 'straw'
   | 'basket'
   | 'shovel' // совковая лопата из Опилочника: набирает опилки в ведро и в тачку
-  | 'net'; // длинный сачок: вылавливает навоз из бассейна
+  | 'net' // длинный сачок: вылавливает навоз из бассейна
+  | 'hoofKnife' // копытный нож/крючок: вычищает засорённые трещины подошвы
+  | 'hoofRasp' // рашпиль/насадка: стачивает отросший рог ногтя
+  | 'ointment'; // мазь/спрей: антисептическая защита подошв (treatedTime)
+
+// Инструменты педикюра, которые хранятся в ящике ухода за ногами
+export const PEDICURE_KINDS = ['hoofKnife', 'hoofRasp', 'ointment'] as const;
+export type PedicureKind = (typeof PEDICURE_KINDS)[number];
 
 export interface Item {
   id: number;
@@ -52,6 +59,14 @@ export interface LooseBale {
   x: number;
   y: number;
   portions: number;
+}
+
+// Здоровье копыт: деградация подошв от грязного/голого пола, таймер мази (игровые минуты)
+export interface FeetState {
+  health: number; // 0..100, по умолчанию 100
+  soleCracks: number; // 0..100, глубина/загрязнённость трещин подошвы
+  nailOvergrowth: number; // 0..100, отрастание рога ногтя
+  treatedTime: number; // остаток антисептической защиты в игровых минутах
 }
 
 export type ElephantState =
@@ -116,6 +131,11 @@ export interface Elephant {
   wetness: number; // 0..100: после купания мокрый и тёмный, на солнце светлеет
   traits: { appetite: number; messiness: number; aggression: number };
   musthTimer: number; // реальные секунды
+  /**
+   * Здоровье копыт (педикюр). Опциональное поле — старые сейвы грузятся без
+   * bump схемы: ensureFeet() создаёт запись со значениями по умолчанию на лету.
+   */
+  feet?: FeetState;
   pool?: number; // в каком бассейне купается
   targetItem?: number;
   signalStarted?: number;
@@ -326,6 +346,8 @@ export interface State {
   supply: Supply;
   container: Container;
   spareBucket: boolean;
+  footStool: { x: number; y: number }; // тумба для подъёма ноги: осмотр/педикюр проводится у неё
+  pedicureBox: Item[]; // ящик ухода за ногами: нож, рашпиль, мазь (не в items[], чтобы их не сломали)
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
   stock: Stock;
   stats: {
