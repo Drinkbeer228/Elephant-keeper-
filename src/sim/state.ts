@@ -24,6 +24,7 @@ export function createShift(seed: number, opts: ShiftOptions = {}): State {
     ),
     dung: [],
     litter: [],
+    looseBales: [],
     items: [],
     kitchen: {
       kasha: { status: 'idle', readyAt: 0, portions: 0, meal: null },

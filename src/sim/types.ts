@@ -22,7 +22,14 @@ export type ItemKind =
   | 'straw'
   | 'basket'
   | 'shovel' // совковая лопата из Опилочника: набирает опилки в ведро и в тачку
-  | 'net'; // длинный сачок: вылавливает навоз из бассейна
+  | 'net' // длинный сачок: вылавливает навоз из бассейна
+  | 'hoofKnife' // копытный нож/крючок: вычищает засорённые трещины подошвы
+  | 'hoofRasp' // рашпиль/насадка: стачивает отросший рог ногтя
+  | 'ointment'; // мазь/спрей: антисептическая защита подошв (treatedTime)
+
+// Инструменты педикюра, которые хранятся в ящике ухода за ногами
+export const PEDICURE_KINDS = ['hoofKnife', 'hoofRasp', 'ointment'] as const;
+export type PedicureKind = (typeof PEDICURE_KINDS)[number];
 
 export interface Item {
   id: number;
@@ -42,6 +49,24 @@ export interface Item {
   owner?: string; // таз: чей слот
   nested?: Item[]; // таз в руках: вложенные в него пустые тазы — стопка из настоящих тазов
   eatenAt?: number; // таз: когда опустел
+  portions?: number; // тюк сена, разобранный вилами: сколько охапок осталось растрясти
+}
+
+// Тюк сена, разобранный вилами: порции идут в кормушку или на подстилку;
+// когда порции кончились — тюк исчезает, оставляя бечёвку и мелкий сор
+export interface LooseBale {
+  id: number;
+  x: number;
+  y: number;
+  portions: number;
+}
+
+// Здоровье копыт: деградация подошв от грязного/голого пола, таймер мази (игровые минуты)
+export interface FeetState {
+  health: number; // 0..100, по умолчанию 100
+  soleCracks: number; // 0..100, глубина/загрязнённость трещин подошвы
+  nailOvergrowth: number; // 0..100, отрастание рога ногтя
+  treatedTime: number; // остаток антисептической защиты в игровых минутах
 }
 
 export type ElephantState =
@@ -106,6 +131,11 @@ export interface Elephant {
   wetness: number; // 0..100: после купания мокрый и тёмный, на солнце светлеет
   traits: { appetite: number; messiness: number; aggression: number };
   musthTimer: number; // реальные секунды
+  /**
+   * Здоровье копыт (педикюр). Опциональное поле — старые сейвы грузятся без
+   * bump схемы: ensureFeet() создаёт запись со значениями по умолчанию на лету.
+   */
+  feet?: FeetState;
   pool?: number; // в каком бассейне купается
   targetItem?: number;
   signalStarted?: number;
@@ -166,6 +196,8 @@ export interface Barrow {
   trail: number; // сколько проехала с грузом с последнего рассыпания
   stuck: boolean; // в прошлый кадр упёрлась в препятствие (для встряски при упоре)
   spoiled: boolean; // в тачке смесь с навозом: на пол нельзя, только в мусорный бак
+  /** Внутреннее (не в сейв): доля загрузки 0..1 — кэш barrowLoadShare() для HUD. */
+  loadPct?: number;
 }
 
 // Большой мусорный бак: заезжать, пока не наполовину; потом дверцу закрыть и ставить трап; полный — вызывать мусоровоз
@@ -292,6 +324,7 @@ export interface State {
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
   litter: { id: number; x: number; y: number; kind: 'straw' | 'hay' | 'sawdust' }[]; // сор с тачки на твёрдом полу
+  looseBales: LooseBale[]; // разобранные вилами тюки в вольере: растрясают порциями в кормушку или на подстилку
   items: Item[];
   kitchen: Kitchen;
   feederHay: number;
@@ -313,6 +346,8 @@ export interface State {
   supply: Supply;
   container: Container;
   spareBucket: boolean;
+  footStool: { x: number; y: number }; // тумба для подъёма ноги: осмотр/педикюр проводится у неё
+  pedicureBox: Item[]; // ящик ухода за ногами: нож, рашпиль, мазь (не в items[], чтобы их не сломали)
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
   stock: Stock;
   stats: {
