@@ -4,7 +4,7 @@ import { dist } from './elephants';
 import { emit } from './events';
 import { chance, randomRange } from './rng';
 import { addItem } from './state';
-import type { State, Tool } from './types';
+import type { Barrow, State, Tool } from './types';
 
 const B = BALANCE.barrow;
 const K = BALANCE.container;
@@ -85,6 +85,29 @@ export function updateBarrowRisk(state: State, dt: number): void {
 export function barrowFill(state: State): number {
   const b = state.barrow;
   return Math.max(b.sawdust / B.sawdustLoad, b.straw / B.strawLoad, 0);
+}
+
+// Единая шкала загрузки тачки (в единицах веса): считает всё — мусор, сыпучее, тюки, инвентарь.
+// Это и общий лимит объёма/веса (barrowRoom), и источник доли для скорости кипера и «горки»
+export function barrowLoadUnits(b: Barrow): number {
+  const W = B.weight;
+  return b.waste * W.waste + b.sawdust * W.sawdust + b.straw * W.straw + b.bales * W.bale + b.tools.length * W.tool;
+}
+
+// Доля загрузки 0..1 от единой шкалы capacity
+export function barrowLoadShare(state: State): number {
+  const share = Math.min(1, barrowLoadUnits(state.barrow) / B.capacity);
+  state.barrow.loadPct = share; // кэш для HUD: поле не сериализуется (RUNTIME_ONLY_FIELDS в save.ts)
+  return share;
+}
+
+// Скорость кипера, толкающего тачку: пустая — вся базовая (speedFactor); выше slowAt —
+// линейное падение до minShare на полностью гружёной. Плавный ход по прямой при этом
+// ничего не рассыпает — скорость жёстко привязана к загрузке, а не наоборот
+export function barrowSpeedFactor(state: State): number {
+  const share = barrowLoadShare(state);
+  const ramp = share <= B.slowAt ? 1 : 1 - ((share - B.slowAt) / (1 - B.slowAt)) * (1 - B.minShare);
+  return B.speedFactor * ramp;
 }
 
 // Встряска тачки: то, от чего «с горкой» просыпается заряд сыпучего

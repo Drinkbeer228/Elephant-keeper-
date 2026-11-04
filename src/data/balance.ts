@@ -103,7 +103,15 @@ export const BALANCE = {
   barrow: {
     wasteCapacity: 12,
     reach: 4.5, // тачка помогает, если стоит не дальше этого
-    speedFactor: 0.8,
+    speedFactor: 0.8, // базовая «тачечная» скорость: лёгкая тачка катится ровно столько
+    // Единая шкала загрузки (0..capacity): считает всё — мусор, сыпучее, тюки, инвентарь.
+    // Пустая тачка идёт на полной базовой скорости; дальше — линейное падение:
+    // до slowAt — почти не чувствуется, выше — скорость плавно уходит к minShare на самом дне.
+    capacity: 20,
+    weight: { waste: 1, sawdust: 1, straw: 1, bale: 3, tool: 0.5 },
+    slowAt: 0.7, // доля загрузки, после которой тачка начинает заметно тормозить
+    minShare: 0.6, // 60% базовой скорости при полностью гружёной тачке
+    overload: 0.9, // «с горкой»: риск высыпать частицы при беге или резкой смене направления
     maxBales: 4,
     stableBales: 2, // до стольких тюков едут спокойно, дальше — балансировать
     sawdustLoad: 8,
@@ -195,6 +203,10 @@ export const BALANCE = {
     basinCrushAfter: 45,
     basinCrushChance: 0.01,
     hayBale: 40,
+    // Разбор тюка вилами: тюк = 8 порций; часть идёт в кормушку, часть — на подстилку
+    balePortions: 8,
+    feederPerPortion: 5,
+    beddingCellsPerPortion: 2,
     hayStart: 60,
     troughFill: 4,
     troughOverflowEvery: 10,

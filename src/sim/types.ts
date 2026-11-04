@@ -42,6 +42,16 @@ export interface Item {
   owner?: string; // таз: чей слот
   nested?: Item[]; // таз в руках: вложенные в него пустые тазы — стопка из настоящих тазов
   eatenAt?: number; // таз: когда опустел
+  portions?: number; // тюк сена, разобранный вилами: сколько охапок осталось растрясти
+}
+
+// Тюк сена, разобранный вилами: порции идут в кормушку или на подстилку;
+// когда порции кончились — тюк исчезает, оставляя бечёвку и мелкий сор
+export interface LooseBale {
+  id: number;
+  x: number;
+  y: number;
+  portions: number;
 }
 
 export type ElephantState =
@@ -166,6 +176,8 @@ export interface Barrow {
   trail: number; // сколько проехала с грузом с последнего рассыпания
   stuck: boolean; // в прошлый кадр упёрлась в препятствие (для встряски при упоре)
   spoiled: boolean; // в тачке смесь с навозом: на пол нельзя, только в мусорный бак
+  /** Внутреннее (не в сейв): доля загрузки 0..1 — кэш barrowLoadShare() для HUD. */
+  loadPct?: number;
 }
 
 // Большой мусорный бак: заезжать, пока не наполовину; потом дверцу закрыть и ставить трап; полный — вызывать мусоровоз
@@ -292,6 +304,7 @@ export interface State {
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
   litter: { id: number; x: number; y: number; kind: 'straw' | 'hay' | 'sawdust' }[]; // сор с тачки на твёрдом полу
+  looseBales: LooseBale[]; // разобранные вилами тюки в вольере: растрясают порциями в кормушку или на подстилку
   items: Item[];
   kitchen: Kitchen;
   feederHay: number;
