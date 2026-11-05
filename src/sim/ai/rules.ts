@@ -83,10 +83,43 @@ export const TEMPERAMENTS: Record<string, Temperament> = {
   },
 };
 
-/** Характер слона. Инкремент 2: всегда neutral — поведение побитово совпадает со старым. */
+/** Характер слона для симуляции. Инкремент 2: всегда neutral — поведение побитово совпадает со старым. */
 export function temperamentOf(_profile: ElephantProfile): Temperament {
   return TEMPERAMENTS.neutral;
 }
+
+const ELEPHANT_TEMPERAMENT_IDS: Record<string, keyof typeof TEMPERAMENTS> = {
+  pretty: 'calm',
+  margo: 'capricious',
+  audrey: 'shy',
+  radja: 'dominant',
+  baron: 'calm',
+  caesar: 'playful',
+};
+
+/** Индивидуальный архетип характера слона для карточки осмотра, HUD и AI-оверлея. */
+export function displayTemperamentOf(profileOrId: ElephantProfile | string): Temperament {
+  const id = typeof profileOrId === 'string' ? profileOrId : profileOrId.id;
+  const key = ELEPHANT_TEMPERAMENT_IDS[id] ?? 'neutral';
+  return TEMPERAMENTS[key] ?? TEMPERAMENTS.neutral;
+}
+
+export const STATE_LABELS: Record<Elephant['state'], string> = {
+  idle: 'Спокойно стоит',
+  walk: 'Идёт по загону',
+  eatHay: 'Ест сено у кормушки',
+  eatBasin: 'Ест из таза',
+  drink: 'Пьёт воду',
+  signal: 'Просится в туалет!',
+  peeing: 'Писает',
+  walkCommand: 'Ждёт «Давай гуляй»',
+  sleep: 'Спит на подстилке',
+  sway: 'Качается от скуки!',
+  reach: 'Тянется хоботом к вещи',
+  bathe: 'Купается в бассейне',
+  scratch: 'Чешется о дерево',
+  play: 'Играет с покрышкой',
+};
 
 // ---------------------------------------------------------------------------
 // Мост в слой симуляции. elephants.ts регистрирует себя при загрузке — цикл

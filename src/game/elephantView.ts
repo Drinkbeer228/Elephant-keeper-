@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import { PX } from '../art/pixel';
 import { type ElephantProfile } from '../data/elephants';
 import { MAP } from '../data/map';
-import type { Elephant, State } from '../sim';
+import { displayTemperamentOf, STATE_LABELS, type Elephant, type State } from '../sim';
 
 const TILE = 48;
 const FONT = '"Press Start 2P", monospace';
+const AI_DEBUG = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ai') === '1';
 
 // Слон: пиксельные кадры — стоит, шагает, топает, ест, спит, купается.
 // Мокрая шкура темнеет (wetness) и светлеет обратно, пока слон сохнет
@@ -30,19 +31,19 @@ export class ElephantView {
     this.shadow = scene.add.image(0, 0, 'shadow-el').setScale(PX).setAlpha(0.3).setOrigin(0.5, 0.5);
     this.sprite = scene.add.image(0, 0, `el-${profile.id}-idle0`).setScale(PX).setOrigin(0.5, 1);
     this.name = scene.add
-      .text(0, 0, profile.name.toUpperCase(), { fontFamily: FONT, fontSize: '8px', color: '#fcfcfc', backgroundColor: '#000000', padding: { x: 3, y: 2 } })
+      .text(0, 0, profile.name.toUpperCase(), { fontFamily: FONT, fontSize: '8px', color: '#fcfcfc', backgroundColor: '#141210', padding: { x: 4, y: 2 } })
       .setOrigin(0.5, 1);
     this.musthMark = scene.add.graphics().setDepth(20001);
     this.musthTag = scene.add
-      .text(0, 0, '💢 МУСТ', { fontFamily: FONT, fontSize: '8px', color: '#ff7070', backgroundColor: '#000000', padding: { x: 3, y: 2 } })
+      .text(0, 0, '💢 МУСТ', { fontFamily: FONT, fontSize: '8px', color: '#ff7070', backgroundColor: '#141210', padding: { x: 3, y: 2 } })
       .setOrigin(0.5, 1)
       .setDepth(20002)
       .setVisible(false);
     this.traitTag = scene.add
-      .text(0, 0, '', { fontFamily: FONT, fontSize: '6px', color: '#fce0a8', backgroundColor: '#000000', padding: { x: 2, y: 1 } })
+      .text(0, 0, '', { fontFamily: FONT, fontSize: '6px', color: '#fce0a8', backgroundColor: '#141210', padding: { x: 3, y: 1 } })
       .setOrigin(0.5, 1)
       .setDepth(20001)
-      .setVisible(profile.paddock === 'male');
+      .setVisible(profile.paddock === 'male' || AI_DEBUG);
   }
 
   update(e: Elephant, _s: State, time: number): void {
@@ -103,15 +104,21 @@ export class ElephantView {
     else this.sprite.clearTint();
     this.shadow.setTexture(e.state === 'sleep' ? 'shadow-lying' : 'shadow-el').setPosition(px, py - 2).setDepth(py - 1);
 
-    // Над слоном — только имя. Что он хочет, игрок читает по поведению: топот, стойка у решётки
     const top = py - (e.state === 'sleep' ? 16 : 31) * PX * (id === 'audrey' || id === 'caesar' ? 0.88 : 1);
     this.name.setPosition(px, top).setDepth(20000);
-    const traits = [
-      e.traits.appetite >= 1.2 ? 'ПРОЖОРЛИВЫЙ' : e.traits.appetite <= 0.9 ? 'СКРОМНЫЙ' : '',
-      e.traits.messiness >= 1.2 ? 'ГРЯЗНУЛЯ' : '',
-      e.traits.aggression >= 1.2 ? 'БУЙНЫЙ' : '',
-    ].filter(Boolean);
-    this.traitTag.setText(traits[0] ?? 'СПОКОЙНЫЙ').setPosition(px, top - 8);
+    if (AI_DEBUG) {
+      const temp = displayTemperamentOf(this.profile).name.toUpperCase();
+      const stLabel = STATE_LABELS[e.state] ?? e.state;
+      const tr = e.fsm?.transitions ?? 0;
+      this.traitTag.setText(`${temp} • ${stLabel} (#${tr})`).setPosition(px, top - 10);
+    } else if (this.profile.paddock === 'male') {
+      const traits = [
+        e.traits.appetite >= 1.2 ? 'ПРОЖОРЛИВЫЙ' : e.traits.appetite <= 0.9 ? 'СКРОМНЫЙ' : '',
+        e.traits.messiness >= 1.2 ? 'ГРЯЗНУЛЯ' : '',
+        e.traits.aggression >= 1.2 ? 'БУЙНЫЙ' : '',
+      ].filter(Boolean);
+      this.traitTag.setText(traits[0] ?? 'СПОКОЙНЫЙ').setPosition(px, top - 10);
+    }
     this.musthTag.setVisible(e.musthTimer > 0).setPosition(px, top + 8);
     this.musthMark.clear();
     if (e.musthTimer > 0) {

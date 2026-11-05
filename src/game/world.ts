@@ -8,6 +8,7 @@ import { darkness, groundOf, sawdustAbsorbed, stinkSources, type Cell, type Stat
 import { ElephantView } from './elephantView';
 import { KeeperView } from './keeperView';
 import { BarrowView } from './barrowView';
+import { sound } from './sound';
 import { itemTexture, loadTextures } from './textures';
 
 // Мир в пиксель-арте: два загона, коридоры с разметкой, помещения, дорога справа,
@@ -136,6 +137,30 @@ export class WorldScene extends Phaser.Scene {
       this.setOverview(!this.overview);
     }
   };
+
+  public isOverview(): boolean {
+    return this.overview;
+  }
+
+  public toggleOverview(): void {
+    this.setOverview(!this.overview);
+  }
+
+  public focusWorldPoint(tileX: number, tileY: number): void {
+    const cam = this.cameras?.main;
+    if (!cam) return;
+    this.setOverview(false);
+    cam.stopFollow();
+    cam.pan(tileX * TILE, tileY * TILE, 420, 'Sine.easeInOut', true, (_c, progress) => {
+      if (progress >= 1 && this.keeper && !this.overview) {
+        this.time.delayedCall(1800, () => {
+          if (!this.overview && this.keeper) {
+            cam.startFollow(this.keeper.sprite, false, 0.12, 0.12);
+          }
+        });
+      }
+    });
+  }
 
   private setOverview(on: boolean): void {
     if (this.overview === on) return;
@@ -324,7 +349,15 @@ export class WorldScene extends Phaser.Scene {
     this.poolG = this.add.graphics().setDepth(12000);
 
     // Живые
-    this.elephants = ELEPHANTS.map((p) => new ElephantView(this, p, (x, y) => this.fx.dust.explode(6, x, y)));
+    this.elephants = ELEPHANTS.map(
+      (p) =>
+        new ElephantView(this, p, (x, y) => {
+          this.fx.dust.explode(6, x, y);
+          const st = this.getState();
+          const distTiles = Math.hypot(x / TILE - st.player.x, y / TILE - st.player.y);
+          sound.stomp(distTiles);
+        }),
+    );
     this.keeper = new KeeperView(this);
     this.barrow = new BarrowView(this);
     // Димон — напарник: тот же кипер, кепка другого цвета

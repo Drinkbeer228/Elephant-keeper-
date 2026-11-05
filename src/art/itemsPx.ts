@@ -323,6 +323,64 @@ function dot(c: string, n = 2): Sprite {
   return new Sprite(n, n).fill(() => true, c);
 }
 
+function hoofKnife(): Sprite {
+  return grid(
+    [
+      '..........kkk...',
+      '.........kmmmk..',
+      '........kmmk.mk.',
+      '........kMMk..k.',
+      '.......kMMk.....',
+      '......kwWk......',
+      '.....kwWk.......',
+      '....kwWk........',
+      '...kwWk.........',
+      '...kkk..........',
+      '................',
+      '................',
+      '................',
+      '................',
+      '................',
+      '................',
+    ],
+    TOOL_PAL,
+  );
+}
+
+function hoofRasp(): Sprite {
+  return grid(
+    [
+      '...........kkkk.',
+      '..........kMDMDk',
+      '.........kDMDMDk',
+      '........kMDMDMk.',
+      '.......kDMDMDk..',
+      '......kMDMDMk...',
+      '.....kDMDMDk....',
+      '.....kkkkkk.....',
+      '....kwWk........',
+      '...kwWk.........',
+      '..kwWk..........',
+      '..kkk...........',
+      '................',
+      '................',
+      '................',
+      '................',
+    ],
+    TOOL_PAL,
+  );
+}
+
+function ointment(): Sprite {
+  const s = new Sprite(16, 16);
+  s.shape(rect(4, 6, 11, 14), T.green);
+  s.shape(rect(5, 3, 10, 5), T.metal);
+  s.fill(rect(6, 8, 9, 11), C.white);
+  s.set(7, 9, C.greenDark);
+  s.set(8, 9, C.greenDark);
+  return s;
+}
+
 export function itemSprites(): Record<string, Sprite> {
   return {
     'item-bucket': bucket('empty'),
@@ -351,6 +409,9 @@ export function itemSprites(): Record<string, Sprite> {
     'item-broom': broom(),
     'item-shovel': shovel(),
     'item-net': net(),
+    'item-hoofKnife': hoofKnife(),
+    'item-hoofRasp': hoofRasp(),
+    'item-ointment': ointment(),
     dung: dung(),
     'fx-bubble': bubble(),
     'fx-heart': heart(),

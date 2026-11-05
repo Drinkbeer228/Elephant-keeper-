@@ -21,6 +21,9 @@ export const ITEM_NAMES: Record<Item['kind'], string> = {
   basket: 'корзина для овощей',
   shovel: 'совковая лопата',
   net: 'длинный сачок',
+  hoofKnife: 'копытный нож',
+  hoofRasp: 'рашпиль для копыт',
+  ointment: 'антисептическая мазь',
 };
 
 // Вещи, до которых слониха может дотянуться

@@ -245,3 +245,52 @@ describe('save/load: поведение после восстановления'
     void before;
   });
 });
+
+describe('save/load: слоты localStorage и экспорт/импорт (storage.ts)', () => {
+  it('saveToSlot, peekSlotMeta, loadFromSlot и deleteSlot работают с localStorage', async () => {
+    const store = new Map<string, string>();
+    const fakeStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        store.delete(k);
+      },
+    };
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: fakeStorage,
+      configurable: true,
+      writable: true,
+    });
+
+    const { saveToSlot, loadFromSlot, peekSlotMeta, deleteSlot, exportSaveJson, importSaveJson } = await import('../src/sim');
+    const s = liveShift(21);
+    const c = ctx();
+    const saveRes = saveToSlot(s, c, 'slot-1');
+    expect(saveRes.ok).toBe(true);
+
+    const meta = peekSlotMeta(c, 'slot-1');
+    expect(meta.exists).toBe(true);
+    expect(meta.compatible).toBe(true);
+    expect(meta.mapId).toBe(MAP_ID);
+
+    const loadRes = loadFromSlot(c, 'slot-1');
+    expect(loadRes).not.toBeNull();
+    expect(loadRes?.ok).toBe(true);
+    if (loadRes && loadRes.ok) {
+      expect(loadRes.state).toEqual(s);
+    }
+
+    const exported = exportSaveJson(s, c);
+    const imported = importSaveJson(exported, c);
+    expect(imported.ok).toBe(true);
+    if (imported.ok) {
+      expect(imported.state).toEqual(s);
+    }
+
+    deleteSlot(c, 'slot-1');
+    expect(peekSlotMeta(c, 'slot-1').exists).toBe(false);
+  });
+});
+

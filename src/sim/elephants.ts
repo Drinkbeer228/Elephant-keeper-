@@ -382,7 +382,7 @@ export function pee(state: State, e: Elephant): void {
     });
   }
   e.bladder = 0;
-  e.signalStarted = undefined;
+  delete e.signalStarted;
   e.state = 'idle';
   e.timer = 2;
 }
@@ -508,7 +508,7 @@ function bedSpot(state: State, e: Elephant): { x: number; y: number } | null {
 
 export function decide(state: State, e: Elephant): void {
   const p = profileOf(e);
-  e.pool = undefined;
+  delete e.pool;
   const basin = ownBasin(state, e);
   if (basin) return walkTo(state, e, basin.x, basin.y - 0.6, 'eatBasin');
   const trough = troughOf(e);

@@ -612,7 +612,7 @@ export class Bot {
     const meal = full[0]?.meal;
     if (meal) {
       const hungry = s.elephants.filter(
-        (e) => s.meals[meal][e.id] === null && full.some((basin) => basin.owner === e.id),
+        (e) => profileOf(e).paddock === 'female' && s.meals[meal][e.id] === null && full.some((basin) => basin.owner === e.id),
       );
       if (hungry.length) {
         const steps: Step[] = [...this.freeHands()];
@@ -632,7 +632,7 @@ export class Bot {
           steps.push({
             label: `слот ${nm}`,
             // Таз ставят у решётки: кипер стоит в коридоре, до слота — через прутья
-            to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: sl.y } : null),
+            to: () => (s.player.held?.food && s.meals[meal][e.id] === null ? { x: sl.x, y: sl.y + 0.9 } : null),
             expect: new RegExp(`для ${nm}`),
             done: () => s.meals[meal][e.id] !== null,
           });

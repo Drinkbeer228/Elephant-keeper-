@@ -324,7 +324,7 @@ export interface State {
   cells: Cell[][]; // [cy][cx]
   dung: { id: number; x: number; y: number; at: number }[];
   litter: { id: number; x: number; y: number; kind: 'straw' | 'hay' | 'sawdust' }[]; // сор с тачки на твёрдом полу
-  looseBales: LooseBale[]; // разобранные вилами тюки в вольере: растрясают порциями в кормушку или на подстилку
+  looseBales?: LooseBale[]; // разобранные вилами тюки в вольере: растрясают порциями в кормушку или на подстилку
   items: Item[];
   kitchen: Kitchen;
   feederHay: number;
@@ -346,8 +346,8 @@ export interface State {
   supply: Supply;
   container: Container;
   spareBucket: boolean;
-  footStool: { x: number; y: number }; // тумба для подъёма ноги: осмотр/педикюр проводится у неё
-  pedicureBox: Item[]; // ящик ухода за ногами: нож, рашпиль, мазь (не в items[], чтобы их не сломали)
+  footStool?: { x: number; y: number }; // тумба для подъёма ноги: осмотр/педикюр проводится у неё
+  pedicureBox?: Item[]; // ящик ухода за ногами: нож, рашпиль, мазь (не в items[], чтобы их не сломали)
   meals: Record<MealId, Record<string, number | null>>; // когда подан таз каждой
   stock: Stock;
   stats: {

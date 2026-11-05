@@ -1,6 +1,6 @@
 // Клавиатура и сенсорный джойстик сводятся в один вектор движения и очередь нажатий
 
-export type Press = 'action' | 'interact' | 'inspect' | 'pause' | number; // число — пункт меню действия, с нуля
+export type Press = 'action' | 'interact' | 'inspect' | 'pause' | 'schedule' | 'mute' | number; // число — пункт меню действия, с нуля
 
 export class Input {
   private keys = new Set<string>();
@@ -10,11 +10,15 @@ export class Input {
   constructor() {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const k = e.code;
       this.keys.add(k);
       if (k === 'Space') this.push('action');
       else if (k === 'KeyE') this.push('interact');
       else if (k === 'KeyF') this.push('inspect');
+      else if (k === 'KeyJ') this.push('schedule');
+      else if (k === 'KeyM') this.push('mute');
       else if (k === 'KeyP' || k === 'Escape') this.push('pause');
       else if (/^(Digit|Numpad)[1-9]$/.test(k)) this.push(Number(k.slice(-1)) - 1);
       if (k === 'Space' || k.startsWith('Arrow')) e.preventDefault();

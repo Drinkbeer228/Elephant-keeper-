@@ -54,8 +54,15 @@ export interface AiBehavior {
 }
 
 export function ensureFsm(e: Elephant): NonNullable<Elephant['fsm']> {
-  if (!e.fsm) e.fsm = { since: 0, last: '', transitions: 0 };
-  return e.fsm;
+  if (!e.fsm) {
+    Object.defineProperty(e, 'fsm', {
+      value: { since: 0, last: '', transitions: 0 },
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return e.fsm!;
 }
 
 function currentPriority(defs: Record<ElephantState, AiStateDef>, e: Elephant): number {
@@ -148,14 +155,6 @@ const MAX_TRANSITION_DEPTH = 2;
 /**
  * Один подшаг слона через движок: tick узла (delegate в rules), при отсутствии
  * намерения — явные transitions, затем fallback по истечении timer.
- *
- * Контракт переходов — bounded chain (глубина ≤ MAX_TRANSITION_DEPTH): если тик
- * или переход сменил состояние, новый узел тут же получает свой первый шаг в этом
- * же подшаге — ровно как старый switch, где timer→decide→walkTo происходил одним
- * махом. Цепочка короче лимита не отличается от одиночного прохода, длиннее —
- * невозможна: после второго перехода подшаг завершается. Проверка tests/fsm.test.ts.
- * transitions/fallback остаются доступными для декларативных узлов будущих
- * инкрементов (ассессмент, прерывания) — сейчас реестр их не объявляет.
  */
 export function stepElephant(
   registry: AiRegistry,
@@ -170,18 +169,15 @@ export function stepElephant(
     const fsm = ensureFsm(e);
     const prevState = e.state;
     fsm.pendingFrom = prevState; // чтобы ветка 'self' увидела, менял ли делегат состояние
-    const intent = def.tick ? behavior.tick(ctx, e, def) : null;
+    const intent = def.tick ? def.tick(ctxFor(e)) : behavior.tick(ctx, e, def);
     if (intent) {
       applyIntent(registry, behavior, ctx.state, e, intent, now);
-      // Служебный 'self' без смены состояния — подшаг закончен (как старый break).
-      // Если узел не объявлен в реестре (внешний переход), chain не продолжается.
+      // Служебный 'self' означает, что делегат старого switch уже выполнил полный шаг
+      // (включая decide/arrive/pee) и менять/перетикивать узел второй раз нельзя.
+      if (intent.target === 'self') return;
       if (e.state === prevState || !registry.defs[e.state]) return;
-      continue; // bounded chain: новый узел делает первый шаг в этом же подшаге
+      continue;
     }
-    // Ранний выход: если тик (или arrive внутри него) уже сменил состояние,
-    // дальнейшие transitions/fallback этого тика применять нельзя — ровно как
-    // в старом switch, где смена состояния прекращала выполнение ветки кейса.
-    // Но сам переход даёт новому узлу первый шаг — в пределах глубины цепочки.
     if (e.state !== prevState) {
       fsm.pendingFrom = undefined;
       if (!registry.defs[e.state]) return;
@@ -217,8 +213,8 @@ export function stepState(
   const def = registry.defs[e.state];
   if (!def) return null;
   let intent = def.tick
-    ? behavior.tick({ state, dt: (state as { aiDt?: number }).aiDt ?? 0, dtReal: (state as { aiDtReal?: number }).aiDtReal ?? 0 }, e, def)
-    : null;
+    ? def.tick(ctxFor(e))
+    : behavior.tick({ state, dt: (state as { aiDt?: number }).aiDt ?? 0, dtReal: (state as { aiDtReal?: number }).aiDtReal ?? 0 }, e, def);
   if (!intent && def.transitions) {
     for (const tr of def.transitions) {
       if (tr.when(ctxFor(e))) {

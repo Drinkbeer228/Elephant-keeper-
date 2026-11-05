@@ -78,9 +78,6 @@ function stepSim(state: State, dt: number, dtReal: number): void {
   hint(state, 'start', 'Смена идёт. Тачка — у стойки инвентаря. Всё, что взял, верни на место: утром сменщик примет вольер по чек-листу.');
   const before = dayPart(state.t);
   state.t += dt;
-  // Внутренние поля текущего подшага: их читает FSM-мост (ai/rules), в сейв не попадают
-  state.aiDt = dt;
-  state.aiDtReal = dtReal;
   updateElephants(state, dt, dtReal);
   updateToys(state, dt, dtReal);
   updatePartner(state, dt, dtReal);
