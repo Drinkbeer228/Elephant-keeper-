@@ -53,6 +53,11 @@ export class KeeperView {
     return this.root.y;
   }
 
+  // Таз в руках нарисован по слону — перед сменой стада отпустить его текстуру
+  dropHerdImages(): void {
+    if (this.held.texture.key.startsWith('tub-')) this.held.setTexture('__DEFAULT').setVisible(false);
+  }
+
   update(s: State, dt: number): void {
     const k = s.keeper;
     const moved = Math.hypot(k.x - this.lastX, k.y - this.lastY);

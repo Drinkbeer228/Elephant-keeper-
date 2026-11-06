@@ -156,6 +156,9 @@ export class WorldScene extends Phaser.Scene {
     this.herdKey = key;
     for (const v of this.elephants.values()) v.destroy();
     this.elephants.clear();
+    // Сначала отпустить всё, что рисуется текстурами старого стада, потом заменить текстуры
+    this.world.dropHerdImages();
+    this.keeper.dropHerdImages();
     for (const e of s.elephants) {
       loadElephantArt(this, e.profile);
       this.elephants.set(e.id, new ElephantView(this, e));
