@@ -2,11 +2,16 @@
 // В состоянии нет undefined, Infinity и ссылок — сохранение и загрузка дают побитово то же состояние,
 // а значит, и продолжение смены после загрузки идёт так же, как шло бы без неё.
 // Профили слонов лежат в сейве целиком: загрузка никогда не генерирует характер заново.
+// Сейв прошлой версии (v2) переводится миграцией: недостающие черты и привычки досчитываются
+// один раз из того же seed — так же, как их получило бы новое стадо, — и дальше хранятся в сейве.
 
-import { H, W } from '../data/facility';
-import { SAVE_VERSION } from './state';
+import { HOSE_LENGTH, HOSE_REEL, H, TANK_HOME, TREES, W, areaAt } from '../data/facility';
+import { DIET_IDS, PORRIDGE_SACK_KG, emptyVeg } from '../data/rations';
+import { initialLearned, assignDiets, extraProfile, makeHabits } from './herd';
+import { elephantCanStand, nearestStandable } from './nav';
+import { SAVE_VERSION, cleanBody, emptyChecks, emptyDayStats, freshTrough, rackSpot, vegStockFor } from './state';
 import { clockText, shiftDay } from './time';
-import { TRAIT_KEYS, type ActivityKind, type State } from './types';
+import { ACTIVITY_KINDS, TRAIT_KEYS, type ActivityKind, type ElephantProfile, type State } from './types';
 
 export const SAVE_FORMAT = 'elephant-keeper';
 
@@ -26,7 +31,7 @@ export interface SaveFile {
 
 export type LoadFailure = 'malformed' | 'legacy' | 'newer' | 'old' | 'corrupt';
 
-export type LoadResult = { ok: true; state: State; meta: SaveMeta; savedAt: number } | { ok: false; reason: LoadFailure; detail: string };
+export type LoadResult = { ok: true; state: State; meta: SaveMeta; savedAt: number; migrated: boolean } | { ok: false; reason: LoadFailure; detail: string };
 
 export const LOAD_FAILURE_TEXT: Record<LoadFailure, string> = {
   malformed: 'Файл повреждён или это не сохранение.',
@@ -37,8 +42,100 @@ export const LOAD_FAILURE_TEXT: Record<LoadFailure, string> = {
 };
 
 // Миграции: migrations[v] переводит документ версии v в v+1
-type Migration = (doc: Record<string, unknown>) => Record<string, unknown>;
-const MIGRATIONS: Record<number, Migration> = {};
+type Doc = Record<string, unknown>;
+type Migration = (doc: Doc) => Doc;
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function migrate2to3(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object' || !st.world) return doc;
+  const w = st.world;
+  const cellsN = W * H;
+  // Ворота: одни на выгул; между стойлами — открыты (как было: слоновник был одним помещением)
+  w.gates = { outer: !!w.gateOpen, shift: true };
+  delete w.gateOpen;
+  const hay = w.hay ?? {};
+  w.feeders = {
+    barnRackW: { hay: Math.round((hay.barnRack ?? 0) * 0.5 * 1000) / 1000, straw: 0 },
+    barnRackE: { hay: Math.round((hay.barnRack ?? 0) * 0.5 * 1000) / 1000, straw: 0 },
+    paddockFeeder: { hay: hay.paddockFeeder ?? 0, straw: 0 },
+  };
+  delete w.hay;
+  const water = w.water ?? {};
+  const tr = (x: any) => ({ ...freshTrough(typeof x?.level === 'number' ? x.level : 50, 0.2), valve: !!x?.valve });
+  w.troughs = { barnWaterW: tr(water.barnWater), barnWaterE: tr(water.barnWater), paddockWater: tr(water.paddockWater) };
+  delete w.water;
+  delete w.trough;
+  w.cells = w.cells ?? {};
+  for (const key of ['litter', 'sawdust']) if (!Array.isArray(w.cells[key])) w.cells[key] = new Array(cellsN).fill(0);
+  const mapKind = (k: string) => (k === 'fork' ? 'shovel' : k);
+  w.items = (Array.isArray(w.items) ? w.items : []).map((it: any) => ({ id: it.id, kind: mapKind(it.kind), x: it.x, y: it.y, load: it.kind === 'ration' ? it.portions ?? 0 : 0, aux: 0, owner: null }));
+  const nextId = () => (st.nextId = (st.nextId ?? 1) + 1) - 1;
+  w.items.push({ id: nextId(), kind: 'tank', x: TANK_HOME.x, y: TANK_HOME.y, load: 0, aux: 0, owner: null });
+  const t = w.tools ?? {};
+  w.tools = { shovel: t.fork ?? true, rake: t.rake ?? true, broom: true, mop: true, brush: true };
+  w.barrow = { ...(w.barrow ?? {}), cargo: [] };
+  w.hose = { state: 'reel', path: [{ x: HOSE_REEL.x, y: HOSE_REEL.y }], end: { x: HOSE_REEL.x, y: HOSE_REEL.y }, length: HOSE_LENGTH, damage: 0, chewed: 0 };
+  w.food = (Array.isArray(w.food) ? w.food : []).map((f: any) => ({ ...f, rot: 0 }));
+  const stock = w.stock ?? {};
+  const porridge: Record<string, number> = {};
+  for (const d of DIET_IDS) porridge[d] = PORRIDGE_SACK_KG;
+  const herdN = Array.isArray(st.elephants) ? st.elephants.length : 3;
+  w.stock = { hay: stock.hay ?? 10, straw: stock.straw ?? 6, browse: stock.browse ?? 3, bamboo: 2, sawdust: 3, veg: vegStockFor(st.seed ?? 1, shiftDay(st.t ?? 480), herdN), porridge };
+  w.supplies = { chem: 2, shampoo: 3, tape: 3 };
+  w.checks = emptyChecks();
+  w.trees = Object.fromEntries(TREES.filter((x) => x.fruit).map((x, i) => [x.id, 9 - i * 2]));
+  // Кипер
+  const k = st.keeper ?? {};
+  const h = k.held;
+  if (h && typeof h === 'object') {
+    const kind = mapKind(h.kind);
+    k.held = kind === 'hose' ? null : { kind, load: kind === 'ration' ? h.portions ?? 0 : 0, aux: 0, owner: null };
+  } else k.held = null;
+  k.prep = null;
+  k.carried = 0;
+  st.keeper = k;
+  // Слоны: черты и привычки досчитываем из того же seed, как у нового стада
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  const extras = els.map((e, i) => ({ extra: extraProfile(st.seed ?? 1, i, { age: e.profile?.age ?? 20, traits: e.profile?.traits ?? {} }) }));
+  const diets = assignDiets(els.map((e) => ({ age: e.profile?.age ?? 20, look: e.profile?.look ?? { size: 1 } })));
+  const habits = makeHabits(extras, st.seed ?? 1, diets);
+  els.forEach((e, i) => {
+    const p = e.profile as ElephantProfile;
+    if (p?.traits && typeof p.traits.mischief !== 'number') p.traits.mischief = extras[i].extra.mischief;
+    if (p && !p.habits) p.habits = habits[i];
+    if (e.learned && typeof e.learned.toilet !== 'number') e.learned.toilet = initialLearned(p).toilet;
+    e.body = cleanBody();
+    e.tipsy = 0;
+    e.trunk = { kind: null, amount: 0 };
+    if (e.mem) {
+      e.mem.lastSignalFx = -100;
+      if (e.mem.call) e.mem.call.why = 'call';
+    }
+    e.day = { ...emptyDayStats(), ...(e.day ?? {}) };
+    // Старые цели занятий могут ссылаться на снятые станции — начинаем с «стоит»
+    e.act = { kind: 'idle', target: null, phase: 'do', start: st.t, doStart: st.t, dur: 0, score: 0.1, forced: false, signal: null, note: 'стоит', key: 'idle', aux: null, flag: 0 };
+    e.path = [];
+    e.pathGoal = null;
+    e.lying = false;
+    e.signal = null;
+    // Новая решётка между стойлами и станции у бетонной полосы: сдвинуть, если стоит в них
+    const r = 0.95 * (p?.look?.size ?? 1);
+    const mask = (w.gates.outer ? 1 : 0) | 2;
+    if (!elephantCanStand(e.x, e.y, r, mask)) {
+      const q = nearestStandable({ x: e.x, y: e.y }, r + 0.05, mask);
+      if (q && areaAt(q.x, q.y)) {
+        e.x = q.x;
+        e.y = q.y;
+      }
+    }
+  });
+  w.tubs = els.map((e, i) => ({ id: nextId(), owner: e.id, ...rackSpot(i), heading: 0, where: 'rack', veg: emptyVeg(), emptySince: -1, damage: 0, broken: false, dirty: false }));
+  return { ...doc, version: 3 };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3 };
 
 export function serialize(state: State, savedAt = Date.now()): string {
   const file: SaveFile = {
@@ -59,27 +156,6 @@ function num(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-const ACTIVITIES: ActivityKind[] = [
-  'idle',
-  'wander',
-  'explore',
-  'eat',
-  'drink',
-  'urinate',
-  'defecate',
-  'sleep',
-  'rest',
-  'play',
-  'bathe',
-  'dust',
-  'socialize',
-  'signal',
-  'seekKeeper',
-  'follow',
-  'pace',
-  'avoid',
-];
-
 const NEED_KEYS = ['hunger', 'thirst', 'bladder', 'bowel', 'fatigue', 'boredom', 'social', 'heat', 'stress'];
 
 // Структурная проверка: всё, без чего симуляция упадёт или поведёт себя странно
@@ -94,28 +170,29 @@ export function validateState(s: unknown): string | null {
     ids.add(e.id);
     if (!num(e.x) || !num(e.y) || !num(e.heading)) return `слон ${e.id} без координат`;
     const p = e.profile;
-    if (!isObj(p) || typeof p.name !== 'string' || !isObj(p.traits) || !isObj(p.look)) return `слон ${e.id} без профиля`;
+    if (!isObj(p) || typeof p.name !== 'string' || !isObj(p.traits) || !isObj(p.look) || !isObj(p.habits)) return `слон ${e.id} без профиля`;
     for (const k of TRAIT_KEYS) {
       const v = (p.traits as Record<string, unknown>)[k];
       if (!num(v) || v < 0 || v > 1) return `слон ${e.id}: черта ${k}`;
     }
-    if (!isObj(e.learned) || !num(e.learned.trust) || !num(e.learned.cooperation) || !num(e.learned.expectation)) return `слон ${e.id}: выученное`;
+    const L = e.learned;
+    if (!isObj(L) || !num(L.trust) || !num(L.cooperation) || !num(L.expectation) || !num(L.toilet)) return `слон ${e.id}: выученное`;
     if (!isObj(e.needs)) return `слон ${e.id}: потребности`;
     for (const k of NEED_KEYS) if (!num((e.needs as Record<string, unknown>)[k])) return `слон ${e.id}: потребность ${k}`;
-    if (!isObj(e.act) || !ACTIVITIES.includes(e.act.kind as ActivityKind)) return `слон ${e.id}: занятие`;
-    if (!isObj(e.mem) || !isObj(e.day)) return `слон ${e.id}: память`;
+    if (!isObj(e.act) || !ACTIVITY_KINDS.includes(e.act.kind as ActivityKind)) return `слон ${e.id}: занятие`;
+    if (!isObj(e.mem) || !isObj(e.day) || !isObj(e.body) || !isObj(e.trunk)) return `слон ${e.id}: память`;
   }
   const k = s.keeper;
   if (!isObj(k) || !num(k.x) || !num(k.y) || !num(k.pouch)) return 'нет кипера';
   const w = s.world;
   if (!isObj(w)) return 'нет мира';
   if (!isObj(w.cells)) return 'нет пола';
-  for (const key of ['wet', 'soil', 'bedding']) {
+  for (const key of ['wet', 'soil', 'bedding', 'litter', 'sawdust']) {
     const arr = (w.cells as Record<string, unknown>)[key];
     if (!Array.isArray(arr) || arr.length !== W * H || !arr.every(num)) return `пол: ${key}`;
   }
-  if (!Array.isArray(w.dung) || !Array.isArray(w.food) || !Array.isArray(w.items)) return 'нет предметов';
-  if (!isObj(w.water) || !isObj(w.hay) || !isObj(w.stock) || !isObj(w.barrow)) return 'нет станций';
+  if (!Array.isArray(w.dung) || !Array.isArray(w.food) || !Array.isArray(w.items) || !Array.isArray(w.tubs)) return 'нет предметов';
+  if (!isObj(w.gates) || !isObj(w.feeders) || !isObj(w.troughs) || !isObj(w.stock) || !isObj(w.barrow) || !isObj(w.hose) || !isObj(w.checks)) return 'нет станций';
   if (!Array.isArray(s.journal) || !Array.isArray(s.alerts) || !Array.isArray(s.reports)) return 'нет журнала';
   if (!isObj(s.bonds)) return 'нет отношений';
   return null;
@@ -135,10 +212,15 @@ export function deserialize(json: string): LoadResult {
   let version = doc.version;
   if (version > SAVE_VERSION) return { ok: false, reason: 'newer', detail: `v${version} > v${SAVE_VERSION}` };
   let current: Record<string, unknown> = doc;
+  const migrated = version < SAVE_VERSION;
   while (version < SAVE_VERSION) {
     const m = MIGRATIONS[version];
     if (!m) return { ok: false, reason: 'old', detail: `нет миграции v${version}` };
-    current = m(current);
+    try {
+      current = m(current);
+    } catch (err) {
+      return { ok: false, reason: 'corrupt', detail: `миграция v${version}: ${err instanceof Error ? err.message : err}` };
+    }
     version++;
   }
   const err = validateState(current.state);
@@ -146,5 +228,5 @@ export function deserialize(json: string): LoadResult {
   const state = current.state as State;
   state.version = SAVE_VERSION;
   const meta = isObj(current.meta) ? (current.meta as unknown as SaveMeta) : { day: shiftDay(state.t), clock: clockText(state.t), herd: state.elephants.map((e) => e.profile.name) };
-  return { ok: true, state, meta, savedAt: num(current.savedAt) ? current.savedAt : 0 };
+  return { ok: true, state, meta, savedAt: num(current.savedAt) ? current.savedAt : 0, migrated };
 }

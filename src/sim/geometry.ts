@@ -50,7 +50,7 @@ export const KEEPER_OBSTACLES: Obstacles = {
 export const ELEPHANT_OBSTACLES: Obstacles = {
   rects: [
     ...SOLIDS.map((s) => s.rect),
-    ...Object.values(STATIONS).flatMap((s) => (s.rect && s.zone ? [s.rect] : [])),
+    ...Object.values(STATIONS).flatMap((s) => (s.rect && s.area ? [s.rect] : [])),
   ],
   circles: NATURE_CIRCLES,
   pool: false,
@@ -123,6 +123,34 @@ export class SpatialIndex {
 
 export const keeperIndex = new SpatialIndex(KEEPER_OBSTACLES);
 export const elephantIndex = new SpatialIndex(ELEPHANT_OBSTACLES);
+
+// Стены, ограды и решётки — то, через что не пройдёт лежащий на полу шланг
+export const BARRIER_RECTS: Rect[] = SOLIDS.filter((s) => s.kind === 'wall' || s.kind === 'fence' || s.kind === 'barrier').map((s) => s.rect);
+
+// Пересекает ли отрезок прямоугольник (с небольшим запасом)
+export function segmentHitsRect(ax: number, ay: number, bx: number, by: number, r: Rect, pad = 0): boolean {
+  const x0 = r.x0 - pad;
+  const y0 = r.y0 - pad;
+  const x1 = r.x1 + pad;
+  const y1 = r.y1 + pad;
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const clip = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0;
+    const t = q / p;
+    if (p < 0) {
+      if (t > t1) return false;
+      if (t > t0) t0 = t;
+    } else {
+      if (t < t0) return false;
+      if (t < t1) t1 = t;
+    }
+    return true;
+  };
+  return clip(-dx, ax - x0) && clip(dx, x1 - ax) && clip(-dy, ay - y0) && clip(dy, y1 - ay) && t0 <= t1;
+}
 
 export function angleDiff(a: number, b: number): number {
   let d = b - a;

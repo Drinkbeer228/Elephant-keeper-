@@ -51,6 +51,6 @@ export function log(s: State, severity: Severity, text: string, opts: LogOptions
 }
 
 // Событие без записи в журнал: звук, частицы, анимация
-export function fx(kind: string, x: number, y: number, elephantId: string | null = null): void {
-  emitEvent({ kind, x, y, elephantId, severity: 'info', text: '' });
+export function fx(kind: string, x: number, y: number, elephantId: string | null = null, tag = ''): void {
+  emitEvent(tag ? { kind, x, y, elephantId, severity: 'info', text: '', tag } : { kind, x, y, elephantId, severity: 'info', text: '' });
 }

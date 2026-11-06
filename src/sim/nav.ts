@@ -2,7 +2,7 @@
 // Слон проходит там, где зазор не меньше его радиуса, — поэтому большой слон не
 // протиснется в дверь кипера, а ворота пропустят любого, когда открыты.
 
-import { DOORS, GATE, H, W, inEllipse, POOL, zoneAt, type Rect, type ZoneId } from '../data/facility';
+import { AREA_IDS, DOORS, GATES, H, W, areaAt, inEllipse, POOL, zoneAt, type AreaId, type Rect } from '../data/facility';
 import { distToRect, elephantIndex, keeperIndex, type SpatialIndex } from './geometry';
 import type { Vec } from './types';
 
@@ -37,65 +37,65 @@ function buildField(index: SpatialIndex, extra: Rect[], allow: (x: number, y: nu
 }
 
 // ---------------------------------------------------------------------------
-// Поля зазора для слонов (ворота закрыты / открыты) и для кипера
+// Поля зазора для слонов (по маске открытых ворот) и для кипера
 // ---------------------------------------------------------------------------
 
 const doorRects = DOORS.map((d) => d.rect);
 const inElephantZone = (x: number, y: number) => zoneAt(x, y) !== null;
 
-let elephantFields: { closed: Float32Array; open: Float32Array } | null = null;
-
-function elephantField(gateOpen: boolean): Float32Array {
-  if (!elephantFields) {
-    elephantFields = {
-      closed: buildField(elephantIndex, [GATE, ...doorRects], inElephantZone),
-      open: buildField(elephantIndex, doorRects, inElephantZone),
-    };
-  }
-  return gateOpen ? elephantFields.open : elephantFields.closed;
+function closedGates(mask: number): Rect[] {
+  return GATES.filter((g) => !((g.id === 'outer' ? 1 : 2) & mask)).map((g) => g.rect);
 }
 
-export function elephantClearance(x: number, y: number, gateOpen: boolean): number {
+const elephantFields = new Map<number, Float32Array>();
+
+function elephantField(mask: number): Float32Array {
+  let f = elephantFields.get(mask);
+  if (!f) {
+    f = buildField(elephantIndex, [...closedGates(mask), ...doorRects], inElephantZone);
+    elephantFields.set(mask, f);
+  }
+  return f;
+}
+
+export function elephantClearance(x: number, y: number, mask: number): number {
   if (x < 0 || y < 0 || x >= W || y >= H) return 0;
-  return elephantField(gateOpen)[cellIndex(x, y)];
+  return elephantField(mask)[cellIndex(x, y)];
 }
 
 // Точная проверка позиции слона (между узлами сетки)
-export function elephantCanStand(x: number, y: number, r: number, gateOpen: boolean): boolean {
+export function elephantCanStand(x: number, y: number, r: number, mask: number): boolean {
   if (zoneAt(x, y) === null) return false;
   let d = elephantIndex.clearance(x, y);
-  if (!gateOpen) d = Math.min(d, distToRect(x, y, GATE));
+  for (const g of closedGates(mask)) d = Math.min(d, distToRect(x, y, g));
   for (const door of doorRects) d = Math.min(d, distToRect(x, y, door));
   return d >= r;
 }
 
-// Кипер: двери открыты или заперты — четыре варианта поля, строятся по требованию
+// Кипер: ворота и доступные отсеки (двери открыты, только если отсек пуст) — поле по ключу
 const keeperFields = new Map<string, Float32Array>();
 
 export interface KeeperNavState {
-  gateOpen: boolean;
-  barnDoor: boolean;
-  paddockDoor: boolean;
+  mask: number; // открытые ворота
+  access: AreaId[]; // отсеки, куда кипер может войти
 }
 
 function keeperKey(s: KeeperNavState): string {
-  return `${s.gateOpen ? 1 : 0}${s.barnDoor ? 1 : 0}${s.paddockDoor ? 1 : 0}`;
+  return `${s.mask}:${AREA_IDS.filter((a) => s.access.includes(a)).join(',')}`;
 }
 
 function keeperField(s: KeeperNavState): Float32Array {
   const key = keeperKey(s);
   let f = keeperFields.get(key);
   if (!f) {
-    const extra: Rect[] = [];
-    if (!s.gateOpen) extra.push(GATE);
-    for (const d of DOORS) if (!(d.id === 'barnDoor' ? s.barnDoor : s.paddockDoor)) extra.push(d.rect);
-    const blockedZone = (x: number, y: number) => {
-      const z = zoneAt(x, y);
-      if (z === 'barn' && !s.barnDoor) return false;
-      if (z === 'paddock' && !s.paddockDoor) return false;
+    const extra: Rect[] = [...closedGates(s.mask)];
+    for (const d of DOORS) if (!s.access.includes(d.area)) extra.push(d.rect);
+    const allowed = (x: number, y: number) => {
+      const a = areaAt(x, y);
+      if (a && !s.access.includes(a)) return false;
       return !inEllipse(POOL, x, y, 0.3);
     };
-    f = buildField(keeperIndex, extra, (x, y) => x > 0.5 && y > 0.5 && x < W - 0.5 && y < H - 0.5 && blockedZone(x, y));
+    f = buildField(keeperIndex, extra, (x, y) => x > 0.5 && y > 0.5 && x < W - 0.5 && y < H - 0.5 && allowed(x, y));
     keeperFields.set(key, f);
   }
   return f;
@@ -274,11 +274,11 @@ function poolCost(i: number): number {
 }
 
 // Маршрут слона от точки к точке; null — недостижимо (например, ворота закрыты)
-export function elephantRoute(from: Vec, to: Vec, radius: number, gateOpen: boolean): Vec[] | null {
-  const field = elephantField(gateOpen);
+export function elephantRoute(from: Vec, to: Vec, radius: number, mask: number): Vec[] | null {
+  const field = elephantField(mask);
   const need = Math.round(radius * 20) / 20;
   if (lineClear(field, from, to, need) && field[cellIndex(to.x, to.y)] >= need) return [to];
-  const key = `${cellIndex(from.x, from.y)}:${cellIndex(to.x, to.y)}:${need}:${gateOpen ? 1 : 0}`;
+  const key = `${cellIndex(from.x, from.y)}:${cellIndex(to.x, to.y)}:${need}:${mask}`;
   let path = pathCache.get(key);
   if (path === undefined) {
     path = astar(field, from, to, need, poolCost);
@@ -304,34 +304,30 @@ export function keeperFieldAt(x: number, y: number, s: KeeperNavState): number {
 }
 
 // Ближайшая точка, где слон с таким радиусом может стоять
-export function nearestStandable(p: Vec, radius: number, gateOpen: boolean): Vec | null {
-  const field = elephantField(gateOpen);
+export function nearestStandable(p: Vec, radius: number, mask: number): Vec | null {
+  const field = elephantField(mask);
   const i = nearestOpen(field, cellIndex(p.x, p.y), radius);
   if (i < 0) return null;
   if (field[cellIndex(p.x, p.y)] >= radius) return { x: p.x, y: p.y };
   return cellCenter(i);
 }
 
-// Достижимы ли зоны друг из друга
-export function zonesConnected(a: ZoneId, b: ZoneId, gateOpen: boolean): boolean {
-  return a === b || gateOpen;
-}
-
 // Случайные точки по зоне выбирают из списка открытых клеток — заранее посчитанного
 const openCellsCache = new Map<string, Vec[]>();
 
-export function openCells(zone: ZoneId, radius: number): Vec[] {
+// Свободные клетки отсека (при закрытых воротах), где слон такого размера может стоять
+export function openCells(area: AreaId, radius: number): Vec[] {
   // Поле зазора ограничено ~1.2 м, поэтому порог тоже ограничиваем: иначе крупной слонихе «негде встать»
   const need = Math.min(1.15, Math.round(radius * 10) / 10);
-  const key = `${zone}:${need}`;
+  const key = `${area}:${need}`;
   let list = openCellsCache.get(key);
   if (!list) {
-    const field = elephantField(false);
+    const field = elephantField(0);
     list = [];
     for (let i = 0; i < field.length; i++) {
       if (field[i] < need) continue;
       const c = cellCenter(i);
-      if (zoneAt(c.x, c.y) === zone) list.push(c);
+      if (areaAt(c.x, c.y) === area) list.push(c);
     }
     openCellsCache.set(key, list);
   }

@@ -926,17 +926,52 @@ export function drawIcon(ctx: Ctx, icon: string, tint: string): void {
   }
 }
 
+// Текст на текстуре: шрифт задаётся в настоящих пикселях без масштабирования холста.
+// Дробные размеры шрифта вроде 0.3px под transform Safari округляет — надписи обрезались.
+function pixelFont(weight: number, meters: number): { font: string; px: number } {
+  const px = Math.round(meters * TEX);
+  return { font: `${weight} ${px}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`, px };
+}
+
+function measure(font: string, text: string, spacing: number): number {
+  const probe = document.createElement('canvas').getContext('2d')!;
+  probe.font = font;
+  let w = 0;
+  for (const ch of text) w += probe.measureText(ch).width + spacing;
+  return Math.max(0, w - spacing);
+}
+
+// Строка по центру точки (cx, cy) в пикселях холста, по реальным границам глифов
+function centeredText(ctx: Ctx, text: string, font: string, cx: number, cy: number, spacing: number, color: string): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const m = ctx.measureText(text);
+  const asc = m.actualBoundingBoxAscent || parseFloat(font.split(' ')[1]) * 0.72;
+  const desc = m.actualBoundingBoxDescent || 0;
+  let x = cx - measure(font, text, spacing) / 2;
+  const y = cy + (asc - desc) / 2;
+  for (const ch of text) {
+    ctx.fillText(ch, x, y);
+    x += ctx.measureText(ch).width + spacing;
+  }
+  ctx.restore();
+}
+
 // Подпись-плашка с именем
 export function namePill(name: string, color: string): Art {
-  const font = '600 0.27px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-  const probe = document.createElement('canvas').getContext('2d')!;
-  probe.font = font.replace('0.27px', `${0.27 * TEX}px`);
-  const tw = probe.measureText(name).width / TEX;
-  const w = tw + 0.62;
-  const h = 0.46;
-  return draw(w + 0.1, h + 0.1, (w + 0.1) / 2, (h + 0.1) / 2, (ctx) => {
+  const { font } = pixelFont(600, 0.28);
+  const tw = measure(font, name, 0) / TEX;
+  const w = tw + 0.66;
+  const h = 0.5;
+  const cw = w + 0.12;
+  const ch = h + 0.12;
+  return draw(cw, ch, cw / 2, ch / 2, (ctx) => {
     rrect(ctx, -w / 2, -h / 2, w, h, h / 2);
-    ctx.fillStyle = 'rgba(244,241,234,0.94)';
+    ctx.fillStyle = 'rgba(244,241,234,0.95)';
     ctx.fill();
     ctx.lineWidth = 0.03;
     ctx.strokeStyle = C.ink;
@@ -944,37 +979,25 @@ export function namePill(name: string, color: string): Art {
     ellipse(ctx, -w / 2 + 0.2, 0, 0.075, 0.075);
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.fillStyle = C.ink;
-    ctx.font = font;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(name, -w / 2 + 0.34, 0.012);
+    centeredText(ctx, name, font, (cw / 2 + 0.17) * TEX, (ch / 2) * TEX, 0, C.ink);
   });
 }
 
 // Табличка помещения — тёмная, как вывески в референсе, но своя
 export function roomSign(text: string): Art {
-  const font = '700 0.32px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-  const probe = document.createElement('canvas').getContext('2d')!;
-  probe.font = font.replace('0.32px', `${0.32 * TEX}px`);
+  const { font, px } = pixelFont(700, 0.32);
   const label = text.toUpperCase();
-  const tw = (probe.measureText(label).width / TEX) * 1.12;
+  const spacing = px * 0.12;
+  const tw = measure(font, label, spacing) / TEX;
   const w = tw + 0.8;
-  const h = 0.56;
-  return draw(w + 0.1, h + 0.1, (w + 0.1) / 2, (h + 0.1) / 2, (ctx) => {
+  const h = 0.62;
+  const cw = w + 0.12;
+  const ch = h + 0.12;
+  return draw(cw, ch, cw / 2, ch / 2, (ctx) => {
     rrect(ctx, -w / 2, -h / 2, w, h, 0.12);
     ctx.fillStyle = C.ink;
     ctx.fill();
-    ctx.fillStyle = C.paper;
-    ctx.font = font;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    // Немного разрядки, как на вывеске
-    let x = -tw / 2;
-    for (const ch of label) {
-      const cw = (probe.measureText(ch).width / TEX) * 1.12;
-      ctx.fillText(ch, x + cw / 2, 0.015);
-      x += cw;
-    }
+    centeredText(ctx, label, font, (cw / 2) * TEX, (ch / 2) * TEX, spacing, C.paper);
   });
 }
 

@@ -1,12 +1,20 @@
 import Phaser from 'phaser';
-import type { State } from '../sim';
-import { STATIONS } from '../data/facility';
+import type { Held, State } from '../sim';
 import { D } from './ground';
 import { C, hex } from './palette';
 import { ART_SCALE, originOf, PPM } from './textures';
 
 const P = PPM;
-const REEL = { x: 30.6, y: 22.6 };
+
+function heldKey(h: Held): string {
+  if (h.kind === 'tank') return h.load > 0 ? 'item-tank-full' : h.aux ? 'item-tank-dirty' : 'item-tank';
+  if (h.kind === 'porridge') return h.load > 0 ? 'item-porridge' : 'item-porridge-empty';
+  if (h.kind === 'tub') return `tub-${h.owner}`;
+  return `item-${h.kind}`;
+}
+
+const LONG = new Set(['shovel', 'rake', 'broom', 'mop']);
+const BULKY = new Set(['hay', 'straw', 'sawdust', 'bamboo', 'browse']);
 
 // Кипер: вид сверху — плечи в форме, кепка, руки с вещью; шаги и рабочий таймер
 export class KeeperView {
@@ -14,25 +22,23 @@ export class KeeperView {
   private shadow: Phaser.GameObjects.Image;
   private feet: Phaser.GameObjects.Graphics;
   private held: Phaser.GameObjects.Image;
-  private hose: Phaser.GameObjects.Graphics;
   private progress: Phaser.GameObjects.Graphics;
   private facing = 0;
   private phase = 0;
   private lastX = 0;
   private lastY = 0;
 
-  constructor(scene: Phaser.Scene, s: State) {
+  constructor(private scene: Phaser.Scene, s: State) {
     const img = (key: string) => {
       const o = originOf(key);
       return scene.add.image(0, 0, key).setOrigin(o.ox, o.oy).setScale(ART_SCALE);
     };
     this.shadow = img('shadow-keeper').setDepth(D.shadow).setScale(ART_SCALE * 1.3);
     this.feet = scene.add.graphics();
-    this.held = img('item-fork').setVisible(false);
+    this.held = img('item-shovel').setVisible(false);
     const body = img('keeper-body');
     const head = img('keeper-head');
     this.root = scene.add.container(s.keeper.x * P, s.keeper.y * P, [this.feet, this.held, body, head]).setScale(1.3);
-    this.hose = scene.add.graphics().setDepth(D.actor - 0.5);
     this.progress = scene.add.graphics().setDepth(D.marker);
     this.facing = s.keeper.facing;
     this.lastX = s.keeper.x;
@@ -71,26 +77,15 @@ export class KeeperView {
     // Вещь в руках
     const h = k.held;
     if (h) {
-      const key = `item-${h.kind}`;
-      const o = originOf(key);
-      this.held.setTexture(key).setOrigin(o.ox, o.oy).setVisible(true);
-      const tool = h.kind === 'fork' || h.kind === 'rake';
-      this.held.setPosition((tool ? 0.55 : h.kind === 'hose' ? 0.32 : 0.42) * P, 0).setScale(ART_SCALE * (h.kind === 'hay' || h.kind === 'straw' ? 0.85 : 1));
+      const key = heldKey(h);
+      if (this.scene.textures.exists(key)) {
+        const o = originOf(key);
+        this.held.setTexture(key).setOrigin(o.ox, o.oy).setVisible(true);
+        const x = LONG.has(h.kind) ? 0.55 : h.kind === 'hose' ? 0.32 : h.kind === 'tub' ? 0.55 : 0.42;
+        const scale = BULKY.has(h.kind) ? 0.85 : h.kind === 'tub' ? 0.7 : 1;
+        this.held.setPosition(x * P, 0).setScale(ART_SCALE * scale);
+      } else this.held.setVisible(false);
     } else this.held.setVisible(false);
-
-    // Шланг тянется от катушки
-    this.hose.clear();
-    if (h?.kind === 'hose') {
-      const hx = k.x + Math.cos(this.facing) * 0.3;
-      const hy = k.y + Math.sin(this.facing) * 0.3;
-      const mx = (REEL.x + hx) / 2;
-      const my = (REEL.y + hy) / 2 + Math.min(1.6, Math.hypot(hx - REEL.x, hy - REEL.y) * 0.12);
-      const curve = new Phaser.Curves.QuadraticBezier(new Phaser.Math.Vector2(REEL.x * P, REEL.y * P), new Phaser.Math.Vector2(mx * P, my * P), new Phaser.Math.Vector2(hx * P, hy * P));
-      this.hose.lineStyle(0.11 * P, hex(C.ink), 1);
-      curve.draw(this.hose, 24);
-      this.hose.lineStyle(0.07 * P, hex(C.sageMid), 1);
-      curve.draw(this.hose, 24);
-    }
 
     // Работа идёт: кольцо прогресса над головой
     this.progress.clear();
@@ -109,5 +104,3 @@ export class KeeperView {
     }
   }
 }
-
-export const KEEPER_STATIONS = STATIONS;

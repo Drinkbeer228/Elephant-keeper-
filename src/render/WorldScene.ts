@@ -1,6 +1,8 @@
 // Главная сцена: строит мир из текстур и векторной графики и каждый кадр показывает состояние симуляции.
 
 import Phaser from 'phaser';
+import { SIGNS, SIGN_SCALE } from './ground';
+import { labelScale, setLabelZoom } from './labels';
 import { H, W } from '../data/facility';
 import type { SimEvent, State } from '../sim';
 import { ElephantView } from './ElephantView';
@@ -171,7 +173,11 @@ export class WorldScene extends Phaser.Scene {
     const events = this.hooks.frame(dt);
     const s = this.hooks.getState();
     this.rebuildHerd(s);
-    for (const ev of events) this.fx.handle(ev);
+    for (const ev of events) {
+      this.fx.handle(ev);
+      if (ev.kind.startsWith('stomp:') && ev.elephantId) this.elephants.get(ev.elephantId)?.stomp(ev.kind.slice(6));
+      if (ev.kind === 'shake') this.world.shakeTree(ev.x, ev.y);
+    }
     const t = time / 1000;
     const sel = this.hooks.selected();
     const names = this.hooks.showNames();
@@ -197,5 +203,9 @@ export class WorldScene extends Phaser.Scene {
     const want = this.overview ? this.fitZoom() : this.baseZoom() * this.targetZoom;
     this.zoomLevel += (want - this.zoomLevel) * Math.min(1, dt * 7);
     cam.setZoom(this.zoomLevel);
+    // Подписи — читаемого размера при любом зуме
+    setLabelZoom(this.zoomLevel / this.baseZoom());
+    const ls = SIGN_SCALE * labelScale();
+    for (const sign of SIGNS) if (sign.scaleX !== ls) sign.setScale(ls);
   }
 }

@@ -1,5 +1,7 @@
+import v2save from './fixtures/save-v2.json?raw';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { deserialize, serialize, runMinutes, step, saveSlot, loadSlot, slotInfo, legacyKeys, clearLegacy, validateState, type State } from '../src/sim';
+import { deserialize, serialize, runMinutes, step, saveSlot, loadSlot, slotInfo, legacyKeys, clearLegacy, validateState, SAVE_VERSION, type State } from '../src/sim';
+import { AREA_IDS, areaAt } from '../src/data/facility';
 import { game, walk } from './helpers';
 
 class MemoryStorage {
@@ -95,6 +97,39 @@ describe('сохранение и загрузка', () => {
     noCells.state.world.cells.wet = [1, 2];
     expect(validateState(noCells.state)).toMatch(/пол/);
     expect(deserialize(JSON.stringify({ format: 'something-else', version: 2 })).ok).toBe(false);
+  });
+
+  it('сейв прошлой версии (v2, записан прежней сборкой) переносится: стадо и выученное сохраняются, новое — дописано', () => {
+    const text = v2save;
+    const old = JSON.parse(text) as { version: number; state: { elephants: { id: string; profile: { name: string; traits: Record<string, number> }; learned: { trust: number } }[]; world: { gateOpen: boolean } } };
+    expect(old.version).toBe(2);
+    const res = deserialize(text);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.migrated).toBe(true);
+    const s = res.state;
+    expect(s.version).toBe(SAVE_VERSION);
+    // Те же слоны, тот же характер и доверие
+    expect(s.elephants.map((e) => e.profile.name)).toEqual(old.state.elephants.map((e) => e.profile.name));
+    s.elephants.forEach((e, i) => {
+      expect(e.profile.traits.confidence).toBe(old.state.elephants[i].profile.traits.confidence);
+      expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
+      // Новые черты и привычки — постоянные, из seed: проказливость, манера звать, свисток
+      expect(e.profile.traits.mischief).toBeGreaterThanOrEqual(0);
+      expect(e.profile.habits.whistle.f0).toBeGreaterThan(0);
+      expect(AREA_IDS).toContain(areaAt(e.x, e.y) ?? 'paddock');
+    });
+    expect(s.world.gates.outer).toBe(old.state.world.gateOpen);
+    expect(s.world.tubs).toHaveLength(s.elephants.length);
+    expect(validateState(s)).toBeNull();
+    // Повторная загрузка того же файла даёт то же самое (перенос детерминирован)
+    const again = deserialize(text);
+    expect(again.ok && serialize(again.state, 1)).toBe(serialize(s, 1));
+    // И смена идёт дальше без поломок
+    runMinutes(s, 120);
+    expect(validateState(s)).toBeNull();
+    const round = deserialize(serialize(s));
+    expect(round.ok).toBe(true);
   });
 
   it('слоты localStorage: сохранить, прочитать сводку, загрузить', () => {

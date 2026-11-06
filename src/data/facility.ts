@@ -1,19 +1,22 @@
 // Канонический план слоновника. 1 единица = 1 метр, ось y направлена вниз.
 //
-//   y=2  ┌──────────────────────── ВЫГУЛ (песок, трава) ───────────────────────┐
-//        │ пылевая яма     дерево            бревно    бассейн           дерево │
-//   y=20 ├─поилка─┬──────ворота──── СЛОНОВНИК ────────┬─кормушка──дверь───────┤
-//        │ западный│  подстилка (песок+солома)          │ восточный двор:        │
-//        │ двор:   │                                    │ шланг, контейнер       │
-//        │ пульт   │  бетонная полоса у решётки         │ для навоза             │
-//   y=30 │ ворот   └─сенник─кормушка─стенка+сток──────┘                         │
-//        ├───────────────────── СЛУЖЕБНЫЙ КОРИДОР ───────────────────────────────┤
-//   y=33 ├─ДЕЖУРКА─┬─КУХНЯ─────┬─ИНВЕНТАРНАЯ─┬─СЕННИК──────────────────────────┤
-//   y=40 └─────────┴───────────┴─────────────┴─────────────────────────────────┘
+//   y=2  ┌──────────────────────── ВЫГУЛ (трава, песок) ───────────────────────┐
+//        │ пылевая яма   яблоня             бревно    бассейн           яблоня  │
+//   y=20 ├─поилка─┬──ворота──┬──────────────┬─кормушка──дверь────────────────────┤
+//        │ западный│ ЗАПАДНОЕ │ ВОСТОЧНОЕ     │ восточный двор:                    │
+//        │ двор    │ СТОЙЛО  ворота СТОЙЛО    дверь шланг, контейнер             │
+//        │         │ подстилка│ подстилка     │                                    │
+//        │         │ бетон: сенник, поилка │ сенник, стенка+сток, поилка          │
+//   y=30 │         └═решётка═дверь═пульт═решётка═дверь════┘                       │
+//        ├──────────── ПРОХОД КИПЕРА (внутри слоновника) · КОРИДОР ───────────────┤
+//   y=33 ├─ДЕЖУРКА─┬─КОРМОКУХНЯ─┬─ИНВЕНТАРНАЯ─┬─СЕННИК───────────────────────────┤
+//   y=40 └─────────┴────────────┴─────────────┴──────────────────────────────────┘
 //
-// Слоны живут в двух зонах — выгул и слоновник, — соединённых воротами.
-// Кипер работает в защищённом контакте: входит в зону, только когда в ней (и во всём,
-// что с ней соединено открытыми воротами) нет слонов.
+// Слоны живут в трёх отсеках: выгул и два стойла слоновника. Отсеки соединяют ворота:
+// «на выгул» (западное стойло ↔ выгул) и «между стойлами». Между стойлами и проходом
+// кипера — решётка защищённого контакта: через неё кормят, чешут, моют и зовут.
+// Кипер входит в стойло или на выгул по своей двери, только если в этом отсеке и во всём,
+// что с ним соединено открытыми воротами, нет слонов. Проход кипера доступен всегда.
 
 export interface Point {
   x: number;
@@ -40,9 +43,14 @@ export interface Ellipse {
   ry: number;
 }
 
+// Зона — вид места для поведения (внутри или снаружи); отсек — физическая часть вольера
 export type ZoneId = 'paddock' | 'barn';
+export type AreaId = 'paddock' | 'stallW' | 'stallE';
+export type GateId = 'outer' | 'shift';
 
-// wall — капитальная стена; fence — ограда выгула; barrier — решётка слоновника (через неё работают руками и хоботом)
+export const AREA_IDS: AreaId[] = ['paddock', 'stallW', 'stallE'];
+
+// wall — капитальная стена; fence — ограда выгула; barrier — решётка (через неё работают руками и хоботом)
 export type SolidKind = 'wall' | 'fence' | 'barrier' | 'furniture' | 'nature';
 
 export interface Solid {
@@ -79,40 +87,91 @@ function vline(x: number, y0: number, y1: number, th: number, gaps: [number, num
 }
 
 // ---------------------------------------------------------------------------
-// Зоны
+// Зоны и отсеки
 // ---------------------------------------------------------------------------
 
 export const PADDOCK: Rect = { x0: 2, y0: 2, x1: 46, y1: 20 };
 export const BARN: Rect = { x0: 10, y0: 20, x1: 30, y1: 30 };
+export const STALL_W: Rect = { x0: 10, y0: 20, x1: 20, y1: 30 };
+export const STALL_E: Rect = { x0: 20, y0: 20, x1: 30, y1: 30 };
 export const ZONES: Record<ZoneId, Rect> = { paddock: PADDOCK, barn: BARN };
+export const AREAS: Record<AreaId, Rect> = { paddock: PADDOCK, stallW: STALL_W, stallE: STALL_E };
+export const AREA_ZONE: Record<AreaId, ZoneId> = { paddock: 'paddock', stallW: 'barn', stallE: 'barn' };
+export const AREA_LABEL: Record<AreaId, string> = { paddock: 'выгул', stallW: 'западное стойло', stallE: 'восточное стойло' };
 
-// Подстилка в слоновнике: песок с соломой; остальное — бетонная полоса у решётки и у двери
-export const BEDDING: Rect = { x0: 10, y0: 20, x1: 26, y1: 27 };
+// Проход кипера внутри слоновника — часть служебного коридора вдоль решётки
+export const AISLE: Rect = { x0: 10, y0: 30, x1: 30, y1: 33 };
 
-// Ворота слоновник ↔ выгул в северной стене слоновника
-export const GATE: Rect = { x0: 17.5, y0: 19.75, x1: 22.5, y1: 20.25 };
+// Подстилка покрывает стойла целиком; вдоль решётки — бетонная полоса для кормушек, поилок и стока
+export const BEDDING: Rect = { x0: 10, y0: 20, x1: 30, y1: 27.4 };
+export const SERVICE_EDGE_Y = 27.4;
 
-// Двери кипера: узкие (слон в них не проходит), открываются, только если за ними нет слонов
-export interface DoorDef {
-  id: 'barnDoor' | 'paddockDoor';
+// Ворота: сдвижные створки, ими управляет пульт в проходе кипера
+export interface GateDef {
+  id: GateId;
   rect: Rect;
-  zone: ZoneId;
+  a: AreaId;
+  b: AreaId;
   label: string;
+  vertical: boolean; // створка вдоль оси y (ворота между стойлами)
+  approach: Record<string, { x: number; y: number; face: number }>; // где встаёт слон, чтобы пройти или ждать
+}
+
+export const GATES: GateDef[] = [
+  {
+    id: 'outer',
+    rect: { x0: 13.5, y0: 19.75, x1: 17.5, y1: 20.25 },
+    a: 'stallW',
+    b: 'paddock',
+    label: 'Ворота на выгул',
+    vertical: false,
+    approach: { stallW: { x: 15.5, y: 22.45, face: -Math.PI / 2 }, paddock: { x: 15.5, y: 17.55, face: Math.PI / 2 } },
+  },
+  {
+    id: 'shift',
+    rect: { x0: 19.85, y0: 21.4, x1: 20.15, y1: 25.4 },
+    a: 'stallW',
+    b: 'stallE',
+    label: 'Ворота между стойлами',
+    vertical: true,
+    approach: { stallW: { x: 17.6, y: 23.4, face: 0 }, stallE: { x: 22.4, y: 23.4, face: Math.PI } },
+  },
+];
+
+export const GATE_BY_ID: Record<GateId, GateDef> = { outer: GATES[0], shift: GATES[1] };
+
+// Двери кипера: узкие (слон в них не проходит), открываются, только если отсек за ними пуст
+export type DoorId = 'doorW' | 'doorE' | 'barnDoor' | 'paddockDoor';
+
+export interface DoorDef {
+  id: DoorId;
+  rect: Rect;
+  area: AreaId;
+  label: string;
+  light: Point; // огонёк «можно / нельзя»
 }
 
 export const DOORS: DoorDef[] = [
-  { id: 'barnDoor', rect: { x0: 29.8, y0: 26.8, x1: 30.2, y1: 28.3 }, zone: 'barn', label: 'Дверь в слоновник' },
-  { id: 'paddockDoor', rect: { x0: 40.9, y0: 19.85, x1: 42.4, y1: 20.15 }, zone: 'paddock', label: 'Дверь на выгул' },
+  { id: 'doorW', rect: { x0: 14.6, y0: 29.85, x1: 15.8, y1: 30.15 }, area: 'stallW', label: 'Дверь в западное стойло', light: { x: 16.15, y: 30.45 } },
+  { id: 'doorE', rect: { x0: 24.6, y0: 29.85, x1: 25.8, y1: 30.15 }, area: 'stallE', label: 'Дверь в восточное стойло', light: { x: 24.25, y: 30.45 } },
+  { id: 'barnDoor', rect: { x0: 29.8, y0: 26.8, x1: 30.2, y1: 28.3 }, area: 'stallE', label: 'Дверь в стойло со двора', light: { x: 30.45, y: 26.4 } },
+  { id: 'paddockDoor', rect: { x0: 40.9, y0: 19.85, x1: 42.4, y1: 20.15 }, area: 'paddock', label: 'Дверь на выгул', light: { x: 43.0, y: 20.45 } },
 ];
 
 // ---------------------------------------------------------------------------
 // Стены, ограды и решётки
 // ---------------------------------------------------------------------------
 
-const barnNorth = hline(10, 30, 20, WALL, [[17.5, 22.5]]);
+const barnNorth = hline(10, 30, 20, WALL, [[13.5, 17.5]]);
 const barnWest = vline(10, 20, 30, WALL);
 const barnEast = vline(30, 20, 30, WALL, [[26.8, 28.3]]);
-const barnSouth = hline(10, 30, 30, FENCE); // решётка: кипер работает через неё
+// Решётка защищённого контакта между стойлами и проходом кипера (с дверями)
+const barnSouth = hline(10, 30, 30, FENCE, [
+  [14.6, 15.8],
+  [24.6, 25.8],
+]);
+// Решётка между стойлами: слоны видят и касаются друг друга хоботами
+const stallRail = vline(20, 20.2, 29.85, FENCE, [[21.4, 25.4]]);
 
 const paddockFence = [
   ...hline(2, 46, 2, FENCE),
@@ -126,7 +185,7 @@ const paddockFence = [
 const outer = [...vline(2, 20, 40, WALL), ...vline(46, 20, 40, WALL), ...hline(2, 46, 40, WALL)];
 const roomsNorth = hline(2, 46, 33, WALL, [
   [6, 7.6],
-  [16, 17.6],
+  [15.2, 16.8],
   [28.5, 30.5],
   [38.5, 41],
 ]);
@@ -137,15 +196,16 @@ export const SOLIDS: Solid[] = [
   ...barnWest.map((rect) => ({ rect, kind: 'wall' as const })),
   ...barnEast.map((rect) => ({ rect, kind: 'wall' as const })),
   ...barnSouth.map((rect) => ({ rect, kind: 'barrier' as const })),
+  ...stallRail.map((rect) => ({ rect, kind: 'barrier' as const })),
   ...paddockFence.map((rect) => ({ rect, kind: 'fence' as const })),
   ...outer.map((rect) => ({ rect, kind: 'wall' as const })),
   ...roomsNorth.map((rect) => ({ rect, kind: 'wall' as const })),
   ...partitions.map((rect) => ({ rect, kind: 'wall' as const })),
 ];
 
-// Отрезки, через которые кипер и слон тянутся друг к другу (решётка слоновника и ограда выгула со стороны дворов)
+// Отрезки, через которые кипер и слон тянутся друг к другу (решётка стойл и ограда выгула со стороны дворов)
 export interface ContactLine {
-  zone: ZoneId;
+  area: AreaId;
   x0: number;
   y0: number;
   x1: number;
@@ -154,35 +214,45 @@ export interface ContactLine {
 }
 
 export const CONTACT_LINES: ContactLine[] = [
-  { zone: 'barn', x0: 10.3, y0: 30, x1: 29.7, y1: 30, keeperSide: 1 },
-  { zone: 'paddock', x0: 2.3, y0: 20, x1: 9.7, y1: 20, keeperSide: 1 },
-  { zone: 'paddock', x0: 30.3, y0: 20, x1: 45.7, y1: 20, keeperSide: 1 },
+  { area: 'stallW', x0: 10.3, y0: 30, x1: 19.7, y1: 30, keeperSide: 1 },
+  { area: 'stallE', x0: 20.3, y0: 30, x1: 29.7, y1: 30, keeperSide: 1 },
+  { area: 'paddock', x0: 2.3, y0: 20, x1: 9.7, y1: 20, keeperSide: 1 },
+  { area: 'paddock', x0: 30.3, y0: 20, x1: 45.7, y1: 20, keeperSide: 1 },
 ];
 
 // ---------------------------------------------------------------------------
 // Станции: всё, с чем работает кипер и чем пользуются слоны
 // ---------------------------------------------------------------------------
 
+export type FeederId = 'barnRackW' | 'barnRackE' | 'paddockFeeder';
+export type TroughId = 'barnWaterW' | 'barnWaterE' | 'paddockWater';
+export const FEEDER_IDS: FeederId[] = ['barnRackW', 'barnRackE', 'paddockFeeder'];
+export const TROUGH_IDS: TroughId[] = ['barnWaterW', 'barnWaterE', 'paddockWater'];
+
 export type StationId =
-  | 'barnRack'
-  | 'barnTrough'
+  | FeederId
+  | TroughId
   | 'trainingWall'
-  | 'barnWater'
-  | 'paddockWater'
-  | 'paddockFeeder'
+  | 'gatePanel'
   | 'poolValve'
-  | 'gateControl'
   | 'hoseReel'
   | 'container'
   | 'toolRack'
   | 'barrowHome'
   | 'desk'
-  | 'shelf'
+  | 'vegShelf'
   | 'prepTable'
   | 'fridge'
+  | 'tubRack'
+  | 'porridgeStation'
+  | 'kitchenSink'
+  | 'washSink'
+  | 'cabinet'
   | 'hayStack'
   | 'strawStack'
-  | 'browsePile';
+  | 'browsePile'
+  | 'bambooPile'
+  | 'sawdustPile';
 
 export interface Slot {
   x: number;
@@ -195,91 +265,110 @@ export interface StationDef {
   label: string;
   keeper: Point; // где стоит кипер, чтобы работать со станцией
   rect?: Rect; // твёрдое основание станции
-  zone?: ZoneId; // зона слонов, к которой относится станция
+  area?: AreaId; // отсек слонов, к которому относится станция
   slots?: Slot[]; // места для слонов
   reach?: Point; // куда тянется хобот (для отрисовки)
+  valve?: Point; // кран (для поилок)
 }
 
 const S = Math.PI / 2; // смотрит на юг (+y)
-const Wst = Math.PI;
 
 export const STATIONS: Record<StationId, StationDef> = {
-  barnRack: {
-    id: 'barnRack',
-    label: 'Сенник в слоновнике',
-    keeper: { x: 14, y: 31.0 },
-    rect: { x0: 12, y0: 29.15, x1: 16, y1: 29.85 },
-    zone: 'barn',
+  barnRackW: {
+    id: 'barnRackW',
+    label: 'Сенник западного стойла',
+    keeper: { x: 12.4, y: 31.0 },
+    rect: { x0: 10.4, y0: 29.15, x1: 14.4, y1: 29.85 },
+    area: 'stallW',
     slots: [
-      { x: 13, y: 27.3, face: S },
-      { x: 15.2, y: 27.3, face: S },
+      { x: 11.5, y: 27.35, face: S },
+      { x: 13.6, y: 27.35, face: S },
     ],
-    reach: { x: 14, y: 29.4 },
+    reach: { x: 12.4, y: 29.4 },
   },
-  barnTrough: {
-    id: 'barnTrough',
-    label: 'Кормушка для овощей',
-    keeper: { x: 19.5, y: 31.0 },
-    rect: { x0: 18.5, y0: 29.2, x1: 20.5, y1: 29.85 },
-    zone: 'barn',
-    slots: [{ x: 19.5, y: 27.35, face: S }],
-    reach: { x: 19.5, y: 29.45 },
-  },
-  trainingWall: {
-    id: 'trainingWall',
-    label: 'Тренировочная стенка и сток',
-    keeper: { x: 24, y: 31.0 },
-    zone: 'barn',
-    slots: [{ x: 24, y: 27.6, face: S }],
-    reach: { x: 24, y: 29.7 },
-  },
-  barnWater: {
-    id: 'barnWater',
-    label: 'Поилка в слоновнике',
-    keeper: { x: 8.9, y: 24 },
-    rect: { x0: 10.2, y0: 22.4, x1: 11.0, y1: 25.6 },
-    zone: 'barn',
+  barnRackE: {
+    id: 'barnRackE',
+    label: 'Сенник восточного стойла',
+    keeper: { x: 22.4, y: 31.0 },
+    rect: { x0: 20.4, y0: 29.15, x1: 24.4, y1: 29.85 },
+    area: 'stallE',
     slots: [
-      { x: 12.9, y: 22.9, face: Wst },
-      { x: 12.9, y: 25.1, face: Wst },
+      { x: 21.4, y: 27.35, face: S },
+      { x: 23.5, y: 27.35, face: S },
     ],
-    reach: { x: 10.6, y: 24 },
-  },
-  paddockWater: {
-    id: 'paddockWater',
-    label: 'Поилка на выгуле',
-    keeper: { x: 5.5, y: 21.1 },
-    rect: { x0: 3.6, y0: 19.0, x1: 7.4, y1: 19.85 },
-    zone: 'paddock',
-    slots: [
-      { x: 4.4, y: 17.15, face: S },
-      { x: 6.6, y: 17.15, face: S },
-    ],
-    reach: { x: 5.5, y: 19.4 },
+    reach: { x: 22.4, y: 29.4 },
   },
   paddockFeeder: {
     id: 'paddockFeeder',
     label: 'Кормушка на выгуле',
     keeper: { x: 35, y: 21.1 },
     rect: { x0: 33, y0: 19.0, x1: 37, y1: 19.85 },
-    zone: 'paddock',
+    area: 'paddock',
     slots: [
       { x: 33.95, y: 17.15, face: S },
       { x: 36.1, y: 17.15, face: S },
     ],
     reach: { x: 35, y: 19.4 },
   },
+  barnWaterW: {
+    id: 'barnWaterW',
+    label: 'Поилка западного стойла',
+    keeper: { x: 17.45, y: 31.0 },
+    rect: { x0: 16.0, y0: 28.95, x1: 18.9, y1: 29.8 },
+    area: 'stallW',
+    slots: [
+      { x: 16.6, y: 27.25, face: S },
+      { x: 18.65, y: 27.25, face: S },
+    ],
+    reach: { x: 17.45, y: 29.35 },
+    valve: { x: 17.45, y: 30.45 },
+  },
+  barnWaterE: {
+    id: 'barnWaterE',
+    label: 'Поилка восточного стойла',
+    keeper: { x: 28.7, y: 31.0 },
+    rect: { x0: 27.8, y0: 28.95, x1: 29.6, y1: 29.8 },
+    area: 'stallE',
+    slots: [{ x: 28.6, y: 27.25, face: S }],
+    reach: { x: 28.7, y: 29.35 },
+    valve: { x: 28.7, y: 30.45 },
+  },
+  paddockWater: {
+    id: 'paddockWater',
+    label: 'Поилка на выгуле',
+    keeper: { x: 5.5, y: 21.1 },
+    rect: { x0: 3.6, y0: 19.0, x1: 7.4, y1: 19.85 },
+    area: 'paddock',
+    slots: [
+      { x: 4.4, y: 17.15, face: S },
+      { x: 6.6, y: 17.15, face: S },
+    ],
+    reach: { x: 5.5, y: 19.4 },
+    valve: { x: 5.5, y: 20.45 },
+  },
+  trainingWall: {
+    id: 'trainingWall',
+    label: 'Тренировочная стенка и сток',
+    keeper: { x: 26.8, y: 31.0 },
+    area: 'stallE',
+    // [0] — к решётке мордой (угощение, осмотр); [1] — боком вдоль решётки, задом к стоку (туалет в бак)
+    slots: [
+      { x: 26.8, y: 27.6, face: S },
+      { x: 26.6, y: 28.6, face: 0 },
+    ],
+    reach: { x: 26.8, y: 29.7 },
+  },
+  gatePanel: {
+    id: 'gatePanel',
+    label: 'Пульт ворот',
+    keeper: { x: 20, y: 31.25 },
+    rect: { x0: 19.55, y0: 30.2, x1: 20.45, y1: 30.55 },
+  },
   poolValve: {
     id: 'poolValve',
     label: 'Кран бассейна',
     keeper: { x: 44.5, y: 21.1 },
     rect: { x0: 44.25, y0: 20.2, x1: 44.75, y1: 20.55 },
-  },
-  gateControl: {
-    id: 'gateControl',
-    label: 'Пульт ворот',
-    keeper: { x: 8.8, y: 21.3 },
-    rect: { x0: 9.3, y0: 20.9, x1: 9.8, y1: 21.7 },
   },
   hoseReel: {
     id: 'hoseReel',
@@ -296,8 +385,8 @@ export const STATIONS: Record<StationId, StationDef> = {
   toolRack: {
     id: 'toolRack',
     label: 'Стойка инвентаря',
-    keeper: { x: 26.6, y: 38.5 },
-    rect: { x0: 25.0, y0: 39.2, x1: 28.2, y1: 39.8 },
+    keeper: { x: 27.0, y: 38.4 },
+    rect: { x0: 24.6, y0: 39.2, x1: 29.4, y1: 39.8 },
   },
   barrowHome: {
     id: 'barrowHome',
@@ -310,11 +399,11 @@ export const STATIONS: Record<StationId, StationDef> = {
     keeper: { x: 5, y: 35.6 },
     rect: { x0: 3.6, y0: 36.4, x1: 6.4, y1: 37.4 },
   },
-  shelf: {
-    id: 'shelf',
-    label: 'Стеллаж с овощами',
-    keeper: { x: 13.9, y: 36.7 },
-    rect: { x0: 12.2, y0: 34.6, x1: 13.1, y1: 38.8 },
+  vegShelf: {
+    id: 'vegShelf',
+    label: 'Ящики с овощами',
+    keeper: { x: 13.9, y: 36.4 },
+    rect: { x0: 12.2, y0: 34.6, x1: 13.1, y1: 38.4 },
   },
   prepTable: {
     id: 'prepTable',
@@ -327,6 +416,36 @@ export const STATIONS: Record<StationId, StationDef> = {
     label: 'Холодильник с лакомствами',
     keeper: { x: 23.1, y: 36.8 },
     rect: { x0: 22.4, y0: 37.6, x1: 23.8, y1: 39.8 },
+  },
+  tubRack: {
+    id: 'tubRack',
+    label: 'Стеллаж с тазами',
+    keeper: { x: 20.0, y: 34.6 },
+    rect: { x0: 18.0, y0: 33.25, x1: 22.0, y1: 33.9 },
+  },
+  porridgeStation: {
+    id: 'porridgeStation',
+    label: 'Каши и горячая вода',
+    keeper: { x: 15.1, y: 38.4 },
+    rect: { x0: 13.6, y0: 39.2, x1: 16.6, y1: 39.8 },
+  },
+  kitchenSink: {
+    id: 'kitchenSink',
+    label: 'Мойка кормокухни',
+    keeper: { x: 21.0, y: 38.4 },
+    rect: { x0: 20.2, y0: 39.2, x1: 21.9, y1: 39.8 },
+  },
+  washSink: {
+    id: 'washSink',
+    label: 'Мойка и слив',
+    keeper: { x: 31.1, y: 38.4 },
+    rect: { x0: 30.2, y0: 39.2, x1: 32.0, y1: 39.8 },
+  },
+  cabinet: {
+    id: 'cabinet',
+    label: 'Шкаф с моющими средствами',
+    keeper: { x: 33.3, y: 35.0 },
+    rect: { x0: 34.0, y0: 33.6, x1: 34.75, y1: 36.4 },
   },
   hayStack: {
     id: 'hayStack',
@@ -343,22 +462,44 @@ export const STATIONS: Record<StationId, StationDef> = {
   browsePile: {
     id: 'browsePile',
     label: 'Ветки',
-    keeper: { x: 43.9, y: 34.6 },
-    rect: { x0: 44.4, y0: 33.4, x1: 45.8, y1: 36.6 },
+    keeper: { x: 44.0, y: 34.6 },
+    rect: { x0: 44.6, y0: 33.4, x1: 45.8, y1: 36.6 },
+  },
+  bambooPile: {
+    id: 'bambooPile',
+    label: 'Бамбук',
+    keeper: { x: 36.8, y: 34.8 },
+    rect: { x0: 35.6, y0: 33.3, x1: 38.0, y1: 33.95 },
+  },
+  sawdustPile: {
+    id: 'sawdustPile',
+    label: 'Мешки с опилками',
+    keeper: { x: 42.0, y: 34.8 },
+    rect: { x0: 41.2, y0: 33.3, x1: 43.0, y1: 34.0 },
   },
 };
 
-// Стойка инвентаря: места вил и граблей
-export const TOOL_SLOTS = {
-  fork: { x: 25.9, y: 39.0 },
-  rake: { x: 27.3, y: 39.0 },
-} as const;
+// Стойка инвентаря: места лопаты, граблей, метлы, швабры и щётки
+export type ToolKind = 'shovel' | 'rake' | 'broom' | 'mop' | 'brush';
+export const TOOL_KINDS: ToolKind[] = ['shovel', 'rake', 'broom', 'mop', 'brush'];
+export const TOOL_SLOTS: Record<ToolKind, Point> = {
+  shovel: { x: 25.1, y: 39.0 },
+  rake: { x: 26.05, y: 39.0 },
+  broom: { x: 27.0, y: 39.0 },
+  mop: { x: 27.95, y: 39.0 },
+  brush: { x: 28.85, y: 39.0 },
+};
 
 export const BARROW_HOME = { x: 32.4, y: 37.4 };
-export const HOSE_LENGTH = 15;
+export const HOSE_REEL: Point = { x: 30.6, y: 22.6 };
+export const HOSE_LENGTH = 25;
+// Где по утрам стоит бак для мочи (65 л) — в проходе у тренировочной стенки
+export const TANK_HOME: Point = { x: 28.2, y: 32.35 };
+// Куда подставляют бак: под решёткой у тренировочной стенки, под задние ноги слонихи
+export const TANK_PORT: Point = { x: 25.55, y: 29.3 };
 
-// Сток в слоновнике: моча здесь уходит в канализацию
-export const DRAIN: Circle = { x: 24, y: 26.7, r: 1.45 };
+// Сток в восточном стойле: моча здесь уходит в канализацию
+export const DRAIN: Circle = { x: 25.7, y: 28.6, r: 1.1 };
 
 // ---------------------------------------------------------------------------
 // Природа и обогащение на выгуле и в слоновнике
@@ -370,12 +511,13 @@ export interface TreeDef {
   y: number;
   trunk: number;
   canopy: number;
+  fruit: boolean; // яблоня: слоны трясут, яблоки падают
 }
 
 export const TREES: TreeDef[] = [
-  { id: 'treeA', x: 19, y: 6.5, trunk: 0.55, canopy: 3.3 },
-  { id: 'treeB', x: 29, y: 13.5, trunk: 0.45, canopy: 2.7 },
-  { id: 'treeC', x: 43.5, y: 15.8, trunk: 0.35, canopy: 2.0 },
+  { id: 'treeA', x: 19, y: 6.5, trunk: 0.55, canopy: 3.3, fruit: true },
+  { id: 'treeB', x: 29, y: 13.5, trunk: 0.45, canopy: 2.7, fruit: false },
+  { id: 'treeC', x: 43.5, y: 15.8, trunk: 0.35, canopy: 2.0, fruit: true },
 ];
 
 export const BOULDERS: Circle[] = [
@@ -386,12 +528,12 @@ export const BOULDERS: Circle[] = [
 
 export const LOG = { x0: 11.6, y0: 14.0, x1: 14.6, y1: 15.2, r: 0.32 };
 export const DRUM: Circle = { x: 8.5, y: 15.6, r: 0.6 };
-export const TIRE: Circle = { x: 27.4, y: 22.4, r: 0.45 }; // подвесная покрышка в слоновнике
+export const TIRE: Circle = { x: 27.4, y: 22.4, r: 0.45 }; // подвесная покрышка в восточном стойле
 export const POOL: Ellipse = { x: 37, y: 9, rx: 5.2, ry: 3.0 };
 export const DUST_PIT: Ellipse = { x: 8, y: 8, rx: 3.4, ry: 2.3 };
 export const BALL_START = { x: 24, y: 10.5, r: 0.55 };
 
-// Травяные куртины на выгуле (для отрисовки и типа почвы)
+// Густая трава на выгуле (для отрисовки и типа почвы)
 export const GRASS_PATCHES: Ellipse[] = [
   { x: 14, y: 4.2, rx: 7, ry: 2.2 },
   { x: 26.5, y: 17.2, rx: 6, ry: 2.0 },
@@ -399,6 +541,76 @@ export const GRASS_PATCHES: Ellipse[] = [
   { x: 4.3, y: 12.5, rx: 2.4, ry: 4.2 },
   { x: 22, y: 11.5, rx: 3.2, ry: 1.6 },
 ];
+
+// Вытоптанное: проплешины у кормушки, поилки, ворот, под деревьями и у бассейна
+export const DRY_PATCHES: Ellipse[] = [
+  { x: 35, y: 16.8, rx: 3.6, ry: 2.0 },
+  { x: 5.5, y: 16.9, rx: 3.0, ry: 1.9 },
+  { x: 15.5, y: 17.6, rx: 3.2, ry: 2.0 },
+  { x: 19.6, y: 7.4, rx: 2.8, ry: 2.2 },
+  { x: 43.8, y: 16.6, rx: 1.9, ry: 1.6 },
+  { x: 29.6, y: 14.4, rx: 2.2, ry: 1.7 },
+  { x: 31.2, y: 10.6, rx: 1.6, ry: 2.4 },
+  { x: 24.2, y: 10.4, rx: 1.4, ry: 1.0 },
+];
+
+// Тропы, протоптанные слонами (ломаные, ширина ~1.4 м)
+export const PATHS: Point[][] = [
+  [
+    { x: 15.5, y: 18.6 },
+    { x: 22, y: 17.2 },
+    { x: 28, y: 16.8 },
+    { x: 34.2, y: 17.0 },
+  ],
+  [
+    { x: 15.5, y: 18.4 },
+    { x: 12.5, y: 16.6 },
+    { x: 8.6, y: 17.0 },
+    { x: 5.8, y: 17.2 },
+  ],
+  [
+    { x: 15.8, y: 17.4 },
+    { x: 18.2, y: 12.2 },
+    { x: 19.4, y: 8.8 },
+  ],
+  [
+    { x: 30.2, y: 16.4 },
+    { x: 31.6, y: 12.4 },
+    { x: 32.6, y: 10.2 },
+  ],
+  [
+    { x: 7.2, y: 16.2 },
+    { x: 7.8, y: 12.6 },
+    { x: 8.0, y: 10.2 },
+  ],
+  [
+    { x: 36.6, y: 16.6 },
+    { x: 40.2, y: 16.4 },
+    { x: 42.6, y: 16.0 },
+  ],
+];
+
+function nearPath(x: number, y: number, w = 0.7): boolean {
+  for (const path of PATHS) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy || 1;
+      const k = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
+      if (Math.hypot(x - (a.x + dx * k), y - (a.y + dy * k)) < w) return true;
+    }
+  }
+  return false;
+}
+
+// Голая земля на выгуле: проплешины, тропы, полоса вдоль ограды
+export function bareGround(x: number, y: number): boolean {
+  if (DRY_PATCHES.some((d) => inEllipse(d, x, y))) return true;
+  if (nearPath(x, y)) return true;
+  return x < PADDOCK.x0 + 1.0 || x > PADDOCK.x1 - 1.0 || y < PADDOCK.y0 + 1.0 || y > PADDOCK.y1 - 1.0;
+}
 
 // Тень от деревьев (смещена от солнца)
 export function shadeAt(x: number, y: number): number {
@@ -412,21 +624,21 @@ export function shadeAt(x: number, y: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Помещения (для подписей) и стартовые точки
+// Помещения (для подписей и пола) и стартовые точки
 // ---------------------------------------------------------------------------
 
 export interface RoomDef {
   id: string;
   label: string;
   rect: Rect;
-  floor: 'tile' | 'wood' | 'concrete' | 'gravel';
+  floor: 'tile' | 'wood' | 'concrete' | 'gravel' | 'screed';
 }
 
 export const ROOMS: RoomDef[] = [
-  { id: 'duty', label: 'Дежурка', rect: { x0: 2, y0: 33, x1: 12, y1: 40 }, floor: 'wood' },
+  { id: 'duty', label: 'Дежурка', rect: { x0: 2, y0: 33, x1: 12, y1: 40 }, floor: 'screed' },
   { id: 'kitchen', label: 'Кормокухня', rect: { x0: 12, y0: 33, x1: 24, y1: 40 }, floor: 'tile' },
   { id: 'equipment', label: 'Инвентарная', rect: { x0: 24, y0: 33, x1: 35, y1: 40 }, floor: 'concrete' },
-  { id: 'store', label: 'Сенник', rect: { x0: 35, y0: 33, x1: 46, y1: 40 }, floor: 'wood' },
+  { id: 'store', label: 'Сенник', rect: { x0: 35, y0: 33, x1: 46, y1: 40 }, floor: 'screed' },
 ];
 
 export const YARDS: RoomDef[] = [
@@ -437,14 +649,14 @@ export const YARDS: RoomDef[] = [
 
 export const KEEPER_START: Point = { x: 8.6, y: 35.6 };
 
-// Где слоны проводят ночь: стартовые места на подстилке
+// Где слоны проводят ночь: стартовые места на подстилке, по очереди в разных стойлах
 export const BARN_SPOTS: Point[] = [
-  { x: 13.6, y: 22.6 },
-  { x: 18.2, y: 24.6 },
-  { x: 22.6, y: 22.4 },
-  { x: 14.2, y: 25.6 },
-  { x: 21.4, y: 26.0 },
-  { x: 25.2, y: 23.6 },
+  { x: 12.6, y: 22.5 },
+  { x: 24.4, y: 22.4 },
+  { x: 16.8, y: 25.3 },
+  { x: 26.6, y: 25.4 },
+  { x: 12.4, y: 25.6 },
+  { x: 22.6, y: 25.8 },
 ];
 
 export const CAPACITY = BARN_SPOTS.length;
@@ -469,7 +681,18 @@ export function zoneAt(x: number, y: number): ZoneId | null {
   return null;
 }
 
-// Тип поверхности в точке — для звука шагов, следов и отрисовки
+export function areaAt(x: number, y: number): AreaId | null {
+  const z = zoneAt(x, y);
+  if (z === 'paddock') return 'paddock';
+  if (z === 'barn') return x < 20 ? 'stallW' : 'stallE';
+  return null;
+}
+
+export function inAisle(x: number, y: number): boolean {
+  return inRect(AISLE, x, y);
+}
+
+// Тип поверхности в точке — для звука шагов, следов, уборки и отрисовки
 export type Surface = 'sand' | 'grass' | 'dust' | 'water' | 'bedding' | 'concrete' | 'gravel' | 'floor' | 'outside';
 
 export function surfaceAt(x: number, y: number): Surface {
@@ -477,12 +700,18 @@ export function surfaceAt(x: number, y: number): Surface {
   if (zone === 'paddock') {
     if (inEllipse(POOL, x, y)) return 'water';
     if (inEllipse(DUST_PIT, x, y)) return 'dust';
-    if (GRASS_PATCHES.some((g) => inEllipse(g, x, y))) return 'grass';
-    return 'sand';
+    if (bareGround(x, y)) return 'sand';
+    return 'grass';
   }
   if (zone === 'barn') return inRect(BEDDING, x, y) ? 'bedding' : 'concrete';
   if (ROOMS.some((r) => inRect(r.rect, x, y))) return 'floor';
   if (YARDS.some((r) => r.id !== 'corridor' && inRect(r.rect, x, y))) return 'gravel';
   if (inRect({ x0: 2, y0: 30, x1: 46, y1: 33 }, x, y)) return 'concrete';
   return 'outside';
+}
+
+// Твёрдый пол, который метут и моют шваброй: бетон стойл, проход, коридор, помещения, дворы
+export function hardFloor(x: number, y: number): boolean {
+  const s = surfaceAt(x, y);
+  return s === 'concrete' || s === 'floor' || s === 'gravel';
 }

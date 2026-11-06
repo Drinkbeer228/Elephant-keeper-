@@ -46,6 +46,36 @@ export const C = {
   metal: '#9aa29d',
   metalDark: '#6c736f',
   shadow: 'rgba(44, 48, 46, 0.16)',
+  // Полы по зонам: разные материалы, но одна сдержанная гамма; слоны серые — им нужен тёплый фон
+  barnSand: '#c99b55', // утрамбованный песок под соломой — тёплая охра
+  barnSandDark: '#b0843f',
+  strawBed: '#e0bb66',
+  strawBedDark: '#b8913f',
+  barnConcrete: '#cdc6b8', // бетонная полоса у решётки
+  barnConcreteDark: '#b2aa9a',
+  roomBlue: '#D1D5DB', // помещения: холодный бетон и стяжка
+  roomNeutral: '#C5C9CD',
+  roomSeam: '#b4b9bf',
+  corridor: '#e3e5e8',
+  corridorSeam: '#c7cbd0',
+  yard: '#9CA3AF', // технический двор: асфальт и мокрый гравий
+  yardDark: '#8E949E',
+  yardStone: '#7d838c',
+  grassBase: '#a7b484',
+  grassLight: '#b8c497',
+  grassDeep: '#8fa06d',
+  soil: '#ccb48a',
+  soilDark: '#b49b72',
+  wallFill: '#efe5d3',
+  wallTop: '#f8f1e4',
+  wallInk: '#2f3336',
+  railDark: '#454c51',
+  railLight: '#8e979d',
+  steel: '#b8bfc4',
+  steelDark: '#7c858b',
+  waterBlue: '#7fb0c2',
+  waterHi: '#d3e8ef',
+  plastic: '#d9d4c8',
 };
 
 export function hex(c: string): number {

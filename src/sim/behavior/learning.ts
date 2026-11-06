@@ -27,29 +27,47 @@ export function onSignalIgnored(e: Elephant): void {
   e.learned.trust = down(e.learned.trust, LEARN.trustIgnore);
 }
 
-// Угощение: укрепляет доверие; если слон только что пришёл на зов — это награда за послушание
-export function onTreat(s: State, e: Elephant): boolean {
+// Угощение: укрепляет доверие; если слон только что выполнил просьбу — это награда за неё.
+// Награда за туалет в бак закрепляет связь «попросилась — сходила — похвалили»
+export function onTreat(s: State, e: Elephant): 'call' | 'toilet' | 'lie' | null {
   e.learned.trust = up(e.learned.trust, LEARN.trustTreat);
   const call = e.mem.call;
   if (call && call.arrivedAt >= 0 && !call.rewarded && s.t - call.arrivedAt <= LEARN.rewardWindow) {
     call.rewarded = true;
     e.learned.cooperation = up(e.learned.cooperation, LEARN.coopReward);
-    return true;
+    if (call.why === 'toilet' && e.day.urineTank + e.day.urineDrain > 0) {
+      e.learned.toilet = up(e.learned.toilet, LEARN.toiletUp);
+      e.learned.expectation = up(e.learned.expectation, LEARN.expectUp * 0.5);
+    }
+    return call.why;
   }
-  return false;
+  return null;
 }
 
 export function onScratch(e: Elephant): void {
   e.learned.trust = up(e.learned.trust, LEARN.trustScratch);
 }
 
+export function onPet(e: Elephant): void {
+  e.learned.trust = up(e.learned.trust, LEARN.trustPet);
+}
+
+export function onHand(e: Elephant): void {
+  e.learned.trust = up(e.learned.trust, LEARN.trustHand);
+}
+
+export function onGroom(e: Elephant): void {
+  e.learned.trust = up(e.learned.trust, LEARN.trustGroom);
+}
+
 export function onShowerEnjoyed(e: Elephant): void {
   e.learned.trust = up(e.learned.trust, LEARN.trustShower);
 }
 
-// Пришла на зов, а похвалы не было — в следующий раз пойдёт неохотнее
-export function onCallUnrewarded(e: Elephant): void {
+// Пришла на зов (или сходила в бак), а похвалы не было — в следующий раз пойдёт неохотнее
+export function onCallUnrewarded(e: Elephant, why: 'call' | 'toilet' | 'lie' = 'call'): void {
   e.learned.cooperation = down(e.learned.cooperation, LEARN.coopUnrewarded);
+  if (why === 'toilet') e.learned.toilet = down(e.learned.toilet, LEARN.toiletDown);
 }
 
 export function onSpooked(e: Elephant): void {
@@ -63,4 +81,5 @@ export function dailyDrift(e: Elephant): void {
   e.learned.trust = clamp(e.learned.trust + (base.trust - e.learned.trust) * k);
   e.learned.cooperation = clamp(e.learned.cooperation + (base.cooperation - e.learned.cooperation) * k);
   e.learned.expectation = clamp(e.learned.expectation + (base.expectation - e.learned.expectation) * k);
+  e.learned.toilet = clamp(e.learned.toilet + (base.toilet - e.learned.toilet) * k);
 }

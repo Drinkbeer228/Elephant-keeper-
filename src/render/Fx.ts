@@ -79,7 +79,80 @@ export class Fx {
 
   handle(ev: SimEvent): void {
     const { x, y } = ev;
+    if (ev.kind.startsWith('stomp:')) {
+      // Топнула: облачко пыли и глухой круг
+      this.burst(x, y + 0.3, 8, hex('#cdb88f'), 1.2, 1.2, 0.6, 0.7);
+      this.ring(x, y, C.inkSoft, 0.8, 1.8, 0.45, 0.05);
+      return;
+    }
     switch (ev.kind) {
+      case 'rumbleLow':
+        this.ring(x, y, C.inkSoft, 0.8, 1.9, 1.0, 0.035);
+        break;
+      case 'beg':
+        this.ring(x, y, C.terracottaSoft, 0.4, 1.2, 0.6, 0.04);
+        break;
+      case 'toss':
+      case 'hayGrab':
+        this.burst(x, y, 10, hex(C.hay), 1.1, 3.0, 0.9, 0.7);
+        break;
+      case 'shake':
+        this.burst(x, y, 6, hex(C.leaf), 1.6, 2.4, 0.9, 0.8);
+        break;
+      case 'fruitFall':
+        this.burst(x, y, 6, hex('#c8463a'), 2.2, 1.6, 0.7, 0.9);
+        break;
+      case 'chew':
+        this.burst(x, y, 3, hex(C.sageMid), 0.6, 1.0, 0.5, 0.5);
+        break;
+      case 'hoseCut':
+        this.burst(x, y, 18, hex(C.waterLight), 2.6, 3.0, 0.9, 0.6);
+        this.ring(x, y, C.terracotta, 0.4, 1.6, 0.6, 0.05);
+        break;
+      case 'tub':
+      case 'stumble':
+        this.burst(x, y, 4, hex('#cdb88f'), 0.8, 0.8, 0.5, 0.6);
+        break;
+      case 'crack':
+        this.burst(x, y, 12, hex(C.plastic), 2.0, 2.0, 0.7, 0.7);
+        this.ring(x, y, C.terracotta, 0.4, 1.4, 0.5, 0.05);
+        break;
+      case 'kick':
+        this.burst(x, y, 10, hex('#cdb88f'), 1.6, 1.6, 0.6, 0.8);
+        this.ring(x, y, C.terracotta, 1.0, 3.0, 0.7, 0.06);
+        break;
+      case 'foam':
+        for (let i = 0; i < 6; i++) this.spawn('fx-dot', x + (Math.random() - 0.5) * 1.4, y + (Math.random() - 0.5) * 0.8, { vy: -0.2, vz: 0.6, grav: 0, max: 1.2, scale: 1.2, tint: 0xffffff });
+        break;
+      case 'brush':
+      case 'sweep':
+        this.burst(x, y, 6, hex('#d8c48e'), 0.9, 1.0, 0.5, 0.5);
+        break;
+      case 'mop':
+      case 'wring':
+      case 'wash':
+      case 'pour':
+        this.burst(x, y, 6, hex(C.waterLight), 1.0, 1.2, 0.5, 0.5);
+        break;
+      case 'sawdust':
+        this.burst(x, y, 12, hex('#efe0bd'), 1.2, 1.6, 0.7, 0.6);
+        break;
+      case 'tank':
+        this.ring(x, y, '#d8c04e', 0.15, 0.7, 0.7, 0.05);
+        break;
+      case 'tankPlace':
+      case 'tubPlace':
+      case 'hook':
+      case 'stow':
+      case 'reel':
+        this.ring(x, y, C.sageMid, 0.2, 0.8, 0.5, 0.04);
+        break;
+      case 'sniff':
+        this.ring(x, y, C.sageMid, 0.4, 1.0, 0.6, 0.04);
+        break;
+      case 'bamboo':
+        this.burst(x, y, 6, hex('#8fae58'), 1.0, 1.4, 0.6, 0.6);
+        break;
       case 'urine':
         this.burst(x, y, 10, hex('#e7d27a'), 0.8, 1.2, 0.5, 0.5);
         break;

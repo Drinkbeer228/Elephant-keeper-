@@ -1,12 +1,13 @@
 // Физиология и самочувствие: потребности растут и спадают независимо от отношений с кипером.
 
-import { ELEPHANT, NEEDS } from '../../data/balance';
+import { BODY, ELEPHANT, FOOD, NEEDS } from '../../data/balance';
 import { shadeAt } from '../../data/facility';
+import { log } from '../events';
 import { dist, inPool } from '../geometry';
 import { clamp } from '../rng';
 import { darkness, indoorTemperature, temperature } from '../time';
 import type { Elephant, NeedKey, State } from '../types';
-import { zoneDirt } from '../world';
+import { cellOf, lyingDirt, zoneDirt } from '../world';
 import { bond, zoneOf } from './perceive';
 
 export function ambientTemp(s: State, e: { x: number; y: number }): number {
@@ -85,6 +86,13 @@ export function updateNeeds(s: State, e: Elephant, dt: number): void {
   }
   e.wet = Math.max(0, e.wet - (0.012 + Math.max(0, temp - 14) * 0.0016) * dt);
   e.dust = Math.max(0, e.dust - 0.0018 * dt);
+  updateBody(s, e, dt);
+  // Хмель выветривается; пока держится — клонит в сон, нервных тревожит
+  if (e.tipsy > 0) {
+    e.tipsy = Math.max(0, e.tipsy - FOOD.tipsyDecay * dt);
+    n.fatigue += 0.06 * e.tipsy * dt;
+    n.boredom -= 0.05 * e.tipsy * T.playfulness * dt;
+  }
 
   n.stress += (stressTarget(s, e) - n.stress) * NEEDS.stressFollow * dt;
 
@@ -102,11 +110,47 @@ function over(v: number, lo: number): number {
   return Math.max(0, v - lo);
 }
 
+// Кожа: лёжа на мокром и в навозе пачкаются бока и спина, в грязи — ноги
+function updateBody(s: State, e: Elephant, dt: number): void {
+  const b = e.body;
+  if (e.lying) {
+    const d = lyingDirt(s, e.x, e.y);
+    const add = (BODY.lyingWet * d.wet + BODY.lyingDung * d.dung) * dt;
+    if (add > 0) {
+      b.side = clamp(b.side + add);
+      b.back = clamp(b.back + add * 0.45);
+      b.head = clamp(b.head + add * 0.2);
+      if (d.wet > 0.25 || d.dung) e.day.dirtyLying += dt;
+      if (b.side > 0.5 && add > 0.01) {
+        log(s, 'warn', `${e.profile.name} лежит на мокрой и грязной подстилке — бока пачкаются.`, { key: `dirtyLie:${e.id}`, cooldown: 120, elephantId: e.id, x: e.x, y: e.y });
+      }
+    }
+  } else if (e.speed > 0.1 || e.act.phase === 'do') {
+    const c = s.world.cells;
+    const i = cellOf(e.x, e.y);
+    const mud = c.soil[i] + c.wet[i] * 0.5;
+    if (mud > 0.2) b.legs = clamp(b.legs + BODY.legsSoil * mud * dt);
+    else if (e.speed > 0.1) b.legs = Math.max(0, b.legs - BODY.legsClean * dt);
+  }
+  // Пена, которую не смыли, раздражает кожу
+  if (b.soap > 0) {
+    b.soap = Math.max(0, b.soap - dt / (BODY.soapIrritate * 3));
+    if (b.soap > 0.4 && e.wet < 0.2) e.needs.stress = Math.min(100, e.needs.stress + 0.08 * dt);
+  }
+}
+
+export function bodyDirt(e: Elephant): number {
+  const b = e.body;
+  return Math.max(b.back, b.side, b.legs * 0.8, b.head);
+}
+
 export function stressTarget(s: State, e: Elephant): number {
   const n = e.needs;
   const T = e.profile.traits;
   const L = e.learned;
   let st = 6 + 14 * T.nervousness * (1 - L.trust);
+  st += 14 * T.sensitivity * Math.max(0, bodyDirt(e) - 0.35);
+  st += 10 * e.tipsy * T.nervousness;
   st += 0.4 * over(n.hunger, 75) + 0.45 * over(n.thirst, 70) + 0.3 * over(n.fatigue, 80);
   st += 0.3 * over(n.boredom, 72) * (0.6 + T.sensitivity);
   st += 0.55 * T.sociability * over(n.social, 60);
@@ -132,7 +176,8 @@ export function wellbeing(e: Elephant): number {
     0.35 * over(n.boredom, 45) +
     0.6 * T.sociability * over(n.social, 45) +
     0.35 * over(n.heat, 40) +
-    0.55 * n.stress;
+    0.55 * n.stress +
+    8 * Math.max(0, bodyDirt(e) - 0.4);
   return clamp(100 - pen, 0, 100);
 }
 

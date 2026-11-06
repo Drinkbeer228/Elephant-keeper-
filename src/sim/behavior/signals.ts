@@ -1,15 +1,17 @@
 // Сигналы: слон сообщает о потребности, которую не может закрыть сам.
 // Подавать ли сигнал и как ясно — зависит от характера (выразительность, упрямство)
-// и от опыта (ожидает ли слон, что ему ответят).
+// и от опыта (ожидает ли слон, что ему ответят). Как именно — личная привычка:
+// одна топает определённой ногой, другая урчит, третья молча смотрит у решётки.
 
-import { STATIONS } from '../../data/facility';
+import { FEEDER_IDS, STATIONS, TROUGH_IDS } from '../../data/facility';
 import { log } from '../events';
 import { dist } from '../geometry';
+import { footText } from '../herd';
 import { clamp } from '../rng';
 import type { Elephant, SignalKind, State } from '../types';
-import { troughSpoiled } from '../world';
+import { troughDrinkable, troughOfArea, tubKg } from '../world';
 import { onSignalAnswered, onSignalIgnored } from './learning';
-import { zoneOf } from './perceive';
+import { areaOf, canReachArea, canReachZone } from './perceive';
 
 export function signalWillingness(e: Elephant): number {
   const T = e.profile.traits;
@@ -28,32 +30,55 @@ export function signalClarity(e: Elephant): number {
   return clamp(0.25 + 0.75 * e.profile.traits.expressiveness);
 }
 
-const CLEAR: Record<SignalKind, string> = {
-  toilet: 'просится в туалет — переминается у ворот',
-  out: 'просится на выгул — ждёт у ворот',
-  in: 'хочет в слоновник — ждёт у ворот снаружи',
+const WANT: Record<SignalKind, string> = {
+  toilet: 'просится в туалет',
+  out: 'просится на выгул',
+  in: 'хочет в слоновник',
   food: 'требует еды у пустой кормушки',
-  water: 'у пустой поилки — нужна вода',
-  attention: 'тянет к тебе хобот — хочет внимания',
+  water: 'просит воды',
+  attention: 'хочет внимания',
 };
 
-const SUBTLE: Record<SignalKind, string> = {
-  toilet: 'тихо переминается у ворот',
-  out: 'молча стоит у ворот',
-  in: 'молча стоит у ворот снаружи',
-  food: 'обнюхивает пустую кормушку',
-  water: 'трогает хоботом сухую поилку',
-  attention: 'держится поближе к тебе',
-};
+// Как выглядит её сигнал — по привычке
+function gesture(e: Elephant, kind: SignalKind, clear: boolean): string {
+  const h = e.profile.habits;
+  if (kind === 'attention') return h.signal === 'beg' ? 'тянет хобот и выпрашивает лакомство' : clear ? 'тянет к тебе хобот' : 'держится поближе к тебе';
+  if (!clear) {
+    switch (kind) {
+      case 'toilet':
+        return 'тихо переминается';
+      case 'food':
+        return 'обнюхивает пустую кормушку';
+      case 'water':
+        return 'трогает хоботом поилку';
+      default:
+        return 'молча стоит у ворот';
+    }
+  }
+  switch (h.signal) {
+    case 'stomp':
+      return `топает ${footText(h.foot)} ногой`;
+    case 'rumble':
+      return 'урчит и встряхивает хоботом';
+    case 'stare':
+      return 'стоит у решётки и пристально смотрит на тебя';
+    case 'gate':
+      return 'стоит у ворот и не уходит';
+    case 'beg':
+      return kind === 'food' ? 'тянет хобот к сумке с лакомствами' : 'нетерпеливо машет хоботом в твою сторону';
+  }
+}
 
 export function signalText(e: Elephant, kind: SignalKind): string {
-  return `${e.profile.name} ${signalClarity(e) >= 0.5 ? CLEAR[kind] : SUBTLE[kind]}`;
+  const clear = signalClarity(e) >= 0.5;
+  return `${e.profile.name} ${gesture(e, kind, clear)} — ${WANT[kind]}`;
 }
 
 export function beginSignal(s: State, e: Elephant, kind: SignalKind): void {
   if (e.signal) return;
   e.signal = { kind, start: s.t, until: s.t + signalPatience(e), answered: false };
   e.day.signals++;
+  e.mem.lastSignalFx = s.t - 10;
   const clear = signalClarity(e) >= 0.5;
   log(s, clear ? 'warn' : 'info', `${signalText(e, kind)}.`, {
     key: `signal:${e.id}:${kind}`,
@@ -101,29 +126,33 @@ export function signalSatisfied(s: State, e: Elephant): string | null {
   const sig = e.signal;
   if (!sig) return null;
   const w = s.world;
+  const area = areaOf(e);
   switch (sig.kind) {
     case 'out':
     case 'toilet':
-      return w.gateOpen && zoneOf(e) === 'barn' ? 'ворота открыли' : null;
+      return area !== 'paddock' && canReachZone(s, e, 'paddock') ? 'ворота открыли' : null;
     case 'in':
-      return w.gateOpen && zoneOf(e) === 'paddock' ? 'ворота открыли' : null;
+      return area === 'paddock' && canReachZone(s, e, 'barn') ? 'ворота открыли' : null;
     case 'water': {
-      const t = e.act.target;
-      const id = t && t.t === 'slot' && (t.station === 'barnWater' || t.station === 'paddockWater') ? t.station : zoneOf(e) === 'barn' ? 'barnWater' : 'paddockWater';
-      return w.water[id].level > 15 ? 'воду налили' : null;
+      const own = troughOfArea(area);
+      if (troughDrinkable(s, own, e.profile.traits.sensitivity, e.needs.thirst) && w.troughs[own].level > 15) return 'воду налили';
+      for (const t of TROUGH_IDS) if (t !== own && canReachArea(s, e, STATIONS[t].area) && troughDrinkable(s, t, e.profile.traits.sensitivity, e.needs.thirst) && w.troughs[t].level > 15) return 'вода есть рядом';
+      return null;
     }
     case 'food': {
-      const zone = zoneOf(e);
-      const feeder = zone === 'barn' ? 'barnRack' : 'paddockFeeder';
-      if (w.hay[feeder] > 8) return 'сено положили';
-      if (zone === 'barn' && w.trough.portions > 0 && !troughSpoiled(s)) return 'овощи в кормушке';
-      if (w.food.some((f) => f.zone === zone && f.kind !== 'remains' && dist(f, e) < 12)) return 'корм рядом';
-      if (zone === 'paddock' && w.drum > 0.5 && dist(e, STATIONS.paddockFeeder.keeper) < 40) return 'корм в барабане';
+      for (const f of FEEDER_IDS) if (canReachArea(s, e, STATIONS[f].area) && w.feeders[f].hay > 8) return 'сено положили';
+      if (w.tubs.some((t) => t.where === 'floor' && !t.broken && tubKg(t) > 1 && canReachArea(s, e, areaOfPoint(t)))) return 'овощи в тазу';
+      if (w.food.some((f) => f.kind !== 'remains' && f.kind !== 'straw' && dist(f, e) < 12 && canReachArea(s, e, areaOfPoint(f)))) return 'корм рядом';
+      if (area === 'paddock' && w.drum > 0.5) return 'корм в барабане';
       return null;
     }
     case 'attention':
       return null; // только живой ответ кипера
   }
+}
+
+function areaOfPoint(p: { x: number; y: number }) {
+  return areaOf(p);
 }
 
 export function updateSignal(s: State, e: Elephant): 'answered' | 'ignored' | null {

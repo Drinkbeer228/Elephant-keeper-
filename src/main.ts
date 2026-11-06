@@ -10,12 +10,10 @@ import {
   availableActions,
   clearLegacy,
   createState,
-  deserialize,
   LOAD_FAILURE_TEXT,
   legacyKeys,
   loadSlot,
   saveSlot,
-  serialize,
   slotInfo,
   step,
   type SimEvent,
@@ -23,6 +21,7 @@ import {
   type StepInput,
 } from './sim';
 import { Hud } from './ui/hud';
+import { PrepView } from './ui/prep';
 import './ui/styles.css';
 
 const params = new URLSearchParams(location.search);
@@ -40,8 +39,17 @@ let bot: { decide(s: State): StepInput } | null = null;
 let scene: WorldScene | null = null;
 const pending: string[] = [];
 const input = new Input();
+// Нарезка овощей: пока открыт крупный план, время идёт медленнее, чем на территории
+const PREP_PACE = 0.4;
 
-const hud = new Hud(document.getElementById('hud')!, {
+// iPhone и другие браузеры включают звук только из обработчика жеста. Ловим любые касания,
+// клики и клавиши на этапе перехвата — до того, как их обработает игра.
+for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const)
+  window.addEventListener(type, () => sound.unlock(), { capture: true, passive: true });
+input.onGesture = () => sound.unlock();
+
+const hudRoot = document.getElementById('hud')!;
+const hud = new Hud(hudRoot, {
   action: (id) => {
     sound.unlock();
     sound.click();
@@ -82,30 +90,16 @@ const hud = new Hud(document.getElementById('hud')!, {
     selected = null;
     return null;
   },
-  exportSave: () => {
-    const blob = new Blob([serialize(state)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `elephant-keeper-day${Math.floor((state.t - TIME.start) / 1440) + 1}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  },
-  importSave: (file) => {
-    void file.text().then((text) => {
-      const res = deserialize(text);
-      if (!res.ok) hud.toast(LOAD_FAILURE_TEXT[res.reason], 'warn');
-      else {
-        state = res.state;
-        selected = null;
-        hud.toast('Смена загружена из файла.', 'good');
-      }
-    });
-  },
   toggleSound: () => {
     sound.unlock();
     return sound.toggle();
   },
   soundMuted: () => sound.muted,
+  volume: () => sound.volume,
+  setVolume: (v) => {
+    sound.setVolume(v);
+    sound.click();
+  },
   toggleNames: () => (showNames = !showNames),
   namesOn: () => showNames,
   closeReport: () => {
@@ -116,6 +110,19 @@ const hud = new Hud(document.getElementById('hud')!, {
   overview: () => scene?.toggleOverview(),
   legacyCount: () => legacyKeys().length,
   clearLegacy: () => clearLegacy(),
+  binds: () => input.binds,
+  rebind: (a, done) =>
+    input.captureNext((code) => {
+      // Esc — отменить переназначение
+      if (code !== 'Escape') input.rebind(a, code);
+      done();
+    }),
+  resetBinds: () => input.resetBinds(),
+});
+
+const prep = new PrepView(hudRoot, {
+  act: (side) => pending.push(side === 'L' ? 'prepPick:L' : 'prepTrim:R'),
+  exit: () => pending.push('prepExit:exit'),
 });
 
 function setSpeed(v: number): void {
@@ -126,6 +133,10 @@ setSpeed(speed);
 
 const stick = hud.stickElements();
 input.bindStick(stick.base, stick.knob);
+
+function whistleOf(id: string) {
+  return state.elephants.find((e) => e.id === id)?.profile.habits.whistle ?? null;
+}
 
 function nearestElephant(): string | null {
   let best: string | null = null;
@@ -142,14 +153,21 @@ function nearestElephant(): string | null {
 
 function handlePresses(): void {
   for (const p of input.take()) {
-    sound.unlock();
     if (p.kind === 'pause') {
       if (hud.modalOpen) hud.closeMenu();
+      else if (state.keeper.prep) pending.push('prepExit:exit');
+      else if (hud.panelShown) hud.togglePanel(false);
       else hud.openMenu();
       continue;
     }
     if (hud.modalOpen) continue;
     switch (p.kind) {
+      case 'prep':
+        if (state.keeper.prep) pending.push(p.side === 'L' ? 'prepPick:L' : 'prepTrim:R');
+        break;
+      case 'panel':
+        hud.togglePanel();
+        break;
       case 'action': {
         const a = hud.actionForKey(0);
         if (a) pending.push(a.id);
@@ -172,7 +190,7 @@ function handlePresses(): void {
         hud.toggleJournal();
         break;
       case 'mute':
-        sound.toggle();
+        hud.updateSound(sound.toggle());
         break;
       case 'speed':
         setSpeed(speed === 0 ? 1 : speed === 1 ? 2 : speed === 2 ? 4 : 1);
@@ -199,11 +217,13 @@ function frame(dt: number): SimEvent[] {
   const f0 = performance.now();
   perf.frames++;
   perf.dtSum += dt;
+  input.prepMode = state.keeper.prep !== null && !hud.modalOpen;
   handlePresses();
   const events: SimEvent[] = [];
-  const running = !paused && !hud.modalOpen && speed > 0 && state.pendingReport === null;
+  const pace = state.keeper.prep ? Math.min(speed, PREP_PACE) : speed;
+  const running = !paused && !hud.modalOpen && pace > 0 && state.pendingReport === null;
   if (running) {
-    acc += dt * speed;
+    acc += dt * pace;
     let steps = 0;
     const move = input.move();
     while (acc >= TIME.step && steps < 12 * Math.max(1, speed)) {
@@ -224,10 +244,11 @@ function frame(dt: number): SimEvent[] {
     hud.pushEvents(events);
     for (const ev of events) {
       const near = Math.hypot(ev.x - state.keeper.x, ev.y - state.keeper.y) < 14 || ev.x === 0;
-      sound.event(ev, near);
+      sound.event(ev, near, whistleOf);
       if (ev.text && (ev.severity === 'warn' || ev.severity === 'bad')) sound.chime(ev.severity);
     }
   }
+  prep.update(state, events, dt);
   if (state.pendingReport !== null && !hud.modalOpen) {
     const r = state.reports[state.pendingReport];
     if (r) hud.openReport(r);
@@ -295,6 +316,7 @@ function start(): void {
       },
       game,
       perf,
+      sound,
     },
   });
 }

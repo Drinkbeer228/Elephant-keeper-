@@ -7,12 +7,10 @@ function cared(s: State, minutes: number, onStep?: () => void): void {
   const end = s.t + minutes;
   while (s.t < end) {
     const m = minuteOfDay(s.t);
-    s.world.hay.barnRack = Math.max(s.world.hay.barnRack, 50);
-    s.world.hay.paddockFeeder = Math.max(s.world.hay.paddockFeeder, 50);
-    s.world.water.barnWater.level = 90;
-    s.world.water.paddockWater.level = 90;
+    for (const id of ['barnRackW', 'barnRackE', 'paddockFeeder'] as const) s.world.feeders[id].hay = Math.max(s.world.feeders[id].hay, 50);
+    for (const id of ['barnWaterW', 'barnWaterE', 'paddockWater'] as const) s.world.troughs[id].level = 90;
     const day = m >= 8.5 * 60 && m < 19 * 60;
-    if (day !== s.world.gateOpen && !s.elephants.some((e) => Math.abs(e.x - 20) < 3 && Math.abs(e.y - 20) < 2)) s.world.gateOpen = day;
+    if (day !== s.world.gates.outer && !s.elephants.some((e) => Math.abs(e.x - 15.5) < 3.2 && Math.abs(e.y - 20) < 2.2)) s.world.gates.outer = day;
     step(s);
     onStep?.();
   }
@@ -93,29 +91,31 @@ describe('поведение и характер', () => {
     expect(s.elephants[1].day.lyingMinutes).toBeGreaterThan(s.elephants[0].day.lyingMinutes);
   });
 
-  it('уверенная оттесняет робкую от единственной кормушки', () => {
-    let conflicts = 0;
+  it('уверенная отнимает таз у робкой: хозяйке достаётся меньше', () => {
+    let taken = 0;
     for (const seed of [14, 15, 16]) {
       const s = pair(seed, { confidence: 0.95, foodDrive: 0.9, nervousness: 0.1 }, { confidence: 0.05, nervousness: 0.8, foodDrive: 0.9, persistence: 0.1 });
       const [boss, shy] = s.elephants;
-      s.world.trough.portions = 6;
-      s.world.trough.since = s.t;
-      s.world.hay.barnRack = 0;
-      // Робкая уже ест овощи у решётки, властная голодна и стоит поодаль
-      const slot = { x: 19.5, y: 27.35 };
-      shy.x = slot.x;
-      shy.y = slot.y;
+      for (const id of ['barnRackW', 'barnRackE', 'paddockFeeder'] as const) s.world.feeders[id].hay = 0;
+      for (const t of s.world.tubs) t.where = 'rack';
+      const tub = s.world.tubs.find((t) => t.owner === shy.id)!;
+      tub.where = 'floor';
+      tub.x = 15;
+      tub.y = 26.2;
+      tub.veg.carrot = 30;
+      shy.x = 15;
+      shy.y = 24.4;
       shy.heading = Math.PI / 2;
-      shy.act = { kind: 'eat', target: { t: 'slot', station: 'barnTrough', slot: 0 }, phase: 'do', start: s.t, doStart: s.t, dur: 60, score: 0.8, forced: false, signal: null, note: 'ест овощи', key: 'eat:barnTrough', aux: null, flag: 1 };
       shy.needs.hunger = 70;
+      shy.mem.nextThink = s.t;
       boss.x = 22;
       boss.y = 23;
       boss.needs.hunger = 90;
       boss.mem.nextThink = s.t;
-      runMinutes(s, 40);
-      conflicts += boss.day.conflicts;
+      runMinutes(s, 45);
+      taken += boss.day.stolen + shy.day.robbed + boss.day.conflicts;
     }
-    expect(conflicts).toBeGreaterThan(0);
+    expect(taken).toBeGreaterThan(0);
   });
 
   it('скука ведёт к игре и исследованию, если есть чем заняться', () => {
@@ -124,7 +124,7 @@ describe('поведение и характер', () => {
     e.needs.boredom = 85;
     e.needs.hunger = 5;
     e.needs.thirst = 5;
-    s.world.gateOpen = true;
+    s.world.gates.outer = true;
     runMinutes(s, 180);
     const engaged = (e.day.minutes.play ?? 0) + (e.day.minutes.explore ?? 0) + (e.day.minutes.bathe ?? 0) + (e.day.minutes.dust ?? 0);
     expect(engaged).toBeGreaterThan(15);

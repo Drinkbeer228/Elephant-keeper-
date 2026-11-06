@@ -29,6 +29,9 @@ export const ICON = {
   drop2: wrap('<path d="M6 19h12M8 15l4 4 4-4M12 5v14"/>'),
   plus: wrap('<path d="M12 5v14M5 12h14"/>'),
   minus: wrap('<path d="M5 12h14"/>'),
+  dots: wrap('<circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/>'),
+  clock: wrap('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/>'),
+  knife: wrap('<path d="M4 20L15 9l2 2-9 9z"/><path d="M15 9l3-3a2 2 0 0 1 2.8 2.8L18 11.6"/>'),
 };
 
 export type IconName = keyof typeof ICON;

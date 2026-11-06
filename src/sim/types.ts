@@ -1,6 +1,7 @@
-import type { StationId, ZoneId } from '../data/facility';
+import type { AreaId, DoorId, FeederId, GateId, StationId, ToolKind, TroughId, ZoneId } from '../data/facility';
+import type { DietId, VegKind } from '../data/rations';
 
-export type { StationId, ZoneId };
+export type { AreaId, DoorId, FeederId, GateId, StationId, ToolKind, TroughId, ZoneId, DietId, VegKind };
 
 export interface Vec {
   x: number;
@@ -23,6 +24,7 @@ export interface Traits {
   persistence: number; // переменчивая ↔ упрямая
   expressiveness: number; // молчаливая ↔ разговорчивая (ясность сигналов)
   sensitivity: number; // неприхотливая ↔ чувствительная к грязи, жаре и шуму
+  mischief: number; // бережная ↔ шкодливая (тянет, грызёт и ломает вещи)
 }
 
 export type TraitKey = keyof Traits;
@@ -39,6 +41,7 @@ export const TRAIT_KEYS: TraitKey[] = [
   'persistence',
   'expressiveness',
   'sensitivity',
+  'mischief',
 ];
 
 export interface Look {
@@ -60,6 +63,26 @@ export interface Look {
 
 export type FoodKind = 'hay' | 'produce' | 'browse';
 
+// Как слониха сообщает, что ей нужно: личная привычка, а не общая анимация
+export type SignalStyle = 'stomp' | 'rumble' | 'stare' | 'gate' | 'beg';
+export type Foot = 'FL' | 'FR' | 'HL' | 'HR';
+
+// Свисток кипера для этой слонихи: своя высота, интервал и ритм
+export interface Whistle {
+  f0: number;
+  f1: number;
+  notes: number;
+  gap: number;
+  wave: 'sine' | 'triangle';
+}
+
+export interface Habits {
+  signal: SignalStyle;
+  foot: Foot;
+  whistle: Whistle;
+  diet: DietId;
+}
+
 export interface ElephantProfile {
   id: string;
   name: string;
@@ -68,6 +91,7 @@ export interface ElephantProfile {
   look: Look;
   favoriteFood: FoodKind;
   color: string; // цвет-метка в интерфейсе
+  habits: Habits;
 }
 
 // Выученное: меняется от опыта и сохраняется между сменами
@@ -75,6 +99,7 @@ export interface Learned {
   trust: number; // доверие к киперу
   cooperation: number; // готовность выполнять просьбы кипера
   expectation: number; // ожидание, что на сигнал ответят
+  toilet: number; // связь «попросилась — подставили бак — наградили»
 }
 
 export interface Needs {
@@ -90,6 +115,18 @@ export interface Needs {
 }
 
 export type NeedKey = keyof Needs;
+
+// Кожа: грязь по местам (0 — чисто, 1 — сильно), сено на спине и мыльная пена
+export interface BodyState {
+  back: number; // спину достать можно, только когда слониха лежит
+  side: number;
+  legs: number;
+  head: number;
+  hay: number;
+  soap: number;
+}
+
+export type BodyPart = 'back' | 'side' | 'legs' | 'head';
 
 // ---------------------------------------------------------------------------
 // Поведение
@@ -113,11 +150,42 @@ export type ActivityKind =
   | 'seekKeeper'
   | 'follow'
   | 'pace'
-  | 'avoid';
+  | 'avoid'
+  | 'carry'
+  | 'toss'
+  | 'shake'
+  | 'manipulate'
+  | 'lie';
+
+export const ACTIVITY_KINDS: ActivityKind[] = [
+  'idle',
+  'wander',
+  'explore',
+  'eat',
+  'drink',
+  'urinate',
+  'defecate',
+  'sleep',
+  'rest',
+  'play',
+  'bathe',
+  'dust',
+  'socialize',
+  'signal',
+  'seekKeeper',
+  'follow',
+  'pace',
+  'avoid',
+  'carry',
+  'toss',
+  'shake',
+  'manipulate',
+  'lie',
+];
 
 export type SignalKind = 'toilet' | 'out' | 'in' | 'food' | 'water' | 'attention';
 
-export type ObjectId = 'ball' | 'log' | 'drum' | 'tire' | 'pool' | 'dust' | 'treeA' | 'treeB' | 'treeC';
+export type ObjectId = 'ball' | 'log' | 'drum' | 'tire' | 'pool' | 'dust' | 'treeA' | 'treeB' | 'treeC' | 'hose';
 
 export type TargetRef =
   | { t: 'point'; x: number; y: number; face: number | null }
@@ -126,7 +194,8 @@ export type TargetRef =
   | { t: 'food'; id: number }
   | { t: 'el'; id: string }
   | { t: 'item'; id: number }
-  | { t: 'gate'; side: ZoneId };
+  | { t: 'tub'; id: number }
+  | { t: 'gate'; gate: GateId; side: AreaId };
 
 export interface Activity {
   kind: ActivityKind;
@@ -140,8 +209,8 @@ export interface Activity {
   signal: SignalKind | null;
   note: string; // причина выбора (для осмотра и отладки)
   key: string; // ключ поведения: для откатов и сравнения «то же самое занятие»
-  aux: Vec | null; // вторая точка (маршрут хождения взад-вперёд)
-  flag: number; // служебная отметка занятия (спор за место решён, направление хождения)
+  aux: Vec | null; // вторая точка (куда нести сено, маршрут хождения взад-вперёд)
+  flag: number; // служебная отметка занятия (спор за место решён, сено взято, направление хождения)
 }
 
 export interface SignalState {
@@ -160,26 +229,40 @@ export interface DayStats {
   urineDrain: number;
   urineOutside: number;
   urineBedding: number;
+  urineTank: number;
   dung: number;
   ate: number; // единиц голода утолено
+  tubKg: number; // съедено из своего таза
+  stolen: number; // сколько раз отняла чужой корм
+  robbed: number; // сколько раз отняли у неё
   treats: number;
   conflicts: number;
   refusals: number;
+  fermented: number; // забродивших яблок
+  groomed: number;
   wellbeingSum: number;
   wellbeingSamples: number;
   lyingMinutes: number;
+  dirtyLying: number; // минут лёжа на мокром и грязном
 }
 
 export interface ElephantMemory {
   nextThink: number;
   cooldown: Record<string, number>; // ключ поведения → игровое время, раньше которого его не выбирают
   habit: Record<string, number>; // привыкание к видам обогащения 0..1
-  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean } | null;
+  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean; why: 'call' | 'toilet' | 'lie' } | null;
   lastGreet: Record<string, number>;
   lastAte: number;
   spooked: number; // когда кипер в последний раз напугал
   zone: ZoneId;
   zoneSince: number; // когда вошла в текущую зону
+  lastSignalFx: number; // когда последний раз топнула/заурчала (для ритма сигнала)
+}
+
+// Что слон держит хоботом
+export interface Trunk {
+  kind: 'hay' | 'straw' | 'bamboo' | 'fruit' | null;
+  amount: number;
 }
 
 export interface Elephant {
@@ -197,6 +280,9 @@ export interface Elephant {
   lying: boolean;
   wet: number; // мокрая кожа 0..1
   dust: number; // пыль на спине 0..1
+  body: BodyState;
+  tipsy: number; // опьянение от забродивших яблок 0..1
+  trunk: Trunk;
   signal: SignalState | null;
   stuck: number; // секунд без продвижения к цели
   bestDist: number; // ближе всего к цели за текущий подход
@@ -216,45 +302,123 @@ export interface Dung {
   zone: ZoneId;
 }
 
-export type FoodItemKind = 'produce' | 'browse' | 'hay' | 'remains';
+export type FoodItemKind = 'produce' | 'browse' | 'bamboo' | 'hay' | 'straw' | 'fruit' | 'remains';
 
 export interface FoodItem {
   id: number;
   kind: FoodItemKind;
   x: number;
   y: number;
-  amount: number; // для кусков — единиц голода; для веток — доля 0..1
+  amount: number; // для кусков — единиц голода; для веток — доля 0..1; для сена — единиц
   t: number;
   zone: ZoneId;
+  rot: number; // спелость яблока: 0 — свежее … 0.5 бродит … 0.8+ гниль
 }
 
-export type LooseKind = 'fork' | 'rake' | 'hay' | 'straw' | 'ration' | 'browse';
+// Всё, что кипер носит в руках, кладёт на пол или в тачку
+export type ThingKind =
+  | ToolKind
+  | 'hose'
+  | 'hay'
+  | 'straw'
+  | 'browse'
+  | 'bamboo'
+  | 'sawdust'
+  | 'tank'
+  | 'washKit'
+  | 'chem'
+  | 'ration'
+  | 'porridge'
+  | 'tub'
+  | 'pile'
+  | 'shard';
 
-export interface LooseItem {
+// load: лопата — мусор на полотне (0/1), швабра — сырость 0..1, мешок опилок — горстей,
+// бак — литров, набор для мытья — воды 0..1, средство — порций, ведро овощей — порций,
+// каша — кг, куча — объём; aux: таз — его id, каша — когда залили водой; owner — чей таз/каша
+export interface Held {
+  kind: ThingKind;
+  load: number;
+  aux: number;
+  owner: string | null;
+}
+
+export interface LooseItem extends Held {
   id: number;
-  kind: LooseKind;
   x: number;
   y: number;
-  portions: number;
 }
 
-export interface WaterPoint {
+export type TroughStage = 'ok' | 'drained' | 'chem' | 'scrubbed' | 'rinsed';
+
+export interface TroughState {
   level: number;
   valve: boolean;
   overflow: number; // минут переполнения
+  drain: boolean; // открыта пробка слива
+  debris: number; // сено и сор в воде 0..1
+  chem: number; // остаток моющего средства 0..1 (не смыли — пить нельзя)
+  stage: TroughStage;
+  changed: number; // когда воду последний раз полностью меняли с мытьём
+}
+
+export interface FeederState {
+  hay: number;
+  straw: number;
 }
 
 export interface Cells {
   wet: number[];
   soil: number[];
   bedding: number[];
+  litter: number[]; // рассыпанное сено и солома на полу
+  sawdust: number[]; // опилки поверх мокрого
+}
+
+export interface Barrow {
+  x: number;
+  y: number;
+  heading: number;
+  pushed: boolean;
+  load: number; // навоз и грязная подстилка
+  cargo: Held[]; // тюки, мешки, инвентарь, тазы
+}
+
+export interface HoseState {
+  state: 'reel' | 'held' | 'floor';
+  path: Vec[]; // точки перегибов от катушки; последний отрезок — до конца шланга
+  end: Vec;
+  length: number; // рабочая длина (после покусов короче)
+  damage: number; // течь 0..1
+  chewed: number; // сколько раз прокусывали
+}
+
+export interface Tub {
+  id: number;
+  owner: string;
+  x: number;
+  y: number;
+  heading: number;
+  where: 'rack' | 'prep' | 'held' | 'barrow' | 'floor';
+  veg: Record<VegKind, number>; // кг каждого вида
+  emptySince: number; // когда опустел на полу (−1 — нет)
+  damage: number; // трещины 0..1
+  broken: boolean;
+  dirty: boolean;
+}
+
+export interface ShiftChecks {
+  troughChanged: Record<TroughId, boolean>;
+  hoseIncidents: number;
+  tubsBroken: number;
+  porridge: Record<string, number[]>; // слон → когда кормили кашей
+  vegTub: Record<string, number>; // слон → сколько кг овощей поставили в таз
 }
 
 export interface World {
-  gateOpen: boolean;
-  hay: Record<'barnRack' | 'paddockFeeder', number>;
-  trough: { portions: number; since: number };
-  water: Record<'barnWater' | 'paddockWater', WaterPoint>;
+  gates: Record<GateId, boolean>;
+  feeders: Record<FeederId, FeederState>;
+  troughs: Record<TroughId, TroughState>;
   pool: { dirt: number; valve: boolean };
   drum: number;
   ball: { x: number; y: number; vx: number; vy: number };
@@ -264,26 +428,38 @@ export interface World {
   dung: Dung[];
   food: FoodItem[];
   items: LooseItem[];
-  tools: { fork: boolean; rake: boolean; hose: boolean }; // что висит на месте
-  barrow: { x: number; y: number; heading: number; pushed: boolean; load: number };
+  tools: Record<ToolKind, boolean>; // что висит на стойке
+  barrow: Barrow;
+  hose: HoseState;
+  tubs: Tub[];
+  trees: Record<string, number>; // яблок на дереве
   container: number;
-  stock: { hay: number; straw: number; produce: number; browse: number };
+  stock: {
+    hay: number;
+    straw: number;
+    browse: number;
+    bamboo: number;
+    sawdust: number;
+    veg: Record<VegKind, number>; // кг
+    porridge: Record<DietId, number>; // кг сухой смеси
+  };
+  supplies: { chem: number; shampoo: number; tape: number };
+  checks: ShiftChecks;
 }
-
-export type Held =
-  | { kind: 'fork'; load: number }
-  | { kind: 'rake'; load: number }
-  | { kind: 'hose' }
-  | { kind: 'hay' }
-  | { kind: 'straw' }
-  | { kind: 'ration'; portions: number }
-  | { kind: 'browse' };
 
 export interface KeeperTask {
   action: ActionRef;
   label: string;
   elapsed: number;
   dur: number;
+}
+
+// Нарезка овощей: что сейчас в руке
+export interface PrepState {
+  tubId: number;
+  hand: VegKind | null;
+  trimmed: boolean;
+  combo: number; // сколько подряд без ошибок
 }
 
 export interface Keeper {
@@ -293,49 +469,83 @@ export interface Keeper {
   held: Held | null;
   pouch: number;
   task: KeeperTask | null;
+  prep: PrepState | null;
   running: boolean;
   moving: boolean;
+  carried: number; // метров пронесено с тюком (для рассыпания)
 }
 
 // Действие кипера — данные, а не замыкание: его можно сохранить, повторить и проверить
 export interface ActionRef {
   verb: Verb;
-  target: string; // станция, id предмета, id слона, клетка 'x,y'
+  target: string; // станция, id предмета, id слона, клетка
 }
 
 export type Verb =
-  | 'takeTool'
-  | 'returnTool'
+  | 'take'
+  | 'putBack'
   | 'takeHose'
-  | 'returnHose'
-  | 'takeHay'
-  | 'takeStraw'
-  | 'takeBrowse'
-  | 'prepRation'
-  | 'refillPouch'
+  | 'reelHose'
+  | 'grabHose'
   | 'pickUp'
   | 'drop'
-  | 'loadHay'
-  | 'fillTrough'
-  | 'handFeed'
-  | 'scatter'
-  | 'tossBrowse'
-  | 'fillDrum'
-  | 'clearTrough'
-  | 'fork'
-  | 'rake'
-  | 'hose'
-  | 'spreadStraw'
-  | 'emptyTool'
+  | 'stow'
+  | 'unstow'
   | 'pushBarrow'
   | 'parkBarrow'
   | 'dumpBarrow'
+  | 'loadFeeder'
+  | 'shovel'
+  | 'dumpShovel'
+  | 'sweep'
+  | 'mop'
+  | 'wring'
+  | 'rake'
+  | 'sawdust'
+  | 'spreadStraw'
+  | 'hoseFloor'
   | 'valve'
+  | 'drainTrough'
+  | 'chemTrough'
+  | 'scrubTrough'
+  | 'rinseTrough'
   | 'gate'
   | 'treat'
   | 'scratch'
-  | 'shower'
+  | 'pet'
+  | 'hand'
   | 'call'
+  | 'lieDown'
+  | 'standUp'
+  | 'groom'
+  | 'soap'
+  | 'scrub'
+  | 'rinse'
+  | 'shower'
+  | 'hoseWash'
+  | 'tankPlace'
+  | 'toiletCmd'
+  | 'tankTake'
+  | 'emptyTank'
+  | 'feedPorridge'
+  | 'handFeed'
+  | 'placeTub'
+  | 'collectTub'
+  | 'takeTub'
+  | 'rackTub'
+  | 'prepVeg'
+  | 'prepPick'
+  | 'prepTrim'
+  | 'prepToss'
+  | 'prepExit'
+  | 'mixPorridge'
+  | 'takePorridge'
+  | 'wash'
+  | 'refillPouch'
+  | 'scatter'
+  | 'tossBrowse'
+  | 'fillDrum'
+  | 'repairHose'
   | 'journal';
 
 export interface ActionOption {
@@ -347,6 +557,8 @@ export interface ActionOption {
   priority: number;
   elephantId: string | null;
   timed: boolean;
+  group: string; // к чему относится: имя слона, станция, тачка, «в руках»
+  dist: number; // до цели, м — для порядка в списке
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +592,7 @@ export interface ElephantDayReport {
   answered: number;
   ignored: number;
   urineBedding: number;
+  urineTank: number;
   trustDelta: number;
   cooperationDelta: number;
   highlights: string[];
@@ -442,4 +655,5 @@ export interface SimEvent {
   elephantId: string | null;
   severity: Severity;
   text: string;
+  tag?: string; // подробность для анимации (например, какой овощ)
 }

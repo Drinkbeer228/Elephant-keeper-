@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { ElephantProfile } from '../sim';
 import * as A from './art';
+import * as I from './itemsArt';
 import * as S from './stationsArt';
 import { LOG, BOULDERS, TREES } from '../data/facility';
 
@@ -32,9 +33,29 @@ export function loadStaticArt(scene: Phaser.Scene): void {
   addArt(scene, 'item-straw', A.strawBale());
   addArt(scene, 'item-ration', A.rationBucket());
   addArt(scene, 'item-browse', A.browseBundle());
-  addArt(scene, 'item-fork', A.forkTool());
+  addArt(scene, 'item-shovel', I.shovelTool());
   addArt(scene, 'item-rake', A.rakeTool());
+  addArt(scene, 'item-broom', I.broomTool());
+  addArt(scene, 'item-mop', I.mopTool());
+  addArt(scene, 'item-brush', I.brushTool());
   addArt(scene, 'item-hose', A.hoseNozzle());
+  addArt(scene, 'item-sawdust', I.sawdustSack());
+  addArt(scene, 'item-tank', I.tankArt('empty'));
+  addArt(scene, 'item-tank-full', I.tankArt('full'));
+  addArt(scene, 'item-tank-dirty', I.tankArt('dirty'));
+  addArt(scene, 'item-washKit', I.washKitArt());
+  addArt(scene, 'item-chem', I.chemArt());
+  addArt(scene, 'item-porridge', I.porridgeBucket(true));
+  addArt(scene, 'item-porridge-empty', I.porridgeBucket(false));
+  addArt(scene, 'item-pile', I.pileArt());
+  addArt(scene, 'item-bamboo', I.bambooBundle());
+  addArt(scene, 'food-bamboo', I.bambooBundle());
+  addArt(scene, 'food-bamboo-remains', I.bambooRemains());
+  addArt(scene, 'food-straw', I.strawPile());
+  addArt(scene, 'apple-fresh', I.appleArt('fresh'));
+  addArt(scene, 'apple-ferment', I.appleArt('ferment'));
+  addArt(scene, 'apple-rotten', I.appleArt('rotten'));
+  addArt(scene, 'hay-tuft', I.hayTuft());
   addArt(scene, 'barrow', A.barrowArt());
   addArt(scene, 'barrow-load', A.barrowLoad());
   addArt(scene, 'shadow-barrow', A.softShadow(1.5, 0.8, 0.18));
@@ -78,9 +99,16 @@ export function loadStaticArt(scene: Phaser.Scene): void {
   addArt(scene, 'st-rack-barn-slats', S.rackSlats(4, 0.7));
   addArt(scene, 'st-rack-paddock', S.rackArt(4, 0.85));
   addArt(scene, 'st-rack-paddock-slats', S.rackSlats(4, 0.85));
-  addArt(scene, 'st-trough-barn', S.troughArt(0.8, 3.2));
+  addArt(scene, 'st-trough-barnW', S.troughArt(2.9, 0.85));
+  addArt(scene, 'st-trough-barnE', S.troughArt(1.8, 0.85));
   addArt(scene, 'st-trough-paddock', S.troughArt(3.8, 0.85));
-  addArt(scene, 'st-produce', S.rackArt(2, 0.65));
+  addArt(scene, 'st-training', S.trainingWallArt());
+  addArt(scene, 'st-tubrack', S.tubRackArt());
+  addArt(scene, 'st-porridge', S.porridgeArt());
+  addArt(scene, 'st-sink', S.sinkArt());
+  addArt(scene, 'st-cabinet', S.cabinetArt());
+  addArt(scene, 'st-bamboo', S.bambooPileArt());
+  addArt(scene, 'st-sawdust', S.sawdustPileArt());
   addArt(scene, 'st-drain', S.drainArt());
   addArt(scene, 'st-panel', S.panelArt());
   addArt(scene, 'st-valve-open', S.valveArt(true));
@@ -106,6 +134,8 @@ export function loadElephantArt(scene: Phaser.Scene, p: ElephantProfile): void {
   const g = A.bodyGeom(p.look);
   addArt(scene, `el-shadow-${p.id}`, A.softShadow(g.a * 2 + 1.0, g.b * 2 + 0.5, 0.24));
   addArt(scene, `el-name-${p.id}`, A.namePill(p.name, p.color));
+  addArt(scene, `tub-${p.id}`, I.tubArt(p.color));
+  addArt(scene, `shard-${p.id}`, I.shardArt(p.color));
 }
 
 function drawZ(): A.Art {
