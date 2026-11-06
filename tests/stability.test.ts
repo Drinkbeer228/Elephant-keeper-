@@ -38,7 +38,7 @@ describe('устойчивость', () => {
 
   it('ворота открыты весь день: слоны свободно ходят между зонами', () => {
     const s = createState({ seed: 6, herdSize: 3 });
-    s.world.gateOpen = true;
+    s.world.gates.outer = true;
     const zones = new Set<string>();
     for (let i = 0; i < 30 * 60 * 8; i++) {
       step(s);

@@ -71,7 +71,8 @@ export type UrineSpot = 'tank' | 'drain' | 'outside' | 'bedding' | 'concrete' | 
 // Бак под слонихой: стоит на полу в радиусе метра от струи
 export function tankUnder(s: State, x: number, y: number): LooseItem | null {
   let best: LooseItem | null = null;
-  let bestD = 1.0;
+  // Бак широкий (65 л), струя — не точка: стоящей боком у стенки он под ней
+  let bestD = 1.35;
   for (const it of s.world.items) {
     if (it.kind !== 'tank') continue;
     const d = Math.hypot(it.x - x, it.y - y);

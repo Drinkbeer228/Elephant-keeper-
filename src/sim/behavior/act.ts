@@ -837,8 +837,8 @@ function stepEat(s: State, e: Elephant, dt: number, elapsed: number): DoResult {
       fs.hay = Math.max(0, fs.hay - FOOD.hayUse * speed * dt);
       n.boredom -= 0.08 * dt;
       // Солому из той же кормушки выдёргивают и бросают под ноги
-      if (fs.straw > 0 && random(s) < dt * 0.6 * (0.5 + T.playfulness)) {
-        const pull = Math.min(fs.straw, 1.2);
+      if (fs.straw > 0 && random(s) < dt * 0.12 * (0.5 + T.playfulness)) {
+        const pull = Math.min(fs.straw, 1.0);
         fs.straw -= pull;
         addLitter(s, h.x + range(s, -0.8, 0.8), h.y - range(s, 0.3, 1.4), 0.12, 1.0);
       }
@@ -852,8 +852,8 @@ function stepEat(s: State, e: Elephant, dt: number, elapsed: number): DoResult {
     } else if (fs.straw > 0) {
       n.hunger = Math.max(0, n.hunger - FOOD.strawEat * speed * dt);
       fs.straw = Math.max(0, fs.straw - FOOD.strawUse * dt);
-      if (random(s) < dt * 0.9) {
-        const pull = Math.min(fs.straw, 1.5);
+      if (random(s) < dt * 0.25) {
+        const pull = Math.min(fs.straw, 1.2);
         fs.straw -= pull;
         addLitter(s, h.x + range(s, -1, 1), h.y - range(s, 0.3, 1.6), 0.14, 1.1);
       }
@@ -1150,7 +1150,9 @@ export function spook(s: State, e: Elephant, from: Vec, why: string): void {
 }
 
 export function respondToCall(s: State, e: Elephant, spot: Vec, face: number, note: string, why: 'call' | 'toilet' | 'lie' = 'call'): void {
-  e.mem.call = { until: s.t + 12, x: spot.x, y: spot.y, arrivedAt: -1, rewarded: false, why };
+  // Зов ждёт, пока она дойдёт: через оба стойла идти дольше, чем от решётки
+  const walk = dist(e, spot) * 1.3;
+  e.mem.call = { until: s.t + 12 + walk, x: spot.x, y: spot.y, arrivedAt: -1, rewarded: false, why };
   const c: Candidate = { kind: 'follow', target: { t: 'point', x: spot.x, y: spot.y, face }, score: 1.2, dur: LEARN.rewardWindow, key: 'follow', signal: null, note, aux: null };
   const keepCall = e.mem.call;
   startActivity(s, e, c, true);

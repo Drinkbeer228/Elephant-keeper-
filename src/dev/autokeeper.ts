@@ -7,7 +7,7 @@
 import { KEEPER } from '../data/balance';
 import { BARROW_HOME, STALL_E, STALL_W, STATIONS, TANK_HOME, TROUGH_IDS, areaAt, hardFloor, type AreaId, type FeederId, type StationId, type TroughId } from '../data/facility';
 import { PORRIDGE_SOAK_MIN } from '../data/rations';
-import { availableActions, minuteOfDay, type ActionOption, type Elephant, type State, type StepInput, type Vec } from '../sim';
+import { availableActions, bodyDirt, minuteOfDay, type ActionOption, type Elephant, type State, type StepInput, type Vec } from '../sim';
 import { keeperNav } from '../sim/keeper';
 import { keeperFieldAt, keeperRoute } from '../sim/nav';
 import { cellCenter, isBeddingCell } from '../sim/world';
@@ -95,9 +95,12 @@ export class AutoKeeper {
   private done = new Set<string>();
   private skip = new Map<string, number>();
   private tries = new Map<string, number>();
+  private cool = new Map<string, number>();
+  private now = 0;
   stats = { jobs: {} as Record<string, number>, failed: {} as Record<string, number> };
 
   decide(s: State): StepInput {
+    this.now = s.t;
     if (s.keeper.task) return IDLE;
     // Нарезка овощей: левая рука — взять / бросить, правая — обрезать
     const p = s.keeper.prep;
@@ -106,6 +109,7 @@ export class AutoKeeper {
       if (!this.job) {
         this.job = this.plan(s);
         if (!this.job) return IDLE;
+        if (this.cooling(this.job.name, s)) this.job = { name: 'cooldown', steps: [wait(() => false, 3)] };
         this.stats.jobs[this.job.name] = (this.stats.jobs[this.job.name] ?? 0) + 1;
         this.route = [];
         this.stuck = 0;
@@ -162,8 +166,14 @@ export class AutoKeeper {
     if (this.job) {
       const key = why ? `${this.job.name}/${why}` : this.job.name;
       this.stats.failed[key] = (this.stats.failed[key] ?? 0) + 1;
+      // Та же задача — не раньше чем через несколько минут: иначе бот застрянет на ней
+      this.cool.set(this.job.name, this.now + 6);
     }
     this.job = null;
+  }
+
+  private cooling(name: string, s: State): boolean {
+    return (this.cool.get(name) ?? -1) > s.t;
   }
 
   private moveTo(s: State, to: Vec): StepInput {
@@ -230,13 +240,24 @@ export class AutoKeeper {
     const m = minuteOfDay(s.t);
     const day = Math.floor((s.t - 480) / 1440);
     const night = m >= 21 * 60 || m < 6 * 60;
-    const dayTime = m >= 8.5 * 60 && m < 18 * 60;
+    // День бота начинается в 6:30: слонов — на выгул, стойла убрать до сдачи смены в 8:00
+    const dayTime = m >= 6.5 * 60 && m < 18 * 60;
     if (w.barrow.pushed) return this.barrowHome(s);
     if (k.held) return this.dispose(s);
     // Тачка, забытая в отсеке, — вывезти прежде всего: иначе ворота не открыть
     const barrowArea = areaAt(w.barrow.x, w.barrow.y);
     if (barrowArea && w.barrow.load === 0 && !w.barrow.cargo.length) return this.barrowOut(barrowArea);
     if (barrowArea) return this.barrowDump(s);
+
+    // Шланг брошен на полу — поднять и смотать
+    if (w.hose.state === 'floor' && !this.cooling('hoseHome', s)) return { name: 'hoseHome', steps: [go(w.hose.end, 0.8), act('grabHose', true), go(st('hoseReel'), 0.5), act('reelHose', true)] };
+
+    // Инвентарь, оставшийся в тачке, — на стойку
+    const toolIdx = w.barrow.cargo.findIndex((c) => c.kind === 'shovel' || c.kind === 'broom' || c.kind === 'rake' || c.kind === 'mop' || c.kind === 'brush');
+    if (toolIdx >= 0 && !barrowArea) {
+      const kind = w.barrow.cargo[toolIdx].kind;
+      return { name: 'toolsHome', steps: [go((x) => this.barrowSide(x), 0.35), this.unstow(kind), go(st('toolRack')), act(`putBack:${kind}`)] };
+    }
 
     // Краны поилок: закрыть, когда налито
     for (const id of TROUGH_IDS) {
@@ -259,7 +280,13 @@ export class AutoKeeper {
         } else if (!w.gates.outer && a !== 'paddock' && !night) return this.gate('outer', true);
       }
       if ((sig.kind === 'out' && !w.gates.outer) || (sig.kind === 'in' && !w.gates.outer && !night)) return this.gate('outer', true);
-      if (sig.kind === 'water' && !w.troughs[TROUGH_OF[a]].valve && w.troughs[TROUGH_OF[a]].stage === 'ok') return { name: 'water', steps: [go(st(TROUGH_OF[a])), act(`valve:${TROUGH_OF[a]}`)] };
+      if (sig.kind === 'water') {
+        const id = TROUGH_OF[a];
+        const t = w.troughs[id];
+        if (!t.valve && t.stage === 'ok' && !t.drain && t.level < 90) return { name: 'water', steps: [go(st(id)), act(`valve:${id}`)] };
+        // Полная, но пить не хочет — в воде сор или средство: сменить воду
+        if (!t.valve && t.stage === 'ok' && (t.debris > 0.3 || t.chem > 0.05) && w.supplies.chem > 0 && !this.cooling(`troughChange:${id}`, s)) return this.troughChange(id);
+      }
       if (sig.kind === 'food' && w.stock.hay > 0) return this.hay(a === 'paddock' ? 'paddockFeeder' : RACK[a], s);
     }
 
@@ -268,13 +295,19 @@ export class AutoKeeper {
       const t = w.troughs[id];
       if (!t.valve && !t.drain && t.stage === 'ok' && t.level < 45) return { name: 'water', steps: [go(st(id)), act(`valve:${id}`)] };
     }
-    // Начатую смену воды — довести до конца
-    for (const id of TROUGH_IDS) if (w.troughs[id].stage !== 'ok' || w.troughs[id].drain) return this.troughFinish(id);
+    // Начатую смену воды — довести до конца (пока наливается после промывки — ждать не надо)
+    for (const id of TROUGH_IDS) {
+      const t = w.troughs[id];
+      const filling = t.stage === 'rinsed' && t.valve && !t.drain;
+      if ((t.stage !== 'ok' || t.drain) && !filling && !this.cooling(`troughFinish:${id}`, s)) return this.troughFinish(id);
+    }
+    // Рано утром, пока все в стойлах, — сменить воду на выгуле
+    if (m >= 5 * 60 && m < 6.5 * 60 && allIn(s, STALLS) && !w.gates.outer && !w.checks.troughChanged.paddockWater && w.supplies.chem > 0 && !this.cooling('troughChange:paddockWater', s)) return this.troughChange('paddockWater');
 
     // Сено
     if (w.stock.hay > 0) {
-      if ((m >= 15.5 * 60 || m < 7 * 60) && !w.gates.outer) for (const a of ['stallW', 'stallE'] as const) if (w.feeders[RACK[a]].hay < 30) return this.hay(RACK[a], s);
-      if (w.feeders.paddockFeeder.hay < 30 && m >= 7.5 * 60 && m < 16 * 60) return this.hay('paddockFeeder', s);
+      if ((m >= 15.5 * 60 || m < 6 * 60) && !w.gates.outer) for (const a of ['stallW', 'stallE'] as const) if (w.feeders[RACK[a]].hay < 30) return this.hay(RACK[a], s);
+      if (w.feeders.paddockFeeder.hay < 30 && m >= 6 * 60 && m < 16 * 60) return this.hay('paddockFeeder', s);
     }
 
     // Лакомства в сумке
@@ -294,7 +327,7 @@ export class AutoKeeper {
       if (ready && e) return this.porridge(ready.id, e, s);
     }
     // Скоро каша — длинную работу не начинать
-    const porridgeDue = w.items.some((it) => it.kind === 'porridge' && it.load > 0 && s.t - it.aux >= PORRIDGE_SOAK_MIN - 40);
+    const porridgeDue = w.items.some((it) => it.kind === 'porridge' && it.load > 0 && s.t - it.aux >= PORRIDGE_SOAK_MIN - 20);
 
     // Тазы: пустые забрать и помыть; к вечеру — нарезка и тазы к 19:00
     const floorTub = w.tubs.find((t) => t.where === 'floor' && (t.broken || Object.values(t.veg).reduce((x, y) => x + y, 0) < 0.5) && !this.skipped(`tub:${t.id}`, s));
@@ -302,7 +335,7 @@ export class AutoKeeper {
       const a = areaAt(floorTub.x, floorTub.y);
       if (a && (this.inside(s, a) || this.nearLine(floorTub))) return this.collectTub(s, floorTub.id, a);
     }
-    if (m >= 16.5 * 60 && m < 19 * 60 && !porridgeDue) {
+    if (m >= 14.5 * 60 && m < 19 * 60 && !porridgeDue) {
       const tub = w.tubs.find((t) => t.where === 'rack' && !t.dirty && !t.broken && !this.done.has(`prep:${t.id}:${day}`));
       const onTable = w.tubs.find((t) => t.where === 'prep');
       if (onTable) return { name: 'serveTub', steps: [go(st('prepTable')), act(`takeTub:${onTable.id}`), go((x) => this.tubSpot(x, onTable.owner), 0.5), act('placeTub')] };
@@ -326,14 +359,21 @@ export class AutoKeeper {
       if (!w.gates.outer) {
         if (dirty.length && w.barrow.load < KEEPER.barrowMax - 1) return this.cleanArea(dirty[0], s);
         for (const a of STALLS) if (this.bareBedding(s, a) >= 6 && w.stock.straw > 0) return this.straw(s, a);
-        // Смена воды раз за смену — пока у поилок никого
-        for (const id of ['barnWaterW', 'barnWaterE'] as const) if (!w.checks.troughChanged[id] && w.supplies.chem + 0 > 0) return this.troughChange(id);
+      }
+      // Смена воды раз за смену — пока у поилок никого (поилки у решётки, кипер — в проходе)
+      for (const id of ['barnWaterW', 'barnWaterE'] as const) if (!w.checks.troughChanged[id] && w.supplies.chem > 0 && !this.cooling(`troughChange:${id}`, s)) return this.troughChange(id);
+    }
+    // Грязную слониху — помыть из шланга через ограду выгула
+    if (dayTime && !porridgeDue && w.hose.state === 'reel') {
+      const dirtyE = s.elephants.find((e) => areaOfE(e) === 'paddock' && bodyDirt(e) > 0.3 && !e.lying && !this.done.has(`wash:${e.id}:${Math.floor(s.t / 120)}`));
+      if (dirtyE) {
+        this.done.add(`wash:${dirtyE.id}:${Math.floor(s.t / 120)}`);
+        return this.wash(dirtyE);
       }
     }
     // Вечером, когда все в стойлах, — уборка выгула и смена воды на выгуле
     if (!dayTime && !night && allIn(s, STALLS) && !w.gates.outer && !porridgeDue) {
       if (this.paddockDirt(s) >= 2 && w.barrow.load < KEEPER.barrowMax - 1) return this.cleanArea('paddock', s);
-      if (!w.checks.troughChanged.paddockWater && w.supplies.chem > 0) return this.troughChange('paddockWater');
     }
     // Полная тачка — в контейнер
     if (w.barrow.load >= KEEPER.barrowMax - 1) return this.barrowDump(s);
@@ -426,7 +466,7 @@ export class AutoKeeper {
       for (const other of ['barnRackW', 'barnRackE', 'paddockFeeder'] as const) {
         if (other === id || ids.length >= 2) continue;
         const m = minuteOfDay(s.t);
-        const due = other === 'paddockFeeder' ? m >= 7.5 * 60 && m < 15 * 60 : m >= 15 * 60 || m < 7 * 60;
+        const due = other === 'paddockFeeder' ? m >= 6 * 60 && m < 15 * 60 : m >= 15 * 60 || m < 6 * 60;
         if (due && s.world.feeders[other].hay < 55) ids.push(other);
       }
       const steps: Step[] = [go((x) => this.barrowSide(x), 0.35), act('pushBarrow'), go({ x: 37.8, y: 35.4 }, 0.6), act('parkBarrow')];
@@ -461,6 +501,31 @@ export class AutoKeeper {
         act(`treat:${id}`, true),
         pick('tankTake', (_s, o) => o.ref.verb === 'tankTake', true),
         expand((x) => (x.keeper.held?.kind === 'tank' ? [] : [pick('tankPick', (_s, o) => o.ref.verb === 'pickUp' && o.label.includes('бак'), true)])),
+      ],
+    };
+  }
+
+  // Мытьё из шланга: шланг с катушки, к ограде у слонихи (восточный участок — докуда хватает шланга),
+  // позвать, помыть несколько раз, смотать шланг
+  private wash(e: Elephant): Job {
+    const id = e.id;
+    const spot = (x: State) => {
+      const q = x.elephants.find((z) => z.id === id) ?? e;
+      return { x: Math.max(32, Math.min(42, q.x)), y: 21.1 };
+    };
+    const touch = (x: State) => availableActions(x).some((o) => o.elephantId === id && o.ref.verb === 'treat');
+    return {
+      name: 'wash',
+      steps: [
+        go(st('hoseReel'), 0.5),
+        act('takeHose'),
+        go(spot, 0.6),
+        expand((x) => (touch(x) ? [] : [act(`call:${id}`, true), wait(touch, 25)])),
+        act(`hoseWash:${id}`, true),
+        act(`hoseWash:${id}`, true),
+        act(`hoseWash:${id}`, true),
+        go(st('hoseReel'), 0.5),
+        act('reelHose', true),
       ],
     };
   }
@@ -608,7 +673,8 @@ export class AutoKeeper {
     const e = ENTRY[a];
     const tools: ('shovel' | 'broom')[] = a !== 'paddock' && this.hardLitter(s, a) >= 2 ? ['broom', 'shovel'] : ['shovel'];
     const steps: Step[] = [];
-    for (const t of tools) steps.push(go(st('toolRack')), act(`take:${t}`), go((x) => this.barrowSide(x), 0.35), act('stow:barrow'));
+    for (const t of tools)
+      steps.push(expand((x) => (x.world.tools[t] ? [go(st('toolRack')), act(`take:${t}`), go((y) => this.barrowSide(y), 0.35), act('stow:barrow')] : x.world.barrow.cargo.some((c) => c.kind === t) ? [] : [act(`take:${t}`)])));
     steps.push(act('pushBarrow'), go(e.out, 0.35), go(e.in, 0.5), go(INSIDE[a], 0.8), act('parkBarrow'));
     if (tools.includes('broom')) steps.push(this.unstow('broom'), this.sweepLoop(a, 0), go((x) => this.barrowSide(x), 0.35), act('stow:barrow', true));
     steps.push(
@@ -836,7 +902,7 @@ export class AutoKeeper {
       case 'brush':
         return { name: 'returnTool', steps: [...exit, go(st('toolRack')), act(`putBack:${h.kind}`)] };
       case 'hose':
-        return { name: 'returnHose', steps: [act('reelHose', true), act('drop:held', true)] };
+        return { name: 'returnHose', steps: [go(st('hoseReel'), 0.5), act('reelHose', true), expand((x) => (x.keeper.held?.kind === 'hose' ? [act('drop:held', true)] : []))] };
       case 'hay':
         return { name: 'hayDrop', steps: [...exit, go(st('barnRackW')), act('loadFeeder:barnRackW:hay')] };
       case 'straw':

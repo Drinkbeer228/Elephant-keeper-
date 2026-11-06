@@ -59,10 +59,15 @@ function tankAtPort(s: State) {
   return s.world.items.find((it) => it.kind === 'tank' && dist(it, TANK_PORT) < 0.8);
 }
 
+// Достать до слонихи: голова у решётки — или стоит боком у тренировочной стенки, а кипер у окна стенки
+function reachable(s: State, e: Elephant): boolean {
+  return keeperCanTouch(s, e) || (near(s, 'trainingWall', 1.6) && atToiletStance(e));
+}
+
 export function careOptions(c: KCtx, out: ActionOption[]): void {
   const { s, k, h } = c;
   for (const e of s.elephants) {
-    if (!keeperCanTouch(s, e)) continue;
+    if (!reachable(s, e)) continue;
     const acc = nameCase(e.profile.name, 'acc');
     const group = e.profile.name;
     const sig = e.signal?.kind;
@@ -212,7 +217,7 @@ export function applyCare(s: State, ref: ActionRef): boolean {
   const w = s.world;
   const h = k.held;
   const e = elephantBy(s, ref.target);
-  const touch = e ? keeperCanTouch(s, e) : false;
+  const touch = e ? reachable(s, e) : false;
   switch (ref.verb) {
     case 'treat': {
       if (!e || k.pouch <= 0 || !touch) return true;

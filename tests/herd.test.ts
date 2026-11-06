@@ -90,4 +90,21 @@ describe('генерация стада', () => {
     expect(nameCase('Ния', 'dat')).toBe('Нии');
     expect(nameCase('Бинду', 'acc')).toBe('Бинду');
   });
+
+  it('у каждой своя манера звать, своя нога для топота и свой свисток кипера — различимый в стаде', () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const s = createState({ seed, herdSize: 6 });
+      const f0 = s.elephants.map((e) => e.profile.habits.whistle.f0);
+      for (let i = 0; i < f0.length; i++) for (let j = i + 1; j < f0.length; j++) expect(Math.abs(f0[i] - f0[j])).toBeGreaterThan(60);
+      for (const e of s.elephants) {
+        expect(['stomp', 'rumble', 'stare', 'gate', 'beg']).toContain(e.profile.habits.signal);
+        expect(['FL', 'FR', 'HL', 'HR']).toContain(e.profile.habits.foot);
+        expect(e.profile.traits.mischief).toBeGreaterThanOrEqual(0);
+        expect(e.profile.traits.mischief).toBeLessThanOrEqual(1);
+      }
+    }
+    const styles = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) for (const e of createState({ seed, herdSize: 3 }).elephants) styles.add(e.profile.habits.signal);
+    expect(styles.size).toBe(5);
+  });
 });

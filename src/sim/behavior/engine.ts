@@ -78,6 +78,8 @@ function updateOne(s: State, e: Elephant, dt: number, dtSec: number): void {
 function resolveCall(s: State, e: Elephant): void {
   const call = e.mem.call;
   if (!call) return;
+  // У стенки она ждёт команды «Давай гуляй» — награда будет после туалета, не раньше
+  if (call.why === 'toilet' && e.act.kind === 'follow') return;
   if (call.arrivedAt >= 0 && s.t - call.arrivedAt > LEARN.rewardWindow) {
     if (!call.rewarded) {
       onCallUnrewarded(e, call.why);

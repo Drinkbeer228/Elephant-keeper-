@@ -444,7 +444,7 @@ export const STATIONS: Record<StationId, StationDef> = {
   cabinet: {
     id: 'cabinet',
     label: 'Шкаф с моющими средствами',
-    keeper: { x: 33.6, y: 35.0 },
+    keeper: { x: 33.3, y: 35.0 },
     rect: { x0: 34.0, y0: 33.6, x1: 34.75, y1: 36.4 },
   },
   hayStack: {
@@ -496,7 +496,7 @@ export const HOSE_LENGTH = 25;
 // Где по утрам стоит бак для мочи (65 л) — в проходе у тренировочной стенки
 export const TANK_HOME: Point = { x: 28.2, y: 32.35 };
 // Куда подставляют бак: под решёткой у тренировочной стенки, под задние ноги слонихи
-export const TANK_PORT: Point = { x: 25.55, y: 29.45 };
+export const TANK_PORT: Point = { x: 25.55, y: 29.3 };
 
 // Сток в восточном стойле: моча здесь уходит в канализацию
 export const DRAIN: Circle = { x: 25.7, y: 28.6, r: 1.1 };

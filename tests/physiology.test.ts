@@ -23,10 +23,11 @@ describe('физиология', () => {
     const e = s.elephants[0];
     e.needs.hunger = 85;
     e.needs.bowel = 10;
-    s.world.hay.barnRack = 60;
+    s.world.feeders.barnRackW.hay = 60;
+    s.world.feeders.barnRackE.hay = 60;
     runMinutes(s, 90);
     expect(e.needs.hunger).toBeLessThan(60);
-    expect(s.world.hay.barnRack).toBeLessThan(60);
+    expect(s.world.feeders.barnRackW.hay + s.world.feeders.barnRackE.hay).toBeLessThan(120);
     expect(e.day.ate).toBeGreaterThan(20);
   });
 
@@ -36,10 +37,11 @@ describe('физиология', () => {
     e.needs.thirst = 85;
     e.needs.hunger = 5;
     e.needs.bladder = 5;
-    s.world.water.barnWater.level = 60;
+    s.world.troughs.barnWaterW.level = 60;
+    s.world.troughs.barnWaterE.level = 60;
     runMinutes(s, 60);
     expect(e.needs.thirst).toBeLessThan(40);
-    expect(s.world.water.barnWater.level).toBeLessThan(60);
+    expect(s.world.troughs.barnWaterW.level + s.world.troughs.barnWaterE.level).toBeLessThan(120);
     expect(e.needs.bladder + e.day.urineBedding + e.day.urineOutside + e.day.urineDrain).toBeGreaterThan(5);
   });
 
@@ -65,8 +67,8 @@ describe('физиология', () => {
     e.learned.trust = 0;
     e.learned.expectation = 0;
     e.learned.cooperation = 0;
-    s.world.hay.barnRack = 100;
-    s.world.water.barnWater.level = 100;
+    s.world.feeders.barnRackW.hay = 100;
+    s.world.troughs.barnWaterW.level = 100;
     runMinutes(s, 600);
     expect(e.day.urineBedding + e.day.urineOutside + e.day.urineDrain).toBeGreaterThanOrEqual(1);
     expect(e.day.dung).toBeGreaterThanOrEqual(1);
@@ -90,7 +92,8 @@ describe('физиология', () => {
   it('моча над стоком уходит в канализацию — подстилка остаётся сухой', () => {
     const s = game(7, 1);
     const e = s.elephants[0];
-    const slot = STATIONS.trainingWall.slots![0];
+    // Туалетная стойка у стенки: слониха стоит боком, зад — над стоком
+    const slot = STATIONS.trainingWall.slots![1];
     park(e, slot.x, slot.y);
     e.heading = slot.face;
     e.act.forced = false;
