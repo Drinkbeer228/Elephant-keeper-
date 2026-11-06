@@ -13,7 +13,6 @@ import {
   pressingNeed,
   shiftDay,
   signalClarity,
-  signalHabitText,
   slotInfo,
   temperature,
   TRAIT_KEYS,
@@ -21,6 +20,8 @@ import {
   tubKg,
   wellbeing,
   bond,
+  comfortGap,
+  invited,
   type ActionOption,
   type ActivityKind,
   type DayReport,
@@ -136,6 +137,31 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
+
+// Как она сейчас относится к тому, что ты рядом
+function moodText(s: State, e: Elephant): string {
+  const t = e.mem.tension;
+  if (t > 0.6) return 'ей тесно — отойди и заговори спокойно';
+  if (t > 0.25) return 'насторожена';
+  if (invited(s, e)) return 'подпускает тебя';
+  return 'спокойна';
+}
+
+// Личное место: на каком расстоянии от неё держаться без приглашения
+function spaceText(gap: number): string {
+  if (gap < 0.6) return 'подпускает вплотную';
+  if (gap < 1.4) return 'держись в шаге-двух, пока сама не подпустит';
+  return 'держись подальше и сначала заговори — подойдёшь, когда подпустит';
+}
+
+const CUE_LABELS: [keyof Elephant['learned']['cues'], string][] = [
+  ['come', '«Иди сюда»'],
+  ['stay', '«Стоять»'],
+  ['move', '«Подвинься»'],
+  ['follow', '«Пошли»'],
+  ['lie', '«Ложись»'],
+  ['no', '«Нельзя»'],
+];
 
 function bar(value: number, warn = 70, invert = false): string {
   const v = Math.max(0, Math.min(100, value));
@@ -429,7 +455,7 @@ export class Hud {
       .join('');
     this.refs.panel.innerHTML = `
       <div class="panel-head"><h3>Что можно сделать здесь</h3><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
-      <div class="panel-body">${html || '<p class="muted">Рядом ничего нет — подойди к слону у решётки, станции или вещи.</p>'}</div>
+      <div class="panel-body">${html || '<p class="muted">Рядом ничего нет — подойди к слонихе, станции или вещи.</p>'}</div>
       <p class="panel-hint">Действия зависят от того, что в руках, где ты стоишь, кто рядом и в каком они настроении. Цифры — быстрый выбор.</p>`;
   }
 
@@ -447,7 +473,10 @@ export class Hud {
     box.hidden = false;
     const n = e.needs;
     const b = e.body;
-    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(e.learned.trust * 100)}:${Math.round(e.learned.cooperation * 100)}:${Math.round(e.learned.expectation * 100)}:${Math.round(e.learned.toilet * 100)}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
+    const L = e.learned;
+    const gap = comfortGap(s, e);
+    const mood = moodText(s, e);
+    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(L.trust * 100)}:${Math.round(L.cooperation * 100)}:${Math.round(L.expectation * 100)}:${Math.round(L.toilet * 100)}:${Math.round(L.familiarity * 100)}:${Object.values(L.cues).map((v) => Math.round(v * 20)).join(',')}:${Math.round(gap * 5)}:${mood}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
     if (key === this.inspectKey) return;
     const first = this.inspectKey === '' || !box.querySelector(`[data-eid="${e.id}"]`);
     this.inspectKey = key;
@@ -484,24 +513,26 @@ export class Hud {
         <div class="row"><span>Сено на спине</span>${bar(b.hay * 100, 50)}</div>
         ${b.soap > 0.05 ? `<div class="row"><span>Пена (смыть!)</span>${bar(b.soap * 100, 10)}</div>` : ''}
       </div>
-      <h3>Отношения с кипером</h3>
+      <h3>Отношения с тобой <small class="muted">${esc(mood)}</small></h3>
       <div class="grid">
-        <div class="row"><span>Доверие</span>${bar(e.learned.trust * 100, 0, true)}</div>
-        <div class="row"><span>Покладистость</span>${bar(e.learned.cooperation * 100, 0, true)}</div>
-        <div class="row"><span>Ждёт ответа на сигналы</span>${bar(e.learned.expectation * 100, 0, true)}</div>
-        <div class="row"><span>Приучена к баку</span>${bar(e.learned.toilet * 100, 0, true)}</div>
+        <div class="row"><span>Доверие</span>${bar(L.trust * 100, 0, true)}</div>
+        <div class="row"><span>Ты для неё «свой»</span>${bar(L.familiarity * 100, 0, true)}</div>
+        <div class="row"><span>Покладистость</span>${bar(L.cooperation * 100, 0, true)}</div>
+        <div class="row"><span>Ждёт ответа на сигналы</span>${bar(L.expectation * 100, 0, true)}</div>
+        <div class="row"><span>Приучена к баку</span>${bar(L.toilet * 100, 0, true)}</div>
       </div>
+      <p class="muted small-p">Личное место: ${esc(spaceText(gap))}.</p>
+      <details data-d="cues"><summary>Как знает просьбы</summary><div class="grid">${CUE_LABELS.map(([c, label]) => `<div class="row"><span>${label}</span>${bar(L.cues[c] * 100, 0, true)}</div>`).join('')}</div></details>
       <h3>Характер</h3>
       <ul class="hints">${characterHints(p).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>
-      <p class="muted small-p">${esc(signalHabitText(p))}</p>
       <h3>Рацион</h3>
       <p class="small-p">Сено ${diet.hayKg} кг в сутки, ветки ${diet.branchesKg} кг. Каша в 13:00 и 17:00 — ${esc(diet.porridge.product)}, ${String(diet.porridge.kg).replace('.', ',')} кг (запарить за час). Овощи в 19:00 — свой таз. <span class="muted">Рацион из SlonVet — тот же, что у слонихи ${esc(diet.source)}.</span></p>
-      <details><summary>Черты подробно</summary><div class="grid traits">${TRAIT_KEYS.map((k) => `<div class="row"><span>${TRAIT_LABELS[k]}</span><span class="bar neutral"><i style="width:${(p.traits[k] * 100).toFixed(0)}%"></i></span></div>`).join('')}</div></details>
+      <details data-d="traits"><summary>Черты подробно</summary><div class="grid traits">${TRAIT_KEYS.map((k) => `<div class="row"><span>${TRAIT_LABELS[k]}</span><span class="bar neutral"><i style="width:${(p.traits[k] * 100).toFixed(0)}%"></i></span></div>`).join('')}</div></details>
       ${rel ? `<h3>В стаде</h3><ul class="rel">${rel}</ul>` : ''}
       <div class="ins-actions"><button class="btn" data-focus>${ICON.target}<span>Показать на карте</span></button></div>`;
-    const open = box.querySelector('details')?.hasAttribute('open');
+    const open = [...box.querySelectorAll<HTMLDetailsElement>('details[data-d]')].filter((d) => d.open).map((d) => d.dataset.d);
     box.innerHTML = body;
-    if (open) box.querySelector('details')?.setAttribute('open', '');
+    for (const d of box.querySelectorAll<HTMLDetailsElement>('details[data-d]')) if (open.includes(d.dataset.d)) d.open = true;
     const holder = box.querySelector<HTMLElement>('[data-r2="portrait"]')!;
     holder.appendChild(portrait(p));
     box.querySelector('[data-close]')!.addEventListener('click', () => this.h.select(null));
@@ -531,14 +562,14 @@ export class Hud {
     this.journalKey = key;
     const m = minuteOfDay(s.t);
     const routine = [
-      { from: 8 * 60, to: 10 * 60, text: 'Утро: поилки, сено на выгул, ворота на выгул (пульт в проходе)' },
-      { from: 10 * 60, to: 12 * 60, text: 'Слоны снаружи — закрой ворота, убери стойла: лопата, тачка, солома' },
+      { from: 8 * 60, to: 10 * 60, text: 'Утро: поздоровайся со слонами, поилки, сено на выгул, ворота на выгул (у северной стены зала)' },
+      { from: 10 * 60, to: 12 * 60, text: 'Слоны снаружи — закрой ворота, убери зал: лопата, тачка, солома' },
       { from: 12 * 60, to: 13 * 60, text: 'Запарь кашу к 13:00 — за час (кормокухня)' },
       { from: 13 * 60, to: 16 * 60, text: 'Каша, мытьё поилок, ветки и бамбук, душ в жару' },
       { from: 16 * 60, to: 17 * 60 + 30, text: 'Каша к 17:00 — снова запарить за час' },
       { from: 17 * 60 + 30, to: 19 * 60 + 30, text: 'Овощи к 19:00: нарезать по тазу на каждую, сено на ночь' },
-      { from: 19 * 60 + 30, to: 24 * 60, text: 'Слоны в стойлах, собери тазы, убери выгул' },
-      { from: 0, to: 8 * 60, text: 'Ночь: слоны спят, но могут позвать — бак у тренировочной стенки' },
+      { from: 19 * 60 + 30, to: 24 * 60, text: 'Слоны в слоновнике: собери тазы, убери выгул' },
+      { from: 0, to: 8 * 60, text: 'Ночь: слоны спят, но могут позвать — бак в инвентарной, отведи на бетон или к стоку' },
     ];
     const day = shiftDay(s.t);
     const plan = vegPlan(s.seed, day);
@@ -629,6 +660,7 @@ export class Hud {
     return `<div class="help">
         <div>${k('up')}${k('left')}${k('down')}${k('right')} / стрелки — идти, ${k('run')} — бежать (пугает нервных)</div>
         <div>${k('action')} — главное действие, <kbd>2</kbd>…<kbd>6</kbd> — другие, ${k('panel')} — все действия рядом, ${k('drop')} — положить</div>
+        <div>Рядом со слонихой — голосом: окликнуть по имени, «иди сюда», «подвинься», «стоять», «пошли», «ложись», «давай», «молодец». Подходи так, чтобы видела; спящую сначала окликни</div>
         <div>Клик по слону — осмотр · ${k('journal')} — журнал и рацион · ${k('speed')} — скорость · ${k('overview')} — карта</div>
         <div class="muted">На телефоне: стик, кнопка руки — главное действие, «⋯» — все действия.</div>
       </div>`;
@@ -640,7 +672,7 @@ export class Hud {
       'title',
       `<div class="title-mark">${ICON.logo}</div>
       <h1>Elephant Keeper</h1>
-      <p class="lead">Смена смотрителя в небольшом слоновнике защищённого контакта. Слоны живут своей жизнью: едят, пьют, играют, спят — и зовут тебя, когда без тебя не обойтись. У каждой свой характер, своя манера просить и своя память о том, отвечаешь ли ты.</p>
+      <p class="lead">Смена смотрителя в небольшом слоновнике полного контакта: ты работаешь рядом со слонами, в одном зале с ними. Слоны живут своей жизнью: едят, пьют, играют, спят — и зовут тебя, когда без тебя не обойтись. У каждой свой характер, своё личное место и свои отношения с тобой — доверие, привычка, память о том, отвечаешь ли ты.</p>
       ${hasContinue ? `<button class="btn primary wide" data-go="continue">${ICON.play}<span>Продолжить смену</span><small>${esc(hasContinue)}</small></button>` : ''}
       <div class="newgame">
         <span>Новое стадо:</span>

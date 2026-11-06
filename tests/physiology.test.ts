@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runMinutes, step } from '../src/sim';
-import { BEDDING, STATIONS, DRAIN } from '../src/data/facility';
+import { BEDDING, DRAIN, TOILET_STANCE } from '../src/data/facility';
 import { cellOf } from '../src/sim/world';
 import { rearPos } from '../src/sim/behavior/perceive';
 import { game, park } from './helpers';
@@ -92,10 +92,9 @@ describe('физиология', () => {
   it('моча над стоком уходит в канализацию — подстилка остаётся сухой', () => {
     const s = game(7, 1);
     const e = s.elephants[0];
-    // Туалетная стойка у стенки: слониха стоит боком, зад — над стоком
-    const slot = STATIONS.trainingWall.slots![1];
-    park(e, slot.x, slot.y);
-    e.heading = slot.face;
+    // Место у стока: слониха стоит так, что зад — над решёткой стока
+    park(e, TOILET_STANCE.x, TOILET_STANCE.y);
+    e.heading = TOILET_STANCE.face;
     e.act.forced = false;
     e.needs.bladder = 100;
     const wetBefore = s.world.cells.wet.reduce((a, b) => a + b, 0);

@@ -2,7 +2,7 @@
 
 import { ELEPHANT, KEEPER } from '../../data/balance';
 import { AREA_ZONE, CONTACT_LINES, GATES, STATIONS, areaAt, zoneAt, type AreaId, type GateId, type StationId, type ZoneId } from '../../data/facility';
-import { closestOnSegment, dist } from '../geometry';
+import { angleDiff, closestOnSegment, dist } from '../geometry';
 import { bondKey, rankScore } from '../herd';
 import type { Elephant, State, Vec } from '../types';
 
@@ -163,7 +163,7 @@ export function freeSlot(s: State, e: Elephant, station: StationId): number {
   return best;
 }
 
-// Кипер у решётки или ограды: ближайшая точка линии контакта и место для слона напротив
+// Кипер снаружи у ограды выгула: ближайшая точка ограды и место для слона напротив
 export interface KeeperContact {
   area: AreaId;
   zone: ZoneId;
@@ -181,7 +181,7 @@ export function keeperContact(s: State): KeeperContact | null {
     const c = closestOnSegment(k.x, k.y, l.x0, l.y0, l.x1, l.y1);
     if (c.d < bestD && (k.y - c.y) * l.keeperSide >= 0) {
       bestD = c.d;
-      // Слону — по другую сторону линии, на расстоянии длины корпуса от решётки
+      // Слону — по другую сторону ограды, на расстоянии длины корпуса от неё
       const spot = { x: c.x, y: c.y - l.keeperSide * 1.95 };
       best = { area: l.area, zone: AREA_ZONE[l.area], keeper: { x: k.x, y: k.y }, line: { x: c.x, y: c.y }, spot, face: l.keeperSide > 0 ? Math.PI / 2 : -Math.PI / 2 };
     }
@@ -205,6 +205,46 @@ export function contactSpotNear(area: AreaId, x: number, y: number): { spot: Vec
   return best;
 }
 
+// Корпус слона — две окружности: передняя и задняя половины
+export function bodyCircles(e: Elephant): { x: number; y: number; r: number }[] {
+  const L = e.profile.look;
+  const o = ELEPHANT.bodyOffset * L.size * L.length;
+  const r = ELEPHANT.bodyCircle * L.size * L.girth * (e.lying ? 1.15 : 1);
+  const c = Math.cos(e.heading);
+  const sn = Math.sin(e.heading);
+  return [
+    { x: e.x + c * o, y: e.y + sn * o, r },
+    { x: e.x - c * o, y: e.y - sn * o, r },
+  ];
+}
+
+// Зазор между точкой и корпусом слона (отрицательный — точка внутри)
+export function gapToBody(e: Elephant, p: Vec): number {
+  let g = Infinity;
+  for (const c of bodyCircles(e)) g = Math.min(g, Math.hypot(p.x - c.x, p.y - c.y) - c.r);
+  return g;
+}
+
+// Где кипер относительно слонихи: 0 — прямо перед ней, π — точно сзади
+export function keeperBearing(s: State, e: Elephant): number {
+  const a = Math.atan2(s.keeper.y - e.y, s.keeper.x - e.x);
+  return Math.abs(angleDiff(e.heading, a));
+}
+
+// Куда встать слонихе рядом с кипером: в том же отсеке — в двух метрах от него, на её стороне;
+// если кипер снаружи у ограды выгула — по ту сторону ограды
+export function keeperMeet(s: State, e: Elephant): { area: AreaId; spot: Vec; face: number } | null {
+  const k = s.keeper;
+  const a = areaAt(k.x, k.y);
+  if (a) {
+    const d = dist(e, k) || 1;
+    const spot = { x: k.x + ((e.x - k.x) / d) * 2.1, y: k.y + ((e.y - k.y) / d) * 2.1 };
+    return { area: a, spot, face: Math.atan2(k.y - spot.y, k.x - spot.x) };
+  }
+  const c = keeperContact(s);
+  return c ? { area: c.area, spot: c.spot, face: c.face } : null;
+}
+
 export function keeperDistanceToHead(s: State, e: Elephant): number {
   return dist(headPos(e, 1.7), s.keeper);
 }
@@ -219,7 +259,7 @@ export function keeperDistanceToBody(s: State, e: Elephant): number {
   return Math.max(0, cl.d - 0.95 * L.size * L.girth);
 }
 
-// Можно ли дотянуться до слона через решётку: до головы — стоящую, до бока — лежащую или стоящую боком
+// Можно ли дотянуться до слонихи: до головы — стоящую, до бока — лежащую или стоящую боком
 export function keeperCanTouch(s: State, e: Elephant): boolean {
   if (e.lying) return keeperDistanceToBody(s, e) <= 1.3;
   return keeperDistanceToHead(s, e) <= KEEPER.elephantReach || keeperDistanceToBody(s, e) <= 0.9;

@@ -214,6 +214,25 @@ export class ElephantView {
           ears = 0.45;
           break;
         }
+        case 'warn': {
+          // Предупреждает: уши растопырены, голова к киперу, мотает ею, хобот свёрнут
+          const l = local(s.keeper);
+          want = { reach: 0.6, side: Math.max(-1, Math.min(1, l.ang)) * 0.5, curl: 0.85, raise: 0.25 };
+          ears = 1;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5)) + Math.sin(t * 7) * 0.22;
+          tailSwing = Math.sin(t * 5) * 0.6;
+          tailRaise = 0.4;
+          break;
+        }
+        case 'stay':
+        case 'walkWith': {
+          // Стоит или идёт рядом по просьбе: внимание на кипере, спокойна
+          const l = local(s.keeper);
+          want = { reach: 0.85, side: Math.max(-1, Math.min(1, l.ang)) * 0.6, curl: 0.4, raise: 0 };
+          ears = 0.35;
+          headTurn = Math.max(-0.3, Math.min(0.3, l.ang * 0.4));
+          break;
+        }
         case 'socialize':
         case 'follow':
         case 'seekKeeper': {

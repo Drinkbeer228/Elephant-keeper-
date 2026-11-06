@@ -3,7 +3,7 @@ import type { ElephantProfile } from '../sim';
 import * as A from './art';
 import * as I from './itemsArt';
 import * as S from './stationsArt';
-import { LOG, BOULDERS, TREES } from '../data/facility';
+import { LOG, BOULDERS, STATIONS, TREES } from '../data/facility';
 
 export const PPM = 32; // пикселей мира на метр
 export const ART_SCALE = PPM / A.TEX;
@@ -99,10 +99,13 @@ export function loadStaticArt(scene: Phaser.Scene): void {
   addArt(scene, 'st-rack-barn-slats', S.rackSlats(4, 0.7));
   addArt(scene, 'st-rack-paddock', S.rackArt(4, 0.85));
   addArt(scene, 'st-rack-paddock-slats', S.rackSlats(4, 0.85));
-  addArt(scene, 'st-trough-barnW', S.troughArt(2.9, 0.85));
-  addArt(scene, 'st-trough-barnE', S.troughArt(1.8, 0.85));
+  const size = (id: 'barnWaterW' | 'barnWaterE') => {
+    const r = STATIONS[id].rect!;
+    return [r.x1 - r.x0, r.y1 - r.y0 + 0.1] as const;
+  };
+  addArt(scene, 'st-trough-barnW', S.troughArt(...size('barnWaterW')));
+  addArt(scene, 'st-trough-barnE', S.troughArt(...size('barnWaterE')));
   addArt(scene, 'st-trough-paddock', S.troughArt(3.8, 0.85));
-  addArt(scene, 'st-training', S.trainingWallArt());
   addArt(scene, 'st-tubrack', S.tubRackArt());
   addArt(scene, 'st-porridge', S.porridgeArt());
   addArt(scene, 'st-sink', S.sinkArt());
@@ -110,7 +113,6 @@ export function loadStaticArt(scene: Phaser.Scene): void {
   addArt(scene, 'st-bamboo', S.bambooPileArt());
   addArt(scene, 'st-sawdust', S.sawdustPileArt());
   addArt(scene, 'st-drain', S.drainArt());
-  addArt(scene, 'st-panel', S.panelArt());
   addArt(scene, 'st-valve-open', S.valveArt(true));
   addArt(scene, 'st-valve-closed', S.valveArt(false));
   addArt(scene, 'st-reel', S.reelArt());

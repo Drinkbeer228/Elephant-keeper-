@@ -1,10 +1,10 @@
 // Кипер: контекстные действия и работа, которая занимает время.
 // Действия — данные (глагол + цель), поэтому их можно сохранить, повторить в тесте и проверить заново.
-// Список действий собирается из всего, что рядом: слоны у решётки, станции, вещи, тачка, пол.
+// Список действий собирается из всего, что рядом: слоны, станции, вещи, тачка, пол.
 
 import { TASK } from '../../data/balance';
-import { DRUM, GATE_BY_ID, HOSE_REEL, STATIONS, TANK_HOME, TANK_PORT, TOOL_KINDS, TOOL_SLOTS, type GateId, type StationId, type ToolKind, type TroughId } from '../../data/facility';
-import { headPos, keeperContact } from '../behavior/perceive';
+import { DRUM, GATE_BY_ID, HOSE_REEL, STATIONS, TANK_HOME, TOOL_KINDS, TOOL_SLOTS, areaAt, type GateId, type StationId, type ToolKind, type TroughId } from '../../data/facility';
+import { headPos, keeperContact, rearPos } from '../behavior/perceive';
 import { log } from '../events';
 import { dist } from '../geometry';
 import type { ActionOption, ActionRef, State, Vec } from '../types';
@@ -17,9 +17,9 @@ import { applyFeeding, feedingOptions, prepOptions } from './feeding';
 import { applyHose, hoseOptions } from './hose';
 import { applyThing, thingOptions } from './things';
 import { applyTrough, troughOptions } from './troughs';
+import { applyVoice, voiceOptions } from './voice';
 
-export { areaEmpty, doorUnlocked, gateOpenBlock, keeperAccess, keeperArea, keeperNav } from './access';
-export { callElephant } from './care';
+export { areaEmpty, keeperArea, keeperNav, nearGate } from './access';
 export { heavy } from './common';
 export { nextVeg } from './feeding';
 export { hoseLengthTo, hoseUsable, replaceHoseIfBroken } from './hose';
@@ -33,6 +33,7 @@ export function availableActions(s: State): ActionOption[] {
   const c = makeCtx(s);
   const out: ActionOption[] = [];
   careOptions(c, out);
+  voiceOptions(c, out);
   gateOptions(c, out);
   troughOptions(c, out);
   feedingOptions(c, out);
@@ -91,6 +92,7 @@ const TASK_TIME: Partial<Record<ActionRef['verb'], number>> = {
 };
 
 function taskTime(ref: ActionRef): number {
+  if (ref.verb === 'voice') return ref.target.endsWith(':talk') ? TASK.talk : 0;
   if (ref.verb === 'take' && ref.target === 'ration') return 2.0;
   if (ref.verb === 'wash' && ref.target === 'emptyTank') return TASK.emptyTank;
   return TASK_TIME[ref.verb] ?? 0;
@@ -98,6 +100,7 @@ function taskTime(ref: ActionRef): number {
 
 // Нажатие действия: проверить, что оно всё ещё доступно, и запустить (сразу или как работу)
 export function performAction(s: State, id: string): boolean {
+  if (s.keeper.stun > 0) return false;
   const options = availableActions(s);
   const o = options.find((x) => x.id === id);
   if (!o) return false;
@@ -126,6 +129,7 @@ export function stepKeeperTask(s: State, dtSec: number): void {
 
 // Эффект действия: здесь всё, что меняет мир
 export function applyAction(s: State, ref: ActionRef): void {
+  if (applyVoice(s, ref)) return;
   if (applyGate(s, ref)) return;
   if (applyTrough(s, ref)) return;
   if (applyHose(s, ref)) return;
@@ -162,8 +166,6 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
     case 'pet':
     case 'scratch':
     case 'hand':
-    case 'lieDown':
-    case 'standUp':
     case 'groom':
     case 'soap':
     case 'scrub':
@@ -172,15 +174,14 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
     case 'hoseWash':
     case 'handFeed':
     case 'feedPorridge':
-    case 'toiletCmd':
       return e ? (e.lying ? { x: e.x, y: e.y } : headPos(e, 1.6)) : null;
-    case 'call':
+    case 'voice':
       return e ? { x: e.x, y: e.y } : null;
     case 'tankPlace':
-      return TANK_PORT;
+      return e ? rearPos(e) : null;
     case 'tankTake': {
       const it = s.world.items.find((x) => String(x.id) === t);
-      return it ? { x: it.x, y: it.y } : TANK_PORT;
+      return it ? { x: it.x, y: it.y } : TANK_HOME;
     }
     case 'gate': {
       const g = GATE_BY_ID[t as GateId];
@@ -241,6 +242,7 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
     case 'wash':
       return dist(k, STATIONS.washSink.keeper) < dist(k, STATIONS.kitchenSink.keeper) ? mid('washSink') : mid('kitchenSink');
     case 'placeTub': {
+      if (areaAt(k.x, k.y)) return front(0.8);
       const c = keeperContact(s);
       return c ? { x: c.line.x, y: c.line.y - 1.1 } : null;
     }
@@ -266,10 +268,9 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
     case 'journal':
       return mid('desk');
     case 'scatter':
-    case 'tossBrowse': {
-      const c = keeperContact(s);
-      return c ? c.spot : null;
-    }
+      return areaAt(k.x, k.y) ? { x: k.x, y: k.y } : (keeperContact(s)?.spot ?? null);
+    case 'tossBrowse':
+      return areaAt(k.x, k.y) ? front(0.9) : (keeperContact(s)?.spot ?? null);
     case 'fillDrum':
       return DRUM;
     default:

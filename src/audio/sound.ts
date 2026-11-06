@@ -6,7 +6,7 @@
 // (navigator.audioSession, Safari 16.4+) — тогда звук идёт и при выключенном звонке.
 // Микрофон не нужен и не запрашивается.
 
-import type { SimEvent, Whistle } from '../sim';
+import type { SimEvent } from '../sim';
 
 const KEY = 'elephant-keeper:muted';
 const VOL = 'elephant-keeper:volume';
@@ -178,17 +178,55 @@ class Sound {
     }
   }
 
-  // Свисток кипера для конкретной слонихи: у каждой своя высота, интервал и ритм
-  whistle(w: Whistle): void {
-    for (let i = 0; i < w.notes; i++) {
-      const up = i % 2 === 0;
-      const from = up ? w.f0 : w.f1;
-      const to = up ? w.f1 : w.f0;
-      this.tone(from, 0.16, { type: w.wave, gain: 0.05, to, delay: i * (0.16 + w.gap) });
+  // Один слог голоса: пила через две полосы-форманты — получается глухой «гласный» звук
+  private syllable(f: number, dur: number, o: { delay: number; gain: number; to?: number; vowel: number }): void {
+    const ac = this.ctx;
+    if (!ac || !this.master || this._muted || ac.state !== 'running') return;
+    const t0 = ac.currentTime + o.delay;
+    const osc = ac.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(f, t0);
+    if (o.to) osc.frequency.linearRampToValueAtTime(o.to, t0 + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(o.gain, t0 + Math.min(0.035, dur * 0.3));
+    g.gain.setValueAtTime(o.gain, t0 + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    const formants: [number, number, number][] = [
+      [600 + 180 * o.vowel, 6, 1],
+      [1100 + 550 * o.vowel, 9, 0.55],
+    ];
+    for (const [freq, q, k] of formants) {
+      const bp = ac.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = freq;
+      bp.Q.value = q;
+      const fg = ac.createGain();
+      fg.gain.value = k;
+      osc.connect(bp);
+      bp.connect(fg);
+      fg.connect(g);
     }
+    g.connect(this.master);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
   }
 
-  event(ev: SimEvent, near: boolean, whistleOf?: (id: string) => Whistle | null): void {
+  // Голос кипера: не слова, а их ритм и интонация — слоги имени и просьбы.
+  // Окрик — выше и с подъёмом в конце, «нельзя» — коротко и вниз, похвала — тепло, разговор — вполголоса.
+  voice(cue: string, name: string): void {
+    if (!this.throttle('voice', 300)) return;
+    const syl = Math.max(1, Math.min(4, (name.match(/[аеёиоуыэюяaeiouy]/gi) ?? []).length));
+    const plan = voicePlan(cue, syl);
+    const base = 150;
+    let t = 0;
+    plan.forEach(([pitch, dur, loud, glide], i) => {
+      this.syllable(base * pitch, dur, { delay: t, gain: 0.32 * loud, to: glide ? base * glide : undefined, vowel: (i * 0.37) % 1 });
+      t += dur + 0.03;
+    });
+  }
+
+  event(ev: SimEvent, near: boolean, nameOf?: (id: string) => string | null): void {
     if (ev.kind.startsWith('stomp:')) {
       if (near && this.throttle(`stomp-${ev.elephantId}`, 500)) {
         this.noise(0.22, { freq: 180, gain: 0.12 });
@@ -250,15 +288,19 @@ class Sound {
       case 'prepMiss':
         this.tone(160, 0.12, { type: 'triangle', gain: 0.03 });
         break;
-      case 'call': {
-        const w = ev.elephantId && whistleOf ? whistleOf(ev.elephantId) : null;
-        if (w) this.whistle(w);
-        else {
-          this.tone(1250, 0.18, { gain: 0.05, to: 1650 });
-          this.tone(1650, 0.22, { gain: 0.04, delay: 0.2, to: 1250 });
+      case 'voice':
+        this.voice(ev.tag ?? 'name', (ev.elephantId && nameOf?.(ev.elephantId)) || 'слон');
+        break;
+      case 'shove':
+        this.noise(0.25, { freq: 160, gain: 0.12 });
+        this.tone(70, 0.3, { gain: 0.05, to: 50 });
+        break;
+      case 'warn':
+        if (near && this.throttle(`warn-${ev.elephantId}`, 2500)) {
+          this.noise(0.3, { freq: 900, type: 'bandpass', gain: 0.05 });
+          this.tone(90, 0.6, { type: 'sawtooth', gain: 0.035, to: 70, vibrato: 4 });
         }
         break;
-      }
       case 'treat':
       case 'heart':
         this.tone(988, 0.12, { gain: 0.03 });
@@ -297,6 +339,43 @@ class Sound {
       default:
         break;
     }
+  }
+}
+
+// [высота ×, длительность с, громкость ×, скольжение ×]
+type Syl = [number, number, number, number?];
+
+function voicePlan(cue: string, nameSyl: number): Syl[] {
+  const name: Syl[] = Array.from({ length: nameSyl }, (_, i): Syl => [i === 0 ? 1.12 : 1, 0.14, i === 0 ? 1 : 0.8]);
+  const with2 = (...rest: Syl[]): Syl[] => [...name, ...rest];
+  switch (cue) {
+    case 'name': {
+      const last = name[name.length - 1];
+      name[name.length - 1] = [last[0], 0.24, 0.95, 1.32];
+      return name;
+    }
+    case 'come':
+      return with2([1.05, 0.12, 0.8], [1.12, 0.22, 0.9, 1.3]);
+    case 'stay':
+      return with2([1.0, 0.13, 0.95], [1.02, 0.26, 1, 0.86]);
+    case 'move':
+      return with2([1.0, 0.11, 0.8], [1.06, 0.11, 0.85], [1.0, 0.2, 0.85, 0.9]);
+    case 'follow':
+      return with2([1.0, 0.12, 0.8], [1.08, 0.24, 0.9, 1.22]);
+    case 'lie':
+      return with2([1.05, 0.13, 0.85], [1.0, 0.28, 0.9, 0.82]);
+    case 'up':
+      return with2([1.0, 0.12, 0.85], [1.1, 0.24, 0.95, 1.28]);
+    case 'toilet':
+      return with2([1.0, 0.12, 0.85], [1.06, 0.22, 0.85, 0.95]);
+    case 'no':
+      return [[1.3, 0.11, 1.25], [1.18, 0.2, 1.3, 0.85]];
+    case 'praise':
+      return [[1.05, 0.12, 0.75], [1.2, 0.13, 0.85], [1.12, 0.28, 0.85, 0.92]];
+    case 'talk':
+      return Array.from({ length: 6 }, (_, i): Syl => [0.92 + 0.08 * Math.sin(i * 1.7), 0.13 + 0.03 * (i % 2), 0.45]);
+    default:
+      return name;
   }
 }
 

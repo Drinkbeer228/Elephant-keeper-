@@ -38,7 +38,7 @@ function troughRules(id: TroughId): Rule[] {
       severity: 'warn',
       on: (s) => s.world.troughs[id].level < 18 && !s.world.troughs[id].drain && s.world.troughs[id].stage === 'ok',
       off: (s) => s.world.troughs[id].level > 35 || s.world.troughs[id].drain,
-      text: () => `${label} почти пуста — кран со стороны прохода.`,
+      text: () => `${label} почти пуста — открой кран у поилки.`,
       resolved: `${label} наполнена.`,
     },
     {
@@ -67,8 +67,8 @@ const STATIC_RULES: Rule[] = [
     severity: 'warn',
     on: (s) => s.world.feeders.barnRackW.hay + s.world.feeders.barnRackE.hay < 8 && evening(s),
     off: (s) => s.world.feeders.barnRackW.hay + s.world.feeders.barnRackE.hay > 25 || !evening(s),
-    text: () => 'В сенниках стойл кончается сено, а впереди ночь.',
-    resolved: 'Сено на ночь в стойлах есть.',
+    text: () => 'В сенниках слоновника кончается сено, а впереди ночь.',
+    resolved: 'Сено на ночь в слоновнике есть.',
   },
   {
     key: 'hay:paddockFeeder',
@@ -83,7 +83,7 @@ const STATIC_RULES: Rule[] = [
     severity: 'warn',
     on: (s) => cachedDirt(s, 'barn') > 0.24,
     off: (s) => cachedDirt(s, 'barn') < 0.14,
-    text: () => 'Подстилка в стойлах грязная: мокрые пятна и навоз.',
+    text: () => 'Подстилка в слоновнике грязная: мокрые пятна и навоз.',
     resolved: 'Стойла чистые.',
   },
   {
@@ -116,14 +116,14 @@ const STATIC_RULES: Rule[] = [
     on: (s) => s.world.hose.state === 'floor' && s.elephants.some((e) => hoseReachPoint(s, e, reachableAreas(s, e)) !== null),
     off: (s) => s.world.hose.state !== 'floor' || !s.elephants.some((e) => hoseReachPoint(s, e, reachableAreas(s, e)) !== null),
     text: () => 'Шланг лежит в зоне хобота — шкодливая слониха его утащит или прокусит.',
-    resolved: 'Шланг убран от решётки.',
+    resolved: 'Шланг убран от слонов.',
   },
   {
     key: 'tubs:empty',
     severity: 'info',
     on: (s) => s.world.tubs.some((t) => t.where === 'floor' && t.emptySince >= 0 && s.t - t.emptySince > 40),
     off: (s) => !s.world.tubs.some((t) => t.where === 'floor' && t.emptySince >= 0 && s.t - t.emptySince > 20),
-    text: () => 'Пустые тазы стоят у слонов — забери их крюком через решётку, пока не раскрошили.',
+    text: () => 'Пустые тазы стоят у слонов — забери их, пока не раскрошили.',
     resolved: 'Пустые тазы собраны.',
   },
   {

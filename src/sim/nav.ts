@@ -2,7 +2,7 @@
 // Слон проходит там, где зазор не меньше его радиуса, — поэтому большой слон не
 // протиснется в дверь кипера, а ворота пропустят любого, когда открыты.
 
-import { AREA_IDS, DOORS, GATES, H, W, areaAt, inEllipse, POOL, zoneAt, type AreaId, type Rect } from '../data/facility';
+import { AREA_IDS, DOORS, GATES, H, W, areaAt, gateSolid, inEllipse, POOL, zoneAt, type AreaId, type Rect } from '../data/facility';
 import { distToRect, elephantIndex, keeperIndex, type SpatialIndex } from './geometry';
 import type { Vec } from './types';
 
@@ -47,6 +47,11 @@ function closedGates(mask: number): Rect[] {
   return GATES.filter((g) => !((g.id === 'outer' ? 1 : 2) & mask)).map((g) => g.rect);
 }
 
+// Для кипера закрытые ворота — по частям: в щель между створками человек проходит
+function closedGateParts(mask: number): Rect[] {
+  return GATES.filter((g) => !((g.id === 'outer' ? 1 : 2) & mask)).flatMap((g) => gateSolid(g));
+}
+
 const elephantFields = new Map<number, Float32Array>();
 
 function elephantField(mask: number): Float32Array {
@@ -72,7 +77,7 @@ export function elephantCanStand(x: number, y: number, r: number, mask: number):
   return d >= r;
 }
 
-// Кипер: ворота и доступные отсеки (двери открыты, только если отсек пуст) — поле по ключу
+// Кипер: ворота и отсеки, куда он может войти, — поле по ключу
 const keeperFields = new Map<string, Float32Array>();
 
 export interface KeeperNavState {
@@ -88,7 +93,7 @@ function keeperField(s: KeeperNavState): Float32Array {
   const key = keeperKey(s);
   let f = keeperFields.get(key);
   if (!f) {
-    const extra: Rect[] = [...closedGates(s.mask)];
+    const extra: Rect[] = [...closedGateParts(s.mask)];
     for (const d of DOORS) if (!s.access.includes(d.area)) extra.push(d.rect);
     const allowed = (x: number, y: number) => {
       const a = areaAt(x, y);
@@ -297,6 +302,53 @@ export function keeperRoute(from: Vec, to: Vec, s: KeeperNavState): Vec[] | null
   const need = 0.34;
   if (lineClear(field, from, to, need)) return [to];
   return astar(field, from, to, need);
+}
+
+// Маршрут кипера в обход слонов: корпус непроходим, её личное место вокруг (soft) — дороже,
+// так что кипер обходит, если есть где, а в тесноте идёт рядом. Клетки старта и цели остаются
+// как были: подойти вплотную можно, когда это и есть цель.
+export interface Obstacle {
+  x: number;
+  y: number;
+  r: number;
+  soft: number;
+}
+
+export function keeperRouteAround(from: Vec, to: Vec, s: KeeperNavState, bodies: Obstacle[]): Vec[] | null {
+  if (!bodies.length) return keeperRoute(from, to, s);
+  const base = keeperField(s);
+  const need = 0.34;
+  const field = new Float32Array(base);
+  const extra = new Float32Array(GW * GH);
+  for (const b of bodies) {
+    const R = b.r + need + b.soft;
+    const x0 = Math.max(0, Math.floor((b.x - R) / CELL));
+    const x1 = Math.min(GW - 1, Math.floor((b.x + R) / CELL));
+    const y0 = Math.max(0, Math.floor((b.y - R) / CELL));
+    const y1 = Math.min(GH - 1, Math.floor((b.y + R) / CELL));
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const i = cy * GW + cx;
+        const c = cellCenter(i);
+        const d = Math.hypot(c.x - b.x, c.y - b.y) - b.r;
+        if (d < need) field[i] = Math.min(field[i], Math.max(0, d));
+        else if (b.soft > 0 && d < need + b.soft) extra[i] = Math.max(extra[i], 4 * (1 - (d - need) / b.soft));
+      }
+    }
+  }
+  for (const p of [from, to]) {
+    const i = cellIndex(p.x, p.y);
+    field[i] = base[i];
+  }
+  const clear = (a: Vec, b: Vec) => {
+    if (!lineClear(field, a, b, need)) return false;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const n = Math.max(1, Math.ceil(len / 0.25));
+    for (let k = 1; k < n; k++) if (extra[cellIndex(a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n)] > 0) return false;
+    return true;
+  };
+  if (clear(from, to)) return [to];
+  return astar(field, from, to, need, (i) => 1 + extra[i]);
 }
 
 export function keeperFieldAt(x: number, y: number, s: KeeperNavState): number {

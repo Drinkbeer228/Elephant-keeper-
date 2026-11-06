@@ -1,12 +1,11 @@
 // Неподвижная часть карты: грунты, стены, ограды и решётки, мебель и надписи.
-// Зоны различаются материалом: выгул — живая трава с тропами и проплешинами; стойла — тёплый
-// песок под соломой и бетонная полоса у решётки; проход и коридор — светлая плитка;
-// помещения — холодная стяжка; дворы — тёмный асфальт с гравием. Стены — графитовый контур,
-// тёплая заливка и тень на пол; решётки — стойки и перекладины, сквозь них видно слонов.
+// Зоны различаются материалом: выгул — живая трава с тропами и проплешинами; слоновник — один
+// общий зал: тёплый песок под соломой и бетонная полоса у южной стены (кормушки, поилки, сток);
+// дорожки у помещений — светлая плитка; помещения — холодная стяжка; дворы — тёмный гравий.
+// Стены — графитовый контур, тёплая заливка и тень на пол; ограды — стойки и перекладины.
 
 import Phaser from 'phaser';
 import {
-  AISLE,
   BARN,
   BEDDING,
   BOULDERS,
@@ -150,11 +149,11 @@ function drawPaddock(g: Phaser.GameObjects.Graphics, r: () => number): void {
 }
 
 function drawBarn(g: Phaser.GameObjects.Graphics, r: () => number): void {
-  // Стойла: утрамбованный песок под соломой (солома рисуется слоем пола)
+  // Общий зал: утрамбованный песок под соломой (солома рисуется слоем пола)
   rect(g, BARN, C.barnConcrete);
   rect(g, BEDDING, C.barnSand);
   speckle(g, BEDDING, 2.2, [C.barnSandDark, shade(C.barnSand, 0.1)], r, 0.045);
-  // Бетонная полоса вдоль решётки: швы, сток
+  // Бетонная полоса у южной стены: швы, сток
   const edge: Rect = { x0: BARN.x0, y0: SERVICE_EDGE_Y, x1: BARN.x1, y1: BARN.y1 };
   rect(g, edge, C.barnConcrete);
   g.fillStyle(hex(C.barnConcreteDark), 0.6);
@@ -166,21 +165,17 @@ function drawBarn(g: Phaser.GameObjects.Graphics, r: () => number): void {
 
 function drawService(g: Phaser.GameObjects.Graphics, r: () => number): void {
   for (const y of YARDS) {
-    if (y.id === 'corridor') continue;
+    if (y.floor === 'concrete') {
+      // Дорожка у помещений: светлая плитка с деформационными швами
+      rect(g, y.rect, C.corridor);
+      tileJoints(g, y.rect, 1, C.corridorSeam, 0.7, 0.02);
+      continue;
+    }
     // Технический двор: асфальт и мокрый гравий
     rect(g, y.rect, C.yard);
     speckle(g, y.rect, 1.6, [C.yardDark, C.yardStone, shade(C.yard, 0.12)], r, 0.06);
     for (let i = 0; i < 10; i++) ell(g, y.rect.x0 + r() * (y.rect.x1 - y.rect.x0), y.rect.y0 + r() * (y.rect.y1 - y.rect.y0), 0.6 + r(), 0.4 + r() * 0.6, C.yardDark, 0.35);
   }
-  // Коридор и проход кипера: светлая плитка с деформационными швами
-  const corridor = YARDS.find((y) => y.id === 'corridor')!.rect;
-  rect(g, corridor, C.corridor);
-  tileJoints(g, corridor, 1, C.corridorSeam, 0.7, 0.02);
-  g.lineStyle(0.05 * P, hex(C.corridorSeam), 1);
-  for (let x = corridor.x0 + 6; x < corridor.x1; x += 6) g.lineBetween(x * P, corridor.y0 * P, x * P, corridor.y1 * P);
-  // Проход кипера в слоновнике: жёлтая линия безопасности вдоль решётки
-  g.fillStyle(hex('#d9b84a'), 0.9);
-  g.fillRect(AISLE.x0 * P, (AISLE.y0 + 0.62) * P, (AISLE.x1 - AISLE.x0) * P, 0.07 * P);
   for (const room of ROOMS) {
     const fill = room.floor === 'tile' ? C.roomBlue : room.floor === 'concrete' ? C.roomNeutral : room.id === 'duty' ? C.roomNeutral : C.roomBlue;
     rect(g, room.rect, fill);
@@ -343,7 +338,6 @@ export function buildGround(scene: Phaser.Scene): void {
     return { x: (rr.x0 + rr.x1) / 2, y: (rr.y0 + rr.y1) / 2 };
   };
   placeImage(scene, 'st-drain', DRAIN.x, DRAIN.y, D.floor + 0.5);
-  placeImage(scene, 'st-training', 26.75, 29.55, D.station);
   placeImage(scene, 'st-desk', mid('desk').x, mid('desk').y, D.station);
   placeImage(scene, 'st-lockers', 2.75, 37.6, D.station);
   placeImage(scene, 'st-shelf', mid('vegShelf').x, mid('vegShelf').y, D.station).setScale((1 / 3) * 0.9);
@@ -357,7 +351,6 @@ export function buildGround(scene: Phaser.Scene): void {
   placeImage(scene, 'st-bamboo', mid('bambooPile').x, mid('bambooPile').y, D.station);
   placeImage(scene, 'st-sawdust', mid('sawdustPile').x, mid('sawdustPile').y, D.station);
   placeImage(scene, 'st-toolboard', mid('toolRack').x, mid('toolRack').y, D.station);
-  placeImage(scene, 'st-panel', mid('gatePanel').x, mid('gatePanel').y, D.station).setScale((1 / 3) * 0.8);
   placeImage(scene, 'st-reel', mid('hoseReel').x, mid('hoseReel').y, D.station);
   placeImage(scene, 'st-container', mid('container').x, mid('container').y, D.station);
   placeImage(scene, 'st-bench', 44, 31.5, D.station);
@@ -370,12 +363,10 @@ export function buildGround(scene: Phaser.Scene): void {
     placeImage(scene, 'st-lamp', p.x, p.y, D.station);
   }
 
-  // Таблички: на свету и над проходом, чтобы ничто не перекрывало
+  // Таблички: на свету, чтобы ничто не перекрывало
   const signs: [string, number, number][] = [
     ['Выгул', 24, 2.75],
-    ['Западное стойло', 15, 20.95],
-    ['Восточное стойло', 25, 20.95],
-    ['Проход кипера', 20, 32.35],
+    ['Слоновник', 24.6, 20.95],
     ...ROOMS.map((rm) => [rm.label, (rm.rect.x0 + rm.rect.x1) / 2 + (rm.id === 'duty' ? 1.6 : rm.id === 'store' ? -1.4 : rm.id === 'kitchen' ? -2.2 : 0), rm.rect.y0 + 0.85] as [string, number, number]),
     ['Хоздвор', 6, 29.2],
     ['Двор', 37, 29.2],

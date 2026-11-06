@@ -8,7 +8,7 @@ import type { BodyState, DayStats, Elephant, ElephantProfile, ShiftChecks, State
 import { addLitter, cellCenter, dropDung, forCells, touchCells } from './world';
 import { log } from './events';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface NewGameOptions {
   seed: number;
@@ -42,6 +42,9 @@ export function emptyDayStats(): DayStats {
     wellbeingSamples: 0,
     lyingMinutes: 0,
     dirtyLying: 0,
+    shoves: 0,
+    kicks: 0,
+    contactMinutes: 0,
   };
 }
 
@@ -122,6 +125,11 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
       zone: 'barn',
       zoneSince: s.t - 600,
       lastSignalFx: -100,
+      aware: -100,
+      tension: 0,
+      accepted: -100,
+      lastWarn: -100,
+      nag: { cue: '', t: -100, n: 0 },
     },
     day: emptyDayStats(),
   };
@@ -146,7 +154,7 @@ export function createState(opts: NewGameOptions): State {
     nextId: 1,
     elephants: [],
     bonds: initialBonds(herd, seed),
-    keeper: { x: KEEPER_START.x, y: KEEPER_START.y, facing: -Math.PI / 2, held: null, pouch: KEEPER.startTreats, task: null, prep: null, running: false, moving: false, carried: 0 },
+    keeper: { x: KEEPER_START.x, y: KEEPER_START.y, facing: -Math.PI / 2, held: null, pouch: KEEPER.startTreats, task: null, prep: null, running: false, moving: false, carried: 0, stun: 0 },
     world: {
       gates: { outer: false, shift: true },
       feeders,
@@ -191,9 +199,9 @@ export function createState(opts: NewGameOptions): State {
   s.elephants = herd.map((p, i) => createElephant(s, p, i));
   s.world.tubs = s.elephants.map((e, i) => newTub(s, e.id, i));
   s.world.items.push({ id: s.nextId++, kind: 'tank', x: TANK_HOME.x, y: TANK_HOME.y, load: 0, aux: 0, owner: null });
-  for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation };
+  for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation, familiarity: e.learned.familiarity };
   if (opts.mess !== false) addNightMess(s);
-  log(s, 'info', 'Утро. Слоны ночевали в слоновнике. Проверь поилки, положи сено на выгул и открой ворота на выгул — пульт в проходе у решётки, между стойлами.', { kind: 'welcome' });
+  log(s, 'info', 'Утро. Слоны ночевали в слоновнике — ты работаешь рядом с ними, в одном зале. Окликни каждую по имени, проверь поилки, положи сено на выгул и открой ворота на выгул (они у северной стены зала).', { kind: 'welcome' });
   return s;
 }
 

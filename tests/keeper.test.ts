@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { availableActions, doorUnlocked, gateOpenBlock, NO_INPUT, runMinutes, step, tubKg, type State } from '../src/sim';
-import { DOORS, HOSE_REEL, STATIONS, TROUGH_IDS } from '../src/data/facility';
+import { availableActions, NO_INPUT, runMinutes, step, tubKg, type State } from '../src/sim';
+import { HOSE_REEL, KEEPER_GAP, STATIONS, TROUGH_IDS } from '../src/data/facility';
 import { DIETS, PORRIDGE_SOAK_MIN, VEG_KINDS, vegPlan } from '../src/data/rations';
 import { shiftDay } from '../src/sim/time';
 import { addFood, cellOf, dropFruit, fruitStage, isBeddingCell } from '../src/sim/world';
+import { comfortGap } from '../src/sim/behavior/contact';
+import { gapToBody } from '../src/sim/behavior/perceive';
 import { act, actions, at, atStation, game, park, walk } from './helpers';
-
-const door = (id: string) => DOORS.find((d) => d.id === id)!;
+import type { Elephant } from '../src/sim/types';
 
 function allOut(s: State): void {
   s.elephants.forEach((e, i) => park(e, 12 + i * 7, 10));
@@ -16,111 +17,239 @@ function opt(s: State, id: string) {
   return availableActions(s).find((a) => a.id === id || a.id.startsWith(id));
 }
 
-describe('защищённый контакт: два стойла, проход кипера, ворота', () => {
-  it('слоны в стойлах — двери заперты, из прохода не войти; сенник, поилка и пульт работают через решётку', () => {
+// Слониха стоит на месте, но живёт: замечает кипера, реагирует на тесноту (не «заморожена»)
+function hold(e: Elephant, x: number, y: number, heading: number): void {
+  e.x = x;
+  e.y = y;
+  e.heading = heading;
+  e.path = [];
+  e.pathGoal = null;
+  e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 1e6, doStart: 0, forced: false, target: null, key: 'idle' };
+  e.mem.nextThink = 1e9;
+}
+
+describe('полный контакт: общий зал, кипер среди слонов', () => {
+  it('слоны в зале — кипер входит к ним из дежурки, кладёт сено, открывает кран и ворота на выгул руками', () => {
     const s = game(1);
-    expect(doorUnlocked(s, door('doorW'))).toBe(false);
-    expect(doorUnlocked(s, door('doorE'))).toBe(false);
-    at(s, 15.2, 31.2);
-    walk(s, 0, -1, 2);
-    expect(s.keeper.y).toBeGreaterThan(30);
+    // Со двора в зал через дверь — слоны внутри, это не мешает
+    at(s, 8.6, 27.5);
+    walk(s, 1, 0, 1.2);
+    expect(s.keeper.x).toBeGreaterThan(10.4);
     s.keeper.held = { kind: 'hay', load: 0, aux: 0, owner: null };
     atStation(s, 'barnRackW');
     expect(opt(s, 'loadFeeder:barnRackW:hay')?.enabled).toBe(true);
     s.keeper.held = null;
     atStation(s, 'barnWaterW');
     expect(opt(s, 'valve:barnWaterW')?.enabled).toBe(true);
-    atStation(s, 'gatePanel');
-    expect(actions(s)).toContain('gate:outer');
+    // Пульта больше нет: ворота открывают, стоя у створки
+    at(s, 25, 31);
+    expect(actions(s)).not.toContain('gate:outer');
+    at(s, 13.2, 20.9);
+    expect(act(s, 'gate:outer')).toBe(true);
+    expect(s.world.gates.outer).toBe(true);
+    at(s, 19.1, 27);
     expect(actions(s)).toContain('gate:shift');
   });
 
-  it('все на выгуле, ворота на выгул закрыты — оба стойла пусты, можно войти и выйти', () => {
-    const s = game(1);
-    allOut(s);
-    expect(doorUnlocked(s, door('doorW'))).toBe(true);
-    expect(doorUnlocked(s, door('doorE'))).toBe(true);
-    expect(doorUnlocked(s, door('paddockDoor'))).toBe(false);
-    at(s, 15.2, 31.2);
-    walk(s, 0, -1, 2);
-    expect(s.keeper.y).toBeLessThan(29.5);
-    walk(s, 0, 1, 2.5);
-    expect(s.keeper.y).toBeGreaterThan(30.2);
-  });
-
-  it('слоны в восточном, ворота между стойлами закрыты — западное стойло можно убирать', () => {
+  it('разделительные ворота закрыты — кипер проходит боком через щель, слониха остаётся в своей половине', () => {
     const s = game(2);
-    s.elephants.forEach((e, i) => park(e, 23 + i * 2.2, 23 + (i % 2)));
+    s.elephants.forEach((e, i) => park(e, 24 + i * 2, 23));
     s.world.gates.shift = false;
-    expect(doorUnlocked(s, door('doorW'))).toBe(true);
-    expect(doorUnlocked(s, door('doorE'))).toBe(false);
-    // Пока кипер внутри, ворота между стойлами не открыть
-    at(s, 15.2, 28.6);
-    expect(gateOpenBlock(s, 'shift')).toMatch(/внутри/);
-    at(s, 15.2, 31.2);
-    expect(gateOpenBlock(s, 'shift')).toBeNull();
-    s.world.gates.shift = true;
-    expect(doorUnlocked(s, door('doorW'))).toBe(false);
+    const y = (KEEPER_GAP.y0 + KEEPER_GAP.y1) / 2;
+    at(s, 18.6, y);
+    walk(s, 1, 0, 1.2);
+    expect(s.keeper.x).toBeGreaterThan(20.3);
+    // Слониха из восточной половины в западную не пройдёт
+    const e = s.elephants[0];
+    hold(e, 22.6, y, Math.PI);
+    e.act = { ...e.act, kind: 'wander', phase: 'go', target: { t: 'point', x: 16, y, face: null }, key: 'wander', dur: 5, forced: true };
+    runMinutes(s, 3);
+    expect(e.x).toBeGreaterThan(20.5);
   });
 
-  it('пульт: ворота не закрыть на слоне в проёме и не открыть, пока в отсеке тачка', () => {
+  it('ворота не закрыть на слонихе в проёме — подожди или попроси отойти', () => {
     const s = game(3);
-    atStation(s, 'gatePanel');
     s.world.gates.outer = true;
     park(s.elephants[0], 15.5, 20.2);
+    at(s, 13.2, 20.9);
     expect(opt(s, 'gate:outer')!.enabled).toBe(false);
+    expect(opt(s, 'gate:outer')!.reason).toMatch(/В проёме/);
     park(s.elephants[0], 13, 24);
     expect(act(s, 'gate:outer')).toBe(true);
     expect(s.world.gates.outer).toBe(false);
-    allOut(s);
-    s.world.barrow.x = 15;
-    s.world.barrow.y = 25;
-    expect(opt(s, 'gate:outer')!.enabled).toBe(false);
-    expect(opt(s, 'gate:outer')!.reason).toMatch(/тачку/);
   });
 
-  it('у решётки — все действия со слонихой сразу, а не два: панель Q', () => {
+  it('рядом со слонихой — все действия сразу: угостить, погладить, почесать, руку, голосом', () => {
     const s = game(4, 1, [{ nervousness: 0.1 }]);
     const e = s.elephants[0];
     e.learned.trust = 0.8;
     park(e, 13, 27.6);
     e.heading = Math.PI / 2;
-    at(s, 13, 31);
+    at(s, 13, 30.4);
     const list = availableActions(s).filter((a) => a.elephantId === e.id);
     const verbs = new Set(list.map((a) => a.ref.verb));
-    for (const v of ['treat', 'pet', 'scratch', 'hand', 'lieDown']) expect(verbs.has(v as never), v).toBe(true);
-    expect(list.length).toBeGreaterThanOrEqual(5);
+    for (const v of ['treat', 'pet', 'scratch', 'hand', 'voice']) expect(verbs.has(v as never), v).toBe(true);
+    const cues = list.filter((a) => a.ref.verb === 'voice').map((a) => a.ref.target.split(':')[1]);
+    for (const c of ['move', 'stay', 'follow', 'lie', 'no', 'praise', 'talk']) expect(cues, c).toContain(c);
     for (const a of list) expect(a.group).toBe(e.profile.name);
     // Порядок: доступное — выше, при равной важности — ближе
     const all = availableActions(s);
     for (let i = 1; i < all.length; i++) if (all[i - 1].enabled === all[i].enabled) expect(all[i - 1].priority).toBeGreaterThanOrEqual(all[i].priority);
   });
 
-  it('лечь по просьбе решает слониха; спину почистить можно только лежащей', () => {
+  it('«ложись» — решает слониха; спину почистить можно только лежащей', () => {
     const s = game(5, 1, [{ nervousness: 0.05, cooperation: 0.95 }]);
     const e = s.elephants[0];
     e.learned.trust = 0.95;
     e.learned.cooperation = 0.95;
+    e.learned.cues.lie = 0.9;
     e.needs.fatigue = 70;
     e.needs.hunger = 0;
-    // Стоит у решётки и ждёт (не уходит есть между просьбами)
-    park(e, 13, 27.6);
+    // Стоит на подстилке и ждёт (не уходит есть между просьбами)
+    park(e, 14, 24);
     e.heading = Math.PI / 2;
-    at(s, 13, 31);
+    at(s, 14, 27.4);
     s.keeper.held = { kind: 'brush', load: 0, aux: 0, owner: null };
     e.body.back = 0.6;
     const standing = opt(s, `groom:${e.id}`);
     expect(standing?.label).not.toMatch(/спину/);
     let lay = false;
     for (let i = 0; i < 8 && !lay; i++) {
-      act(s, `lieDown:${e.id}`);
-      runMinutes(s, 1);
+      act(s, `voice:${e.id}:lie`);
+      runMinutes(s, 1.7);
       lay = e.lying;
     }
     expect(lay).toBe(true);
-    // Лежит у решётки: подойти вплотную — достать до спины
-    at(s, 13, 30.4);
+    // Лежит — подойти вплотную к боку: достать до спины
+    at(s, 14 + 0.95 * e.profile.look.size * e.profile.look.girth * 1.15 + 0.7, 24);
     expect(opt(s, `groom:${e.id}`)?.label).toMatch(/спину/);
+  });
+});
+
+describe('личное место слонихи и голос', () => {
+  it('подошёл вплотную к спящей, не окликнув, — вскакивает; окликнул по имени — спокойно подпускает', () => {
+    const run = (call: boolean) => {
+      const s = game(30, 1, [{ nervousness: 0.5, confidence: 0.3 }]);
+      const e = s.elephants[0];
+      e.x = 15;
+      e.y = 24;
+      e.heading = 0;
+      e.lying = true;
+      e.act = { ...e.act, kind: 'sleep', phase: 'do', dur: 120, doStart: s.t, forced: false, target: null, key: 'sleep' };
+      e.mem.nextThink = s.t + 200;
+      e.mem.aware = -100;
+      at(s, 11.0, 24);
+      if (call) expect(act(s, `voice:${e.id}:name`)).toBe(true);
+      const trust = e.learned.trust;
+      walk(s, 1, 0, 0.9);
+      return { spooked: s.t - e.mem.spooked < 5, trust: e.learned.trust - trust, gap: gapToBody(e, s.keeper) };
+    };
+    const silent = run(false);
+    expect(silent.spooked).toBe(true);
+    expect(silent.trust).toBeLessThan(0);
+    const called = run(true);
+    expect(called.spooked).toBe(false);
+    expect(called.trust).toBe(0);
+  });
+
+  it('тесно: кипер стоит вплотную без приглашения — уверенная предупреждает, потом толкает; робкая отходит', () => {
+    const bold = game(31, 1, [{ confidence: 0.9, nervousness: 0.2 }]);
+    const b = bold.elephants[0];
+    b.learned.trust = 0.3;
+    b.learned.familiarity = 0.2;
+    hold(b, 15, 24, Math.PI / 2);
+    // Кипер подходит к ней вплотную и стоит
+    at(bold, 15, 26.2);
+    walk(bold, 0, -1, 0.4);
+    const need = comfortGap(bold, b);
+    expect(gapToBody(b, bold.keeper) - 0.3).toBeLessThan(need);
+    let warned = false;
+    for (let i = 0; i < 600 && b.day.shoves === 0; i++) {
+      step(bold, { ...NO_INPUT, move: { x: 0, y: -0.05 } });
+      if (b.act.kind === 'warn') warned = true;
+    }
+    expect(warned).toBe(true);
+    expect(b.day.shoves).toBeGreaterThan(0);
+    expect(bold.keeper.stun).toBeGreaterThan(0);
+
+    const shy = game(32, 1, [{ confidence: 0.15, nervousness: 0.85 }]);
+    const t = shy.elephants[0];
+    t.learned.trust = 0.3;
+    hold(t, 15, 24, Math.PI / 2);
+    at(shy, 15, 26.2);
+    walk(shy, 0, -1, 0.4);
+    const x0 = { x: t.x, y: t.y };
+    for (let i = 0; i < 300 && t.act.kind !== 'giveWay'; i++) step(shy, { ...NO_INPUT, move: { x: 0, y: -0.05 } });
+    expect(t.act.kind).toBe('giveWay');
+    // Развернуться на месте и отойти — несколько секунд
+    runMinutes(shy, 5);
+    expect(Math.hypot(t.x - x0.x, t.y - x0.y)).toBeGreaterThan(0.8);
+    expect(t.day.shoves).toBe(0);
+  });
+
+  it('заговорил спокойно — подпускает ближе: теснота спадает, и можно работать рядом', () => {
+    const s = game(33, 1, [{ confidence: 0.9, nervousness: 0.25 }]);
+    const e = s.elephants[0];
+    e.learned.trust = 0.55;
+    hold(e, 15, 24, Math.PI / 2);
+    at(s, 15, 27.6);
+    s.keeper.facing = -Math.PI / 2;
+    act(s, `voice:${e.id}:name`);
+    expect(act(s, `voice:${e.id}:talk`)).toBe(true);
+    // Подошёл к ней после разговора — не напрягается
+    walk(s, 0, -1, 0.35);
+    for (let i = 0; i < 120; i++) step(s);
+    expect(e.mem.tension).toBeLessThan(0.3);
+    expect(e.day.shoves).toBe(0);
+  });
+
+  it('«пошли» — идёт рядом с кипером, а кипер идёт её шагом; «стоять» — останавливается', () => {
+    const s = game(34, 1, [{ cooperation: 0.9, nervousness: 0.2 }]);
+    const e = s.elephants[0];
+    e.learned.trust = 0.8;
+    e.learned.cues.follow = 0.95;
+    e.learned.cues.stay = 0.95;
+    hold(e, 15, 24, 0);
+    e.mem.nextThink = 0;
+    at(s, 17.6, 24);
+    s.keeper.facing = Math.PI;
+    let ok = false;
+    for (let i = 0; i < 5 && !ok; i++) {
+      act(s, `voice:${e.id}:follow`);
+      ok = e.act.kind === 'walkWith';
+      if (!ok) runMinutes(s, 1.7);
+    }
+    expect(ok).toBe(true);
+    const k0 = { x: s.keeper.x, y: s.keeper.y };
+    walk(s, 1, 0.4, 4);
+    const walked = Math.hypot(s.keeper.x - k0.x, s.keeper.y - k0.y);
+    // Её шагом: не быстрее 1,3 м/с
+    expect(walked).toBeLessThanOrEqual(1.3 * 4 + 0.2);
+    expect(walked).toBeGreaterThan(3);
+    expect(Math.hypot(e.x - s.keeper.x, e.y - s.keeper.y)).toBeLessThan(4.2);
+    expect(act(s, `voice:${e.id}:stay`)).toBe(true);
+    expect(e.act.kind).toBe('stay');
+    const p = { x: e.x, y: e.y };
+    walk(s, -1, 0, 1.5);
+    expect(Math.hypot(e.x - p.x, e.y - p.y)).toBeLessThan(0.6);
+  });
+
+  it('«нельзя» без причины подтачивает доверие; за дело — прекращает', () => {
+    const s = game(35, 1);
+    const e = s.elephants[0];
+    hold(e, 15, 24, Math.PI / 2);
+    at(s, 15, 27.5);
+    const t0 = e.learned.trust;
+    expect(act(s, `voice:${e.id}:no`)).toBe(true);
+    expect(e.learned.trust).toBeLessThan(t0);
+  });
+
+  it('в помещении кипера слоны не слышат — голосовых просьб нет', () => {
+    const s = game(36, 1);
+    atStation(s, 'prepTable');
+    expect(availableActions(s).some((a) => a.ref.verb === 'voice')).toBe(false);
+    at(s, 15, 30.8);
+    expect(availableActions(s).some((a) => a.ref.verb === 'voice')).toBe(true);
   });
 });
 
@@ -375,8 +504,9 @@ describe('поилки', () => {
   it('с химией у поилки нельзя работать, пока рядом слон', () => {
     const s = game(20, 1);
     const e = s.elephants[0];
-    park(e, 17.4, 27.3);
-    e.heading = Math.PI / 2;
+    const slot = STATIONS.barnWaterW.slots![0];
+    park(e, slot.x, slot.y);
+    e.heading = slot.face;
     const t = s.world.troughs.barnWaterW;
     t.level = 0;
     t.drain = true;
@@ -391,7 +521,7 @@ describe('поилки', () => {
 });
 
 describe('шланг', () => {
-  it('шланг тянется от катушки, огибает решётки и не длиннее себя; брошенный лежит, где бросили', () => {
+  it('шланг тянется от катушки, огибает стены и не длиннее себя; брошенный лежит, где бросили', () => {
     const s = game(21);
     atStation(s, 'hoseReel');
     expect(act(s, 'takeHose')).toBe(true);
@@ -409,7 +539,7 @@ describe('шланг', () => {
     expect(s.keeper.held?.kind).toBe('hose');
   });
 
-  it('шланг у решётки слониха может схватить и пожевать — шланг портится', () => {
+  it('брошенный в зале шланг слониха может схватить и пожевать — шланг портится', () => {
     let damage = 0;
     for (const seed of [22, 23, 24]) {
       const s = game(seed, 1, [{ mischief: 0.95, curiosity: 0.9, playfulness: 0.8 }]);
@@ -418,13 +548,11 @@ describe('шланг', () => {
       e.needs.hunger = 5;
       atStation(s, 'hoseReel');
       act(s, 'takeHose');
-      // Протянуть по проходу к западному стойлу и бросить у решётки
-      at(s, 30.6, 31.2);
-      step(s);
+      // Протянуть через дверь из двора в зал и бросить на полу
       for (const [x, y] of [
-        [26, 31.2],
-        [20, 30.7],
-        [15, 30.4],
+        [31.4, 27.6],
+        [28.4, 27.6],
+        [25, 26.5],
       ]) {
         walk(s, x - s.keeper.x, y - s.keeper.y, Math.hypot(x - s.keeper.x, y - s.keeper.y) / 1.3);
       }

@@ -20,10 +20,11 @@ function front(c: KCtx, k = 0.65): { x: number; y: number } {
   return { x: c.k.x + Math.cos(c.k.facing) * k, y: c.k.y + Math.sin(c.k.facing) * k };
 }
 
-// Где кипер вообще может работать с полом: в пустом отсеке, в проходе, во дворах и помещениях
+// Где кипер может работать с полом: в зале и на выгуле — там, где стоит сам, среди слонов;
+// во дворах и помещениях — на твёрдом полу
 function workable(c: KCtx, x: number, y: number): boolean {
   const a = areaAt(x, y);
-  if (a) return c.area === a; // внутри вольера — только там, где стоишь сам (отсек пуст)
+  if (a) return c.area === a; // внутри вольера — только в той части, где стоишь сам
   return hardFloor(x, y);
 }
 
@@ -156,7 +157,7 @@ export function cleaningOptions(c: KCtx, out: ActionOption[]): void {
     return;
   }
   if (h.kind === 'hose' && hoseUsable(s)) {
-    // Смыть бетон: в пустом стойле или проходе
+    // Смыть бетон: в зале или во дворе
     const p = front(c, 0.9);
     let dirty = 0;
     forCells(p.x, p.y, FLOOR.hoseRadius, (i, cx, cy) => {

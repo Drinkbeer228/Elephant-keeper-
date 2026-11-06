@@ -67,21 +67,16 @@ export type FoodKind = 'hay' | 'produce' | 'browse';
 export type SignalStyle = 'stomp' | 'rumble' | 'stare' | 'gate' | 'beg';
 export type Foot = 'FL' | 'FR' | 'HL' | 'HR';
 
-// Свисток кипера для этой слонихи: своя высота, интервал и ритм
-export interface Whistle {
-  f0: number;
-  f1: number;
-  notes: number;
-  gap: number;
-  wave: 'sine' | 'triangle';
-}
-
 export interface Habits {
   signal: SignalStyle;
   foot: Foot;
-  whistle: Whistle;
   diet: DietId;
 }
+
+// Голосовые просьбы кипера. Каждая слониха знает их по-своему: что-то с прежними киперами
+// выучено крепко, что-то — едва. Знание растёт, если за выполненное хвалят, и тает без похвалы
+export type Cue = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'no';
+export const CUES: Cue[] = ['come', 'stay', 'move', 'lie', 'follow', 'no'];
 
 export interface ElephantProfile {
   id: string;
@@ -96,10 +91,12 @@ export interface ElephantProfile {
 
 // Выученное: меняется от опыта и сохраняется между сменами
 export interface Learned {
-  trust: number; // доверие к киперу
+  trust: number; // доверие к киперу: спокойна ли рядом с ним
+  familiarity: number; // насколько он для неё «свой»: растёт от времени рядом и каждодневной заботы
   cooperation: number; // готовность выполнять просьбы кипера
   expectation: number; // ожидание, что на сигнал ответят
   toilet: number; // связь «попросилась — подставили бак — наградили»
+  cues: Record<Cue, number>; // как знает каждую голосовую просьбу
 }
 
 export interface Needs {
@@ -155,7 +152,11 @@ export type ActivityKind =
   | 'toss'
   | 'shake'
   | 'manipulate'
-  | 'lie';
+  | 'lie'
+  | 'stay' // стоит на месте по просьбе
+  | 'giveWay' // отступает от кипера по просьбе «подвинься»
+  | 'walkWith' // идёт рядом с кипером
+  | 'warn'; // предупреждает: уши в стороны, мотает головой — кипер слишком близко
 
 export const ACTIVITY_KINDS: ActivityKind[] = [
   'idle',
@@ -181,6 +182,10 @@ export const ACTIVITY_KINDS: ActivityKind[] = [
   'shake',
   'manipulate',
   'lie',
+  'stay',
+  'giveWay',
+  'walkWith',
+  'warn',
 ];
 
 export type SignalKind = 'toilet' | 'out' | 'in' | 'food' | 'water' | 'attention';
@@ -220,6 +225,8 @@ export interface SignalState {
   answered: boolean;
 }
 
+export type Request = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'toilet';
+
 export interface DayStats {
   minutes: Partial<Record<ActivityKind, number>>;
   distance: number;
@@ -244,13 +251,22 @@ export interface DayStats {
   wellbeingSamples: number;
   lyingMinutes: number;
   dirtyLying: number; // минут лёжа на мокром и грязном
+  shoves: number; // оттолкнула кипера
+  kicks: number; // лягнула (подошли сзади без оклика)
+  contactMinutes: number; // минут рядом с кипером
 }
 
 export interface ElephantMemory {
   nextThink: number;
   cooldown: Record<string, number>; // ключ поведения → игровое время, раньше которого его не выбирают
   habit: Record<string, number>; // привыкание к видам обогащения 0..1
-  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean; why: 'call' | 'toilet' | 'lie' } | null;
+  // Последняя выполненная (или выполняемая) просьба кипера — в окне награды её хвалят
+  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean; why: Request } | null;
+  aware: number; // когда последний раз видела или слышала кипера
+  tension: number; // 0..1 — насколько ей сейчас тесно рядом с кипером
+  accepted: number; // когда последний раз сама приняла контакт (дала погладить, взяла угощение, выполнила просьбу)
+  lastWarn: number; // когда предупреждала
+  nag: { cue: string; t: number; n: number }; // одну и ту же просьбу повторяют, а она не хочет
   lastGreet: Record<string, number>;
   lastAte: number;
   spooked: number; // когда кипер в последний раз напугал
@@ -473,6 +489,7 @@ export interface Keeper {
   running: boolean;
   moving: boolean;
   carried: number; // метров пронесено с тюком (для рассыпания)
+  stun: number; // секунд приходит в себя после толчка
 }
 
 // Действие кипера — данные, а не замыкание: его можно сохранить, повторить и проверить
@@ -514,9 +531,7 @@ export type Verb =
   | 'scratch'
   | 'pet'
   | 'hand'
-  | 'call'
-  | 'lieDown'
-  | 'standUp'
+  | 'voice'
   | 'groom'
   | 'soap'
   | 'scrub'
@@ -524,7 +539,6 @@ export type Verb =
   | 'shower'
   | 'hoseWash'
   | 'tankPlace'
-  | 'toiletCmd'
   | 'tankTake'
   | 'emptyTank'
   | 'feedPorridge'
@@ -595,6 +609,10 @@ export interface ElephantDayReport {
   urineTank: number;
   trustDelta: number;
   cooperationDelta: number;
+  familiarityDelta?: number; // насколько стала «своей» за смену (в отчётах до полного контакта нет)
+  contactMinutes?: number; // сколько была рядом с кипером
+  shoves?: number;
+  kicks?: number;
   highlights: string[];
 }
 
@@ -635,7 +653,7 @@ export interface State {
   alerts: Alert[];
   dayStart: number;
   dailyKeeper: DailyKeeper;
-  startOfDay: Record<string, { trust: number; cooperation: number }>;
+  startOfDay: Record<string, { trust: number; cooperation: number; familiarity?: number }>;
   reports: DayReport[];
   pendingReport: number | null; // индекс отчёта, который ещё не показали
 }

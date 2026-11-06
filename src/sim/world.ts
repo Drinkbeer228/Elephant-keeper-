@@ -167,7 +167,7 @@ export function addFood(s: State, kind: FoodItemKind, x: number, y: number, amou
   return item;
 }
 
-// Разбросать куски по отсеку за решёткой: точки в 2–6 м от линии контакта, только там, где слон пройдёт
+// Разбросать куски по отсеку вокруг точки, только там, где слон пройдёт
 export function scatterPieces(s: State, x: number, y: number, area: AreaId, pieces: number, kind: FoodItemKind, amount: number): number {
   let placed = 0;
   for (let i = 0; i < pieces * 5 && placed < pieces; i++) {

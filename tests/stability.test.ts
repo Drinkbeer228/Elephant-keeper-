@@ -12,7 +12,10 @@ function sane(s: State): void {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThanOrEqual(100);
     }
-    for (const v of Object.values(e.learned)) expect(v >= 0 && v <= 1).toBe(true);
+    for (const [k, v] of Object.entries(e.learned)) {
+      const vals = typeof v === 'number' ? [v] : Object.values(v as Record<string, number>);
+      for (const x of vals) expect(x >= 0 && x <= 1, k).toBe(true);
+    }
   }
   expect(serialize(s).includes('null,null')).toBe(false);
 }

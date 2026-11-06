@@ -116,12 +116,12 @@ export const KEEPER = {
   radius: 0.3,
   speed: 3.2, // м/с
   runFactor: 1.5,
+  leadSpeed: 1.3, // м/с: шаг, когда ведёшь слониху рядом с собой
   heavyFactor: 0.7,
   tubFactor: 0.6, // полный таз тяжёлый
   barrowFactor: 0.82,
   reach: 1.25, // до станции
-  elephantReach: 2.7, // до головы слона через решётку
-  callRange: 34,
+  elephantReach: 2.7, // до головы слона: хобот тянется к руке
   barrowReach: 2.6, // с лопаты в тачку, если она ближе этого
   shovelLoad: 1, // лопата держит одну порцию
   barrowMax: 12,
@@ -159,6 +159,7 @@ export const BODY = {
 
 // Длительность действий кипера, секунд симуляции
 export const TASK = {
+  talk: 1.6, // спокойно поговорить со слонихой
   shovel: 0.9,
   dumpShovel: 0.45,
   sweep: 1.0,
@@ -211,7 +212,6 @@ export const ELEPHANT = {
   urgeBladder: 72,
   urgeBowel: 82,
   personalSpace: 2.6,
-  keeperSpookDistance: 6,
 } as const;
 
 export const LEARN = {
@@ -232,6 +232,40 @@ export const LEARN = {
   toiletDown: 0.04,
   rewardWindow: 4, // минут после выполнения команды, когда угощение — награда
   baselinePull: 0.004, // в сутки к врождённому уровню
+  cueTreat: 0.07, // выполнила просьбу и получила лакомство — знание просьбы растёт
+  cuePraise: 0.03, // похвалили голосом — растёт, но меньше
+  cueUnrewarded: 0.015, // выполнила, а похвалы нет — знание тает
+  nagTrust: 0.012, // одну просьбу повторяют снова и снова — раздражает
+  scoldTrust: 0.025, // «нельзя» без причины
+  pushyCoop: 0.03, // угостили, пока она напирала, — учится требовать
+  trustTalk: 0.006,
+  trustStartle: 0.03,
+  trustKick: 0.05,
+} as const;
+
+// Полный контакт: кипер и слоны рядом. Минуты — игровые, метры — от поверхности корпуса
+export const CONTACT = {
+  viewRange: 12, // видит кипера впереди и сбоку
+  viewHalfAngle: 1.95, // поле зрения: около 110° в каждую сторону
+  hearSteps: 4, // слышит шаги за спиной
+  voiceRange: 9, // слышит, когда к ней обращаются
+  callRange: 25, // окликнуть по имени и позвать слышно издалека — с выгула
+  awareMinutes: 5, // столько помнит, что кипер рядом и где он
+  tensionRise: 2.2, // в минуту, когда кипер ближе, чем ей удобно, без приглашения
+  tensionFall: 0.9,
+  stepAway: 0.35, // отойти
+  warn: 0.6, // предупредить: уши в стороны, мотает головой
+  shove: 0.95, // оттолкнуть
+  shovePush: 1.5,
+  shoveStun: 2.0, // секунд
+  startleGap: 1.0, // подошёл вплотную сзади, пока она не знала
+  kickGap: 0.55,
+  kickPush: 2.0,
+  kickStun: 3.5,
+  invitedFor: 5, // минут: после того как сама приняла контакт, кипер «свой» рядом с ней
+  familiarityNear: 0.0012, // в минуту рядом (до 6 м), спокойно
+  familiarityTouch: 0.006, // за каждый принятый контакт
+  familiarityDecay: 0.03, // в сутки, если почти не виделись
 } as const;
 
 export const DELIVERY = {

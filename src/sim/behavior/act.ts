@@ -1,18 +1,18 @@
 // Исполнение поведения: подход к цели, поворот, само действие и его последствия.
 // Каждое занятие — состояние конечного автомата с фазами «идти» и «делать».
 
-import { BODY, ELEPHANT, FOOD, HOSE, LEARN, NEEDS, WATER } from '../../data/balance';
+import { BODY, ELEPHANT, FOOD, HOSE, KEEPER, LEARN, NEEDS, WATER } from '../../data/balance';
 import { DRUM, GATE_BY_ID, STATIONS, TIRE, TREES, areaAt, zoneAt, type FeederId, type TroughId } from '../../data/facility';
 import { VEG_KINDS } from '../../data/rations';
 import { fx, log } from '../events';
 import { angleDiff, dist, inPool } from '../geometry';
 import { elephantCanStand, elephantRoute, nearestStandable } from '../nav';
 import { clamp, random, range } from '../rng';
-import type { Activity, Elephant, FoodItem, State, TargetRef, Tub, Vec } from '../types';
+import type { Activity, Elephant, FoodItem, Request, State, TargetRef, Tub, Vec } from '../types';
 import { addFood, addLitter, cellOf, dropDung, dropFruit, fruitStage, kickBall, touchCells, tubById, tubKg, urinateAt } from '../world';
 import type { Candidate } from './options';
 import { grabbableFromArea, hoseApproach } from './options';
-import { adjustBond, areaOf, bond, elephantById, gateMask, headPos, keeperContact, radiusOf, rankOf, reachableAreas, rearPos, slotTakenBy, zoneOf } from './perceive';
+import { adjustBond, areaOf, bond, connectedAreas, elephantById, gapToBody, gateMask, headPos, keeperMeet, radiusOf, rankOf, reachableAreas, rearPos, slotTakenBy, zoneOf } from './perceive';
 import { beginSignal } from './signals';
 import { nameCase } from '../herd';
 
@@ -204,16 +204,15 @@ export function approachOf(s: State, e: Elephant, t: TargetRef): Approach | null
         const p = standableNear(e, toward(e, it, reach), mask);
         return p ? { x: p.x, y: p.y, face: Math.atan2(it.y - p.y, it.x - p.x), tol: 0.45 } : null;
       }
-      // Вещь за решёткой: встать вплотную к линии и тянуться хоботом
-      const line = it.y > 25 ? 30 : 20;
-      const p = standableNear(e, { x: it.x, y: line - 2.1 }, mask);
+      // Вещь за оградой выгула: встать вплотную к ограде и тянуться хоботом
+      const p = standableNear(e, { x: it.x, y: 20 - 2.1 }, mask);
       return p ? { x: p.x, y: p.y, face: Math.PI / 2, tol: 0.4 } : null;
     }
     case 'el': {
       const o = elephantById(s, t.id);
       if (!o) return null;
       if (areaOf(o) !== areaOf(e) && !reachableAreas(s, e).includes(areaOf(o))) {
-        // Подруга в соседнем стойле: к решётке напротив неё
+        // Подруга по ту сторону закрытых разделительных ворот: к створке напротив неё
         const x = areaOf(e) === 'stallW' ? 18.4 : 21.6;
         const p = standableNear(e, { x, y: Math.max(21.6, Math.min(28.2, o.y)) }, mask);
         return p ? { x: p.x, y: p.y, face: areaOf(e) === 'stallW' ? 0 : Math.PI, tol: 0.6 } : null;
@@ -238,6 +237,10 @@ function speedFor(e: Elephant): number {
   switch (a.kind) {
     case 'avoid':
       return ELEPHANT.speedTrot * (1 - 0.3 * e.tipsy);
+    case 'giveWay':
+      return ELEPHANT.speedAmble * 1.1;
+    case 'walkWith':
+      return ELEPHANT.speedPurpose * 1.1 * base;
     case 'follow':
     case 'signal':
     case 'urinate':
@@ -311,6 +314,11 @@ export function moveTo(s: State, e: Elephant, goal: Vec, maxSpeed: number, dtSec
   const step = e.speed * dtSec;
   const nx = e.x + Math.cos(e.heading) * step;
   const ny = e.y + Math.sin(e.heading) * step;
+  // Кипер на пути: не наступать на человека — притормозить и подождать (раздражённая напирает)
+  if (e.mem.tension < 0.9 && keeperInWay(s, e, nx, ny)) {
+    e.speed = Math.max(0, e.speed - 4 * dtSec);
+    return 'moving';
+  }
   if (elephantCanStand(nx, ny, r, mask)) {
     e.day.distance += step;
     e.x = nx;
@@ -335,6 +343,30 @@ export function moveTo(s: State, e: Elephant, goal: Vec, maxSpeed: number, dtSec
   return 'blocked';
 }
 
+// Шагнёт — и заденет кипера
+function keeperInWay(s: State, e: Elephant, nx: number, ny: number): boolean {
+  const k = s.keeper;
+  if (Math.abs(k.x - nx) > 3.5 || Math.abs(k.y - ny) > 3.5) return false;
+  const moved = { ...e, x: nx, y: ny } as Elephant;
+  return gapToBody(moved, k) < KEEPER.radius + 0.15 && gapToBody(moved, k) < gapToBody(e, k);
+}
+
+// Отойти от точки на несколько шагов (по просьбе «подвинься» или потому что тесно)
+export function giveWay(s: State, e: Elephant, from: Vec, metres: number, note: string, forced: boolean): boolean {
+  const away = Math.atan2(e.y - from.y, e.x - from.x);
+  const r = radiusOf(e);
+  const mask = gateMask(s);
+  const area = areaOf(e);
+  for (const k of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) {
+    const p = { x: e.x + Math.cos(away + k) * metres, y: e.y + Math.sin(away + k) * metres };
+    if (areaAt(p.x, p.y) === area && elephantCanStand(p.x, p.y, r, mask)) {
+      startActivity(s, e, { kind: 'giveWay', target: { t: 'point', x: p.x, y: p.y, face: null }, score: 1.3, dur: 0.3, key: 'giveWay', signal: null, note, aux: null }, forced);
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Шаг занятия
 // ---------------------------------------------------------------------------
@@ -345,7 +377,8 @@ export function stepActivity(s: State, e: Elephant, dt: number, dtSec: number): 
     stepGo(s, e, dtSec);
     return;
   }
-  e.speed = Math.max(0, e.speed - 2.5 * dtSec);
+  // На месте — тормозит; рядом с кипером она идёт сама (скорость задаёт её шаг)
+  if (a.kind !== 'walkWith') e.speed = Math.max(0, e.speed - 2.5 * dtSec);
   const elapsed = s.t - a.doStart;
   const res = doStep(s, e, dt, dtSec, elapsed);
   if (res !== 'continue') finishActivity(s, e, res);
@@ -500,10 +533,25 @@ function enterDo(s: State, e: Elephant): void {
       if (a.signal) beginSignal(s, e, a.signal);
       break;
     case 'follow':
-      if (e.mem.call) e.mem.call.arrivedAt = s.t;
+    case 'giveWay':
+      if (e.mem.call && e.mem.call.arrivedAt < 0 && (a.kind === 'follow' || e.mem.call.why === 'move')) e.mem.call.arrivedAt = s.t;
+      // Подошла к киперу, когда он позвал, — сама подпустила его к себе
+      if (a.kind === 'follow' && e.mem.call?.why === 'come') {
+        e.mem.accepted = s.t;
+        e.mem.aware = s.t;
+      }
+      break;
+    case 'stay':
+      if (e.mem.call && e.mem.call.why === 'stay' && e.mem.call.arrivedAt < 0) e.mem.call.arrivedAt = s.t;
       break;
     case 'explore':
       if (a.target?.t === 'item') grabItem(s, e, a.target.id);
+      if (a.key === 'explore:keeper') {
+        // Подошла сама и обнюхивает кипера — это её приглашение
+        e.mem.accepted = s.t;
+        e.mem.aware = s.t;
+        fx('sniff', s.keeper.x, s.keeper.y, e.id);
+      }
       break;
     case 'carry':
       enterCarry(s, e);
@@ -590,7 +638,7 @@ function grabItem(s: State, e: Elephant, id: number): void {
   const h = headPos(e, 1.2);
   const zone = zoneOf(e);
   if (!inside) {
-    // Хобот через решётку: вещь оказывается внутри
+    // Хоботом через ограду: вещь оказывается внутри
     s.world.items = s.world.items.filter((x) => x !== it);
     if (it.kind === 'hay') addFood(s, 'hay', h.x, h.y, FOOD.bale, zone);
     else if (it.kind === 'straw') addFood(s, 'straw', h.x, h.y, FOOD.bale * 0.6, zone);
@@ -600,7 +648,7 @@ function grabItem(s: State, e: Elephant, id: number): void {
     else if (it.kind === 'porridge') addFood(s, 'produce', h.x, h.y, it.load * FOOD.porridgeHunger, zone);
     else if (it.kind === 'sawdust') addLitter(s, h.x, h.y, 0.3, 1.2);
     else s.world.items.push({ ...it, x: h.x, y: h.y, aux: it.kind === 'tank' ? 0 : it.aux });
-    log(s, 'warn', `${e.profile.name} утащила через решётку ${ITEM_NAMES[it.kind] ?? 'вещь'}.`, { key: `grab:${e.id}`, cooldown: 10, elephantId: e.id, x: h.x, y: h.y, kind: 'grab' });
+    log(s, 'warn', `${e.profile.name} утащила через ограду ${ITEM_NAMES[it.kind] ?? 'вещь'}.`, { key: `grab:${e.id}`, cooldown: 10, elephantId: e.id, x: h.x, y: h.y, kind: 'grab' });
   } else {
     // Внутри — перекладывает с места на место
     const a = range(s, 0, Math.PI * 2);
@@ -627,7 +675,24 @@ function doStep(s: State, e: Elephant, dt: number, dtSec: number, elapsed: numbe
     case 'wander':
       return elapsed >= 0.4 ? 'done' : 'continue';
     case 'avoid':
+    case 'giveWay':
       return 'done';
+    case 'stay': {
+      // Стоит на месте по просьбе; надолго её хватает, если просьбу знает и кипер рядом
+      e.speed = 0;
+      if (elapsed >= a.dur) return 'done';
+      const cue = e.learned.cues.stay;
+      if ((e.needs.hunger > 88 || e.needs.thirst > 88) && random(s) < dt * (1.2 - cue)) return 'done';
+      return 'continue';
+    }
+    case 'warn': {
+      // Повернуться к киперу, уши в стороны
+      const k = s.keeper;
+      turnToward(e, Math.atan2(k.y - e.y, k.x - e.x), dtSec, ELEPHANT.pivot);
+      return elapsed >= a.dur ? 'done' : 'continue';
+    }
+    case 'walkWith':
+      return stepWalkWith(s, e, dt, dtSec, elapsed);
     case 'carry':
       return a.flag === 9 ? 'fail' : 'done';
     case 'urinate':
@@ -754,7 +819,8 @@ function doStep(s: State, e: Elephant, dt: number, dtSec: number, elapsed: numbe
       return 'continue';
     }
     case 'seekKeeper': {
-      const k = keeperContact(s);
+      // Кипер несёт еду — подходит к нему и ждёт свою порцию
+      const k = keeperMeet(s, e);
       const held = s.keeper.held;
       const carryingFood = held && ['ration', 'hay', 'browse', 'bamboo', 'porridge', 'tub'].includes(held.kind);
       if (!k || !carryingFood || !reachableAreas(s, e).includes(k.area)) return 'done';
@@ -770,13 +836,13 @@ function doStep(s: State, e: Elephant, dt: number, dtSec: number, elapsed: numbe
       if (!call) return 'done';
       if (call.rewarded && elapsed > 0.5) return 'done';
       if (call.why === 'toilet') {
-        // Стоит боком у стенки и ждёт команды; совсем приспичит — справится сама
-        if (n.bladder > 92) {
-          startActivity(s, e, { kind: 'urinate', target: null, score: 1, dur: 1.2, key: 'urinate', signal: null, note: 'мочится у стенки', aux: null }, true);
+        // Подошла к стоку по просьбе — справляется над решёткой стока (или в подставленный бак)
+        if (n.bladder > 15) {
+          startActivity(s, e, { kind: 'urinate', target: null, score: 1, dur: 1.2, key: 'urinate', signal: null, note: 'мочится над стоком', aux: null }, true);
           e.mem.call = { ...call, arrivedAt: s.t };
           return 'continue';
         }
-        return elapsed >= 7 ? 'done' : 'continue';
+        return 'done';
       }
       return elapsed >= LEARN.rewardWindow ? 'done' : 'continue';
     }
@@ -1057,7 +1123,7 @@ function stepManipulate(s: State, e: Elephant, dt: number, elapsed: number): DoR
     if (best < 0) return 'done';
     n.boredom -= 0.7 * dt;
     hose.damage = clamp(hose.damage + HOSE.chew * (0.2 + 1.3 * T.mischief) * dt);
-    // Конец шланга тянет к себе — он заползает за решётку
+    // Конец шланга тянет к себе — он оказывается у неё
     if (best === pts.length - 1 && hose.state === 'floor') {
       const end = hose.end;
       const k = Math.min(1, (0.3 * dt) / Math.max(0.01, bestD));
@@ -1133,6 +1199,39 @@ export function forceElimination(s: State, e: Elephant, kind: 'urinate' | 'defec
   startActivity(s, e, c, true);
 }
 
+// Идёт рядом с кипером: чуть позади и сбоку, его шагом. Отвлечётся — уйдёт по своим делам
+function stepWalkWith(s: State, e: Elephant, dt: number, dtSec: number, elapsed: number): DoResult {
+  const k = s.keeper;
+  const a = e.act;
+  const d = dist(e, k);
+  const cue = e.learned.cues.follow;
+  // Кипер ушёл туда, куда ей нельзя (в помещение), или слишком далеко
+  const here = areaOf(e);
+  const keeperArea = areaAt(k.x, k.y);
+  if (!keeperArea || !connectedAreas(s, here).includes(keeperArea) || d > 11) {
+    a.flag++;
+    if (a.flag > 90) return 'done';
+  } else a.flag = 0;
+  if (elapsed >= a.dur) return 'done';
+  // Отвлекается: голодна и рядом еда, приспичило, слишком устала
+  if (e.needs.hunger > 80 && random(s) < dt * (0.25 - 0.2 * cue)) return 'done';
+  if (e.needs.bladder > 96 || e.needs.bowel > 96) return 'done';
+  // Точка рядом: позади-сбоку на 2 м от кипера
+  const side = e.profile.look.seed % 2 === 0 ? 1 : -1;
+  const back = k.facing + Math.PI - 0.6 * side;
+  const want = { x: k.x + Math.cos(back) * 2.1, y: k.y + Math.sin(back) * 2.1 };
+  const mask = gateMask(s);
+  const goal = standableNear(e, want, mask) ?? want;
+  if (dist(e, goal) > 0.6) {
+    const speed = Math.min(speedFor(e), 0.4 + dist(e, goal) * 0.9);
+    moveTo(s, e, goal, speed, dtSec, 0.5);
+  } else {
+    e.speed = Math.max(0, e.speed - 3 * dtSec);
+    turnToward(e, Math.atan2(k.y - e.y, k.x - e.x), dtSec, ELEPHANT.turn);
+  }
+  return 'continue';
+}
+
 export function spook(s: State, e: Elephant, from: Vec, why: string): void {
   const away = Math.atan2(e.y - from.y, e.x - from.x);
   const r = radiusOf(e);
@@ -1149,8 +1248,8 @@ export function spook(s: State, e: Elephant, from: Vec, why: string): void {
   startActivity(s, e, { kind: 'avoid', target: flee ? { t: 'point', x: flee.x, y: flee.y, face: null } : null, score: 1.5, dur: 0.5, key: 'avoid', signal: null, note: why, aux: null }, true);
 }
 
-export function respondToCall(s: State, e: Elephant, spot: Vec, face: number, note: string, why: 'call' | 'toilet' | 'lie' = 'call'): void {
-  // Зов ждёт, пока она дойдёт: через оба стойла идти дольше, чем от решётки
+export function respondToCall(s: State, e: Elephant, spot: Vec, face: number, note: string, why: Request = 'come'): void {
+  // Зов ждёт, пока она дойдёт: издалека идти дольше
   const walk = dist(e, spot) * 1.3;
   e.mem.call = { until: s.t + 12 + walk, x: spot.x, y: spot.y, arrivedAt: -1, rewarded: false, why };
   const c: Candidate = { kind: 'follow', target: { t: 'point', x: spot.x, y: spot.y, face }, score: 1.2, dur: LEARN.rewardWindow, key: 'follow', signal: null, note, aux: null };

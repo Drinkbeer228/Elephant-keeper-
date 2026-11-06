@@ -1,15 +1,20 @@
 // Автокипер: бот, который играет смену настоящими командами (движение + действия) — так же,
 // как игрок с клавиатуры. Нужен для сквозных тестов (всё ли достижимо и работает в связке)
-// и для демо (?bot). Распорядок: поилки, сено, ворота на выгул, уборка стойл лопатой с тачкой,
-// солома, смена воды в поилках, каша в 13:00 и 17:00, нарезка овощей и тазы к 19:00,
-// ворота в слоновник, туалет в бак ночью, уборка выгула.
+// и для демо (?bot). Полный контакт: работает в одном зале со слонами — окликает ту, что его
+// не видит, заговаривает с той, кому тесно, просит подвинуться стоящую на пути, зовёт по имени,
+// чтобы покормить, и ведёт рядом с собой на бетон, чтобы подставить бак.
+// Распорядок: поилки, сено, ворота на выгул, уборка зала лопатой с тачкой, солома, смена воды
+// в поилках, каша в 13:00 и 17:00, нарезка овощей и тазы к 19:00, ворота в слоновник, туалет
+// в бак ночью, уборка выгула.
 
-import { KEEPER } from '../data/balance';
-import { BARROW_HOME, STALL_E, STALL_W, STATIONS, TANK_HOME, TROUGH_IDS, areaAt, hardFloor, type AreaId, type FeederId, type StationId, type TroughId } from '../data/facility';
+import { CONTACT, KEEPER } from '../data/balance';
+import { BARROW_HOME, STALL_E, STALL_W, STATIONS, TANK_HOME, TOILET_STANCE, TROUGH_IDS, areaAt, hardFloor, type AreaId, type FeederId, type StationId, type TroughId } from '../data/facility';
 import { PORRIDGE_SOAK_MIN } from '../data/rations';
 import { availableActions, bodyDirt, minuteOfDay, type ActionOption, type Elephant, type State, type StepInput, type Vec } from '../sim';
+import { comfortGap, invited } from '../sim/behavior/contact';
+import { bodyCircles, gapToBody, headPos, keeperCanTouch, rearPos } from '../sim/behavior/perceive';
 import { keeperNav } from '../sim/keeper';
-import { keeperFieldAt, keeperRoute } from '../sim/nav';
+import { keeperFieldAt, keeperRoute, keeperRouteAround, type Obstacle } from '../sim/nav';
 import { cellCenter, isBeddingCell } from '../sim/world';
 
 type Step =
@@ -45,12 +50,23 @@ const wait = (until: (s: State) => boolean, max: number): Step => ({ kind: 'wait
 const expand = (make: (s: State) => Step[]): Step => ({ kind: 'expand', make });
 const st = (id: StationId): Vec => STATIONS[id].keeper;
 
-// Двери отсеков: точка перед дверью и сразу за ней
+// С тачкой: в зал — через дверь инвентарной (в западную половину — дальше через открытые
+// разделительные ворота), на выгул — через дверь из двора. Точка перед дверью и сразу за ней
 const ENTRY: Record<AreaId, { out: Vec; in: Vec }> = {
-  stallW: { out: { x: 15.2, y: 31.0 }, in: { x: 15.2, y: 28.8 } },
-  stallE: { out: { x: 25.2, y: 31.0 }, in: { x: 25.2, y: 28.8 } },
+  stallW: { out: { x: 25.9, y: 34.6 }, in: { x: 25.9, y: 31.3 } },
+  stallE: { out: { x: 25.9, y: 34.6 }, in: { x: 25.9, y: 31.3 } },
   paddock: { out: { x: 41.65, y: 21.1 }, in: { x: 41.65, y: 18.6 } },
 };
+// Бетон у южной стены, куда отвести слониху, чтобы подставить бак (между кормушками и поилками)
+// (кипер встаёт у самой стены — тогда идущая следом остановится на бетоне, а не на соломе)
+const CONCRETE: Vec[] = [
+  { x: 15.6, y: 31.5 },
+  { x: 12.4, y: 31.5 },
+  { x: 19.6, y: 31.5 },
+  { x: 25.9, y: 31.5 },
+  { x: 22.4, y: 31.5 },
+  { x: 28.4, y: 31.4 },
+];
 // Где поставить тачку внутри
 const INSIDE: Record<AreaId, Vec> = {
   stallW: { x: 15, y: 26 },
@@ -73,12 +89,74 @@ function allIn(s: State, areas: AreaId[]): boolean {
   return s.elephants.every((e) => areas.includes(areaOfE(e)));
 }
 
-// Точка в проходе напротив слонихи (или у ограды выгула)
-function contactPoint(e: Elephant): Vec {
+function her(s: State, id: string): Elephant {
+  return s.elephants.find((z) => z.id === id)!;
+}
+
+// Где встать, чтобы она видела и могла подойти: в зале — в паре метров перед ней (можно чуть
+// сбоку), не вплотную к другим; на выгуле — у ограды со стороны двора
+function meetPoint(s: State, e: Elephant): Vec {
   const a = areaOfE(e);
-  if (a === 'stallW') return { x: Math.max(10.9, Math.min(19.1, e.x)), y: 31.0 };
-  if (a === 'stallE') return { x: Math.max(20.9, Math.min(29.1, e.x)), y: 31.0 };
-  return e.x < 21 ? { x: Math.max(3, Math.min(9.2, e.x)), y: 21.1 } : { x: Math.max(32, Math.min(45, e.x)), y: 21.1 };
+  if (a === 'paddock') return e.x < 21 ? { x: Math.max(3, Math.min(9.2, e.x)), y: 21.1 } : { x: Math.max(32, Math.min(45, e.x)), y: 21.1 };
+  const nav = keeperNav(s);
+  let best: Vec | null = null;
+  let bestV = -Infinity;
+  for (const r of [3.0, 3.8, 2.4]) {
+    for (const turn of [0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.2, -2.2]) {
+      const ang = e.heading + turn;
+      const q = { x: e.x + Math.cos(ang) * r, y: e.y + Math.sin(ang) * r };
+      if (areaAt(q.x, q.y) !== a || keeperFieldAt(q.x, q.y, nav) < 0.45) continue;
+      if (!invited(s, e) && gapToBody(e, q) - KEEPER.radius < comfortGap(s, e) + 0.2) continue;
+      if (s.elephants.some((o) => o !== e && gapToBody(o, q) < 1.4)) continue;
+      const v = -Math.abs(turn) - 0.12 * dist(q, s.keeper) - (r === 3.0 ? 0 : 0.3);
+      if (v > bestV) {
+        bestV = v;
+        best = q;
+      }
+    }
+  }
+  return best ?? { x: Math.max(10.8, Math.min(29.2, e.x)), y: Math.max(20.8, Math.min(31.6, e.y + 2.6)) };
+}
+
+// Куда встать, чтобы дотянуться до неё и не влезть в её личное место: у головы, спереди или
+// сбоку — там, где она видит; не вплотную к другим слонам. null — такого места нет
+function reachPoint(s: State, e: Elephant): Vec | null {
+  const nav = keeperNav(s);
+  const head = headPos(e, 1.7);
+  const room = invited(s, e) ? 0.15 : comfortGap(s, e) + 0.1;
+  let best: Vec | null = null;
+  let bestV = -Infinity;
+  for (const r of [1.5, 2.0, 2.5]) {
+    for (let i = 0; i < 16; i++) {
+      const turn = ((i - 8) / 8) * Math.PI;
+      const ang = e.heading + turn;
+      const q = { x: head.x + Math.cos(ang) * r, y: head.y + Math.sin(ang) * r };
+      if (!areaAt(q.x, q.y) || keeperFieldAt(q.x, q.y, nav) < 0.45) continue;
+      if (gapToBody(e, q) - KEEPER.radius < room) continue;
+      const seen = Math.abs(Math.atan2(Math.sin(Math.atan2(q.y - e.y, q.x - e.x) - e.heading), Math.cos(Math.atan2(q.y - e.y, q.x - e.x) - e.heading)));
+      if (seen > CONTACT.viewHalfAngle - 0.2) continue;
+      if (s.elephants.some((o) => o !== e && gapToBody(o, q) - KEEPER.radius < Math.max(0.6, comfortGap(s, o)))) continue;
+      const v = -0.12 * dist(q, s.keeper) - 0.35 * seen - 0.2 * r;
+      if (v > bestV) {
+        bestV = v;
+        best = q;
+      }
+    }
+  }
+  return best;
+}
+
+// Ближайшее к ней место на бетоне, где никто не стоит
+function concreteSpot(s: State, e: Elephant): Vec {
+  const a = areaOfE(e);
+  const ok = CONCRETE.filter((p) => (s.world.gates.shift || areaAt(p.x, p.y) === a) && !s.elephants.some((o) => o !== e && gapToBody(o, p) < 1.6));
+  const list = ok.length ? ok : CONCRETE;
+  return list.reduce((b, p) => (dist(p, e) < dist(b, e) ? p : b));
+}
+
+function onConcrete(e: Elephant): boolean {
+  const r = rearPos(e);
+  return hardFloor(r.x, r.y) && hardFloor(e.x, e.y) && !e.lying;
 }
 
 export class AutoKeeper {
@@ -97,14 +175,22 @@ export class AutoKeeper {
   private tries = new Map<string, number>();
   private cool = new Map<string, number>();
   private now = 0;
-  stats = { jobs: {} as Record<string, number>, failed: {} as Record<string, number> };
+  private voiceCool = new Map<string, number>();
+  stats = { jobs: {} as Record<string, number>, failed: {} as Record<string, number>, voice: {} as Record<string, number> };
 
   decide(s: State): StepInput {
     this.now = s.t;
-    if (s.keeper.task) return IDLE;
+    // Занят делом, а рядом кто-то предупреждает — бросить дело и отступить
+    if (s.keeper.task) {
+      const back = this.courtesy(s);
+      return back && (back.move.x || back.move.y) ? back : IDLE;
+    }
     // Нарезка овощей: левая рука — взять / бросить, правая — обрезать
     const p = s.keeper.prep;
     if (p) return { ...IDLE, actions: [p.hand && !p.trimmed ? 'prepTrim:R' : 'prepPick:L'] };
+    if (s.keeper.stun > 0) return IDLE;
+    const polite = this.courtesy(s);
+    if (polite) return polite;
     for (let guard = 0; guard < 8; guard++) {
       if (!this.job) {
         this.job = this.plan(s);
@@ -162,6 +248,71 @@ export class AutoKeeper {
     return IDLE;
   }
 
+  // Среди слонов: окликнуть ту, что тебя не видит (спит, стоит спиной), прежде чем подойти;
+  // заговорить спокойно с той, кому тесно
+  private courtesy(s: State): StepInput | null {
+    const k = s.keeper;
+    for (const e of s.elephants) {
+      const d = dist(e, k);
+      if (d > 5.5) continue;
+      // Предупреждает — отступить, дать ей место (в любую свободную сторону, не к другим слонам);
+      // отступать совсем некуда — попросить её подвинуться
+      if ((e.act.kind === 'warn' || e.mem.tension > 0.4) && gapToBody(e, k) - KEEPER.radius < comfortGap(s, e) + 0.3) {
+        const away = Math.atan2(k.y - e.y, k.x - e.x);
+        const nav = keeperNav(s);
+        for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
+          const ux = Math.cos(away + turn);
+          const uy = Math.sin(away + turn);
+          const p = { x: k.x + ux * 0.6, y: k.y + uy * 0.6 };
+          if (keeperFieldAt(p.x, p.y, nav) < 0.34) continue;
+          if (s.elephants.some((o) => gapToBody(o, p) < KEEPER.radius + 0.15)) continue;
+          return { ...IDLE, move: { x: ux, y: uy } };
+        }
+        const key = `cornered:${e.id}`;
+        if ((this.voiceCool.get(key) ?? -1) < s.t) {
+          this.voiceCool.set(key, s.t + 3);
+          const id = this.say(s, `voice:${e.id}:move`);
+          if (id) return { ...IDLE, actions: [id] };
+        }
+      }
+      const key = `${e.id}`;
+      if ((this.voiceCool.get(key) ?? -1) > s.t) continue;
+      // Окликнуть, если она не знает, что ты рядом, а ты у неё за спиной или она спит
+      const behind = Math.abs(Math.atan2(Math.sin(Math.atan2(k.y - e.y, k.x - e.x) - e.heading), Math.cos(Math.atan2(k.y - e.y, k.x - e.x) - e.heading))) > CONTACT.viewHalfAngle;
+      if (s.t - e.mem.aware > 1 && d < 4.5 && (behind || (e.lying && e.act.kind === 'sleep'))) {
+        this.voiceCool.set(key, s.t + 1.5);
+        const id = this.say(s, `voice:${e.id}:name`);
+        if (id) return { ...IDLE, actions: [id] };
+      }
+      // Заговорить, когда стоишь за её границей (вплотную разговором не поможешь — сначала отступить)
+      if (e.mem.tension > 0.25 && d < 5 && !e.lying && gapToBody(e, k) - KEEPER.radius >= comfortGap(s, e)) {
+        this.voiceCool.set(key, s.t + 4);
+        const id = this.say(s, `voice:${e.id}:talk`);
+        if (id) return { ...IDLE, actions: [id] };
+      }
+    }
+    return null;
+  }
+
+  // Слоны для маршрута: корпус и её личное место (у той, что подпустила, — почти без запаса)
+  private bodies(s: State): Obstacle[] {
+    const out: Obstacle[] = [];
+    for (const e of s.elephants) {
+      if (dist(e, s.keeper) > 30) continue;
+      const soft = invited(s, e) ? 0.1 : Math.max(0.3, Math.min(1.6, comfortGap(s, e)));
+      for (const c of bodyCircles(e)) out.push({ x: c.x, y: c.y, r: c.r, soft });
+    }
+    return out;
+  }
+
+  private say(s: State, id: string): string | null {
+    const o = availableActions(s).find((x) => x.id === id);
+    if (!o || !o.enabled) return null;
+    const cue = id.split(':')[2];
+    this.stats.voice[cue] = (this.stats.voice[cue] ?? 0) + 1;
+    return id;
+  }
+
   private fail(why = ''): void {
     if (this.job) {
       const key = why ? `${this.job.name}/${why}` : this.job.name;
@@ -181,7 +332,8 @@ export class AutoKeeper {
     const nav = keeperNav(s);
     this.routeAge -= 1 / 30;
     if (!this.routeFor || dist(this.routeFor, to) > 0.2 || this.routeAge <= 0 || !this.route.length) {
-      const r = keeperRoute(k, to, nav);
+      // В обход слонов; если обойти некуда (прижат у стены) — напрямую: упрётся — попросит подвинуться
+      const r = keeperRouteAround(k, to, nav, this.bodies(s)) ?? keeperRoute(k, to, nav);
       if (!r) {
         this.fail('noroute');
         return IDLE;
@@ -202,6 +354,19 @@ export class AutoKeeper {
     if (dist(k, this.lastPos) < 0.01) this.stuck += 1 / 30;
     else this.stuck = 0;
     this.lastPos = { x: k.x, y: k.y };
+    // Упёрся в слониху: попросить подвинуться
+    if (this.stuck > 0.3) {
+      const e = s.elephants.find((q) => gapToBody(q, k) < KEEPER.radius + 0.6 && !q.lying);
+      const key = e ? `move:${e.id}` : '';
+      if (e && (this.voiceCool.get(key) ?? -1) < s.t) {
+        this.voiceCool.set(key, s.t + 8);
+        const ask = this.say(s, `voice:${e.id}:move`);
+        if (ask) {
+          this.stuck = 0;
+          return { ...IDLE, actions: [ask] };
+        }
+      }
+    }
     if (this.stuck > 3) {
       this.fail('stuck');
       return IDLE;
@@ -240,12 +405,14 @@ export class AutoKeeper {
     const m = minuteOfDay(s.t);
     const day = Math.floor((s.t - 480) / 1440);
     const night = m >= 21 * 60 || m < 6 * 60;
-    // День бота начинается в 6:30: слонов — на выгул, стойла убрать до сдачи смены в 8:00
+    // День бота начинается в 6:30: слонов — на выгул, зал убрать до сдачи смены в 8:00
     const dayTime = m >= 6.5 * 60 && m < 18 * 60;
     if (w.barrow.pushed) return this.barrowHome(s);
     if (k.held) return this.dispose(s);
     // Тачка, забытая в отсеке, — вывезти прежде всего: иначе ворота не открыть
     const barrowArea = areaAt(w.barrow.x, w.barrow.y);
+    // Из западной половины тачку вывозят через разделительные ворота
+    if (barrowArea === 'stallW' && !w.gates.shift) return this.gate('shift', true);
     if (barrowArea && w.barrow.load === 0 && !w.barrow.cargo.length) return this.barrowOut(barrowArea);
     if (barrowArea) return this.barrowDump(s);
 
@@ -273,13 +440,20 @@ export class AutoKeeper {
       if (sig.kind === 'toilet') {
         if (night && a !== 'paddock') {
           const key = `toilet:${e.id}:${Math.floor(s.t / 30)}`;
-          if (!this.done.has(key) && w.items.some((it) => it.kind === 'tank' && dist(it, TANK_HOME) < 1.5)) {
-            this.done.add(key);
-            return this.toiletTank(e);
+          if (!this.done.has(key)) {
+            // Бак дома — с баком; бак занят — к стоку (если до него можно дойти)
+            if (w.items.some((it) => it.kind === 'tank' && dist(it, TANK_HOME) < 1.5) && !k.held) {
+              this.done.add(key);
+              return this.toiletWalk(e);
+            }
+            if (!k.held && (a === 'stallE' || w.gates.shift)) {
+              this.done.add(key);
+              return this.drainWalk(e);
+            }
           }
         } else if (!w.gates.outer && a !== 'paddock' && !night) return this.gate('outer', true);
       }
-      if ((sig.kind === 'out' && !w.gates.outer) || (sig.kind === 'in' && !w.gates.outer && !night)) return this.gate('outer', true);
+      if ((sig.kind === 'out' && !w.gates.outer && !night) || (sig.kind === 'in' && !w.gates.outer)) return this.gate('outer', true);
       if (sig.kind === 'water') {
         const id = TROUGH_OF[a];
         const t = w.troughs[id];
@@ -288,7 +462,15 @@ export class AutoKeeper {
         if (!t.valve && t.stage === 'ok' && (t.debris > 0.3 || t.chem > 0.05) && w.supplies.chem > 0 && !this.cooling(`troughChange:${id}`, s)) return this.troughChange(id);
       }
       if (sig.kind === 'food' && w.stock.hay > 0) return this.hay(a === 'paddock' ? 'paddockFeeder' : RACK[a], s);
+      // Просит внимания — подойти, поговорить, почесать
+      if (sig.kind === 'attention' && !this.cooling(`attention:${e.id}`, s)) {
+        this.cool.set(`attention:${e.id}`, s.t + 20);
+        return { name: 'attention', steps: [...this.reach(e.id), act(`voice:${e.id}:talk`, true), act(`scratch:${e.id}`, true)] };
+      }
     }
+
+    // Вечером — впустить всех в слоновник, прежде чем браться за долгую работу
+    if (!dayTime && !w.gates.outer && !allIn(s, STALLS)) return this.gate('outer', true);
 
     // Вода: долить, если мало
     for (const id of TROUGH_IDS) {
@@ -301,7 +483,7 @@ export class AutoKeeper {
       const filling = t.stage === 'rinsed' && t.valve && !t.drain;
       if ((t.stage !== 'ok' || t.drain) && !filling && !this.cooling(`troughFinish:${id}`, s)) return this.troughFinish(id);
     }
-    // Рано утром, пока все в стойлах, — сменить воду на выгуле
+    // Рано утром, пока все в слоновнике, — сменить воду на выгуле
     if (m >= 5 * 60 && m < 6.5 * 60 && allIn(s, STALLS) && !w.gates.outer && !w.checks.troughChanged.paddockWater && w.supplies.chem > 0 && !this.cooling('troughChange:paddockWater', s)) return this.troughChange('paddockWater');
 
     // Сено
@@ -333,7 +515,7 @@ export class AutoKeeper {
     const floorTub = w.tubs.find((t) => t.where === 'floor' && (t.broken || Object.values(t.veg).reduce((x, y) => x + y, 0) < 0.5) && !this.skipped(`tub:${t.id}`, s));
     if (floorTub) {
       const a = areaAt(floorTub.x, floorTub.y);
-      if (a && (this.inside(s, a) || this.nearLine(floorTub))) return this.collectTub(s, floorTub.id, a);
+      if (a && (a !== 'paddock' || this.inside(s, a) || this.nearLine(floorTub))) return this.collectTub(s, floorTub.id, a);
     }
     if (m >= 14.5 * 60 && m < 19 * 60 && !porridgeDue) {
       const tub = w.tubs.find((t) => t.where === 'rack' && !t.dirty && !t.broken && !this.done.has(`prep:${t.id}:${day}`));
@@ -352,15 +534,16 @@ export class AutoKeeper {
       if (ready) return { name: 'serveTub', steps: [go(st('prepTable')), act(`takeTub:${ready.id}`), go((x) => this.tubSpot(x, ready.owner), 0.5), act('placeTub')] };
     }
 
-    // Уборка стойл: все на выгуле, ворота закрыты — зайти с тачкой и лопатой
+    // Уборка зала: все на выгуле, ворота закрыты — зайти с тачкой и лопатой
     if (dayTime && allIn(s, ['paddock']) && !porridgeDue) {
       const dirty = STALLS.filter((a) => this.stallDirt(s, a) >= 2 || this.hardLitter(s, a) >= 3);
       if (w.gates.outer && (dirty.length || this.bareBedding(s, 'stallW') + this.bareBedding(s, 'stallE') >= 10)) return this.gate('outer', false);
       if (!w.gates.outer) {
+        if (dirty.includes('stallW') && !w.gates.shift) return this.gate('shift', true);
         if (dirty.length && w.barrow.load < KEEPER.barrowMax - 1) return this.cleanArea(dirty[0], s);
-        for (const a of STALLS) if (this.bareBedding(s, a) >= 6 && w.stock.straw > 0) return this.straw(s, a);
+        for (const a of STALLS) if (this.bareBedding(s, a) >= 6 && w.stock.straw > 0) return a === 'stallW' && !w.gates.shift ? this.gate('shift', true) : this.straw(s, a);
       }
-      // Смена воды раз за смену — пока у поилок никого (поилки у решётки, кипер — в проходе)
+      // Смена воды раз за смену — пока у поилок никого (все на выгуле)
       for (const id of ['barnWaterW', 'barnWaterE'] as const) if (!w.checks.troughChanged[id] && w.supplies.chem > 0 && !this.cooling(`troughChange:${id}`, s)) return this.troughChange(id);
     }
     // Грязную слониху — помыть из шланга через ограду выгула
@@ -371,7 +554,7 @@ export class AutoKeeper {
         return this.wash(dirtyE);
       }
     }
-    // Вечером, когда все в стойлах, — уборка выгула и смена воды на выгуле
+    // Вечером, когда все в слоновнике, — уборка выгула и смена воды на выгуле
     if (!dayTime && !night && allIn(s, STALLS) && !w.gates.outer && !porridgeDue) {
       if (this.paddockDirt(s) >= 2 && w.barrow.load < KEEPER.barrowMax - 1) return this.cleanArea('paddock', s);
     }
@@ -392,23 +575,79 @@ export class AutoKeeper {
     if (!dayTime && w.gates.outer && allIn(s, STALLS) && !this.nearOuterGate(s)) return this.gate('outer', false);
     if (!w.gates.shift && !night) return this.gate('shift', true);
 
-    // Свободная минута — постоять у решётки, понаблюдать
-    const spot = { x: 21.5, y: 31.2 };
+    // Свободная минута — побыть рядом со слонами: поговорить, почесать, угостить
+    const visit = this.visit(s);
+    if (visit) return visit;
+    // Остальное время — у двери инвентарной: видно зал, и никому не мешаешь у кормушек
+    const spot = { x: 25.9, y: 34.3 };
     if (dist(k, spot) > 1) return { name: 'idle', steps: [go(spot)] };
     return { name: 'watch', steps: [wait(() => false, 2)] };
   }
 
-  // Куда поставить таз слонихи: напротив неё, если она в стойле, иначе — её место в стойле
+  // Куда поставить таз слонихи: перед ней (в зале) или к ограде напротив (на выгуле)
   private tubSpot(s: State, owner: string): Vec {
     const e = s.elephants.find((x) => x.id === owner);
-    if (e && areaOfE(e) !== 'paddock') return contactPoint(e);
-    const i = Math.max(0, s.elephants.findIndex((x) => x.id === owner));
+    if (e) return meetPoint(s, e);
+    return { x: 15.6, y: 29.5 };
+  }
+
+  // Подойти самому так, чтобы она видела и было до неё дотянуться; если подойти некуда —
+  // встать перед ней и позвать «иди сюда»
+  private reach(id: string): Step[] {
+    const touch = (x: State) => keeperCanTouch(x, her(x, id));
     return [
-      { x: 12.4, y: 31 },
-      { x: 22.4, y: 31 },
-      { x: 19.2, y: 31 },
-      { x: 29.2, y: 31 },
-    ][i % 4];
+      // Сначала заговорить с ней издалека — тогда подпустит ближе
+      this.greet(id),
+      go((x) => (touch(x) ? null : (reachPoint(x, her(x, id)) ?? meetPoint(x, her(x, id)))), 0.4),
+      expand((x) => (touch(x) ? [] : [act(`voice:${id}:come`, true), wait(touch, 12)])),
+    ];
+  }
+
+  // Подойти на её расстояние и спокойно заговорить, если она ещё не подпустила
+  private greet(id: string): Step {
+    return expand((x) => (keeperCanTouch(x, her(x, id)) || invited(x, her(x, id)) ? [] : [go((y) => meetPoint(y, her(y, id)), 0.7), act(`voice:${id}:talk`, true)]));
+  }
+
+  // Встать у её бока, ближе к задним ногам (для бака): с той стороны, где есть место
+  private flank(s: State, e: Elephant): Vec {
+    const nav = keeperNav(s);
+    const L = e.profile.look;
+    const half = 1.05 * L.size * L.length;
+    const girth = 0.95 * L.size * L.girth;
+    const c = Math.cos(e.heading);
+    const sn = Math.sin(e.heading);
+    let best: Vec | null = null;
+    let bestD = Infinity;
+    for (const along of [-0.35, 0, -0.65]) {
+      for (const side of [1, -1]) {
+        const bx = e.x + c * along * half;
+        const by = e.y + sn * along * half;
+        const q = { x: bx - sn * side * (girth + 0.5), y: by + c * side * (girth + 0.5) };
+        if (keeperFieldAt(q.x, q.y, nav) < 0.34) continue;
+        if (s.elephants.some((o) => o !== e && gapToBody(o, q) < 0.8)) continue;
+        const d = dist(q, s.keeper);
+        if (d < bestD) {
+          bestD = d;
+          best = q;
+        }
+      }
+    }
+    return best ?? { x: e.x - sn * (girth + 0.5), y: e.y + c * (girth + 0.5) };
+  }
+
+  // Свободная минута: к той, с кем давно не были рядом — поговорить, почесать, угостить
+  private visit(s: State): Job | null {
+    const m = minuteOfDay(s.t);
+    if (m >= 21 * 60 || m < 6 * 60) return null;
+    const slot = Math.floor(s.t / 90);
+    const e = s.elephants.find((q) => !q.lying && !this.done.has(`visit:${q.id}:${slot}`) && areaOfE(q) !== 'paddock' && q.act.kind !== 'eat');
+    if (!e) return null;
+    this.done.add(`visit:${e.id}:${slot}`);
+    const id = e.id;
+    return {
+      name: 'visit',
+      steps: [...this.reach(id), act(`voice:${id}:talk`, true), act(`scratch:${id}`, true), act(`voice:${id}:praise`, true)],
+    };
   }
 
   private skipped(key: string, s: State): boolean {
@@ -420,7 +659,7 @@ export class AutoKeeper {
   }
 
   private nearLine(t: Vec): boolean {
-    return (t.y > 27.6 && t.y < 30 && t.x > 10.3 && t.x < 29.7) || (t.y > 18 && t.y < 20 && t.x > 30.3 && t.x < 45.7);
+    return t.y > 18 && t.y < 20 && t.x > 30.3 && t.x < 45.7;
   }
 
   private nearOuterGate(s: State): boolean {
@@ -454,17 +693,37 @@ export class AutoKeeper {
     return n;
   }
 
+  // Ворота открывают и закрывают руками, стоя у створки: на выгул — изнутри зала, сбоку от
+  // проёма; разделительные — со своей стороны, у середины зала
   private gate(id: 'outer' | 'shift', open: boolean): Job {
-    return { name: `${id}:${open ? 'open' : 'close'}`, steps: [go(st('gatePanel'), 0.5), act((s) => (s.world.gates[id] === open ? 'none' : `gate:${id}`), true), wait((s) => s.world.gates[id] === open, 4)] };
+    // Встать у створки там, где никто не стоит: с той стороны, где просторнее
+    const spots: Vec[] =
+      id === 'outer'
+        ? [
+            { x: 13.2, y: 20.9 },
+            { x: 17.8, y: 20.9 },
+            { x: 13.2, y: 19.1 },
+            { x: 17.8, y: 19.1 },
+          ]
+        : [23, 25, 27, 31].flatMap((y) => [
+            { x: 19.1, y },
+            { x: 20.9, y },
+          ]);
+    const spot = (s: State): Vec => {
+      const room = (p: Vec) => Math.min(...s.elephants.map((e) => gapToBody(e, p) - comfortGap(s, e))) - 0.08 * dist(p, s.keeper);
+      return spots.reduce((b, p) => (room(p) > room(b) ? p : b));
+    };
+    return { name: `${id}:${open ? 'open' : 'close'}`, steps: [go(spot, 0.3), act((s) => (s.world.gates[id] === open ? 'none' : `gate:${id}`), true), wait((s) => s.world.gates[id] === open, 4)] };
   }
 
   // Сено: тюк в руках (быстро, но с тюка сыплется) или, если тачка свободна, — тюки в тачке
   private hay(id: FeederId, s?: State): Job {
     const b = s?.world.barrow;
-    if (s && b && !b.pushed && b.load === 0 && !b.cargo.length && !areaAt(b.x, b.y) && s.world.stock.hay >= 2) {
+    if (s && b && !b.pushed && b.load === 0 && !b.cargo.length && !areaAt(b.x, b.y) && s.world.stock.hay >= 2 && (id !== 'barnRackW' || s.world.gates.shift)) {
       const ids: FeederId[] = [id];
       for (const other of ['barnRackW', 'barnRackE', 'paddockFeeder'] as const) {
         if (other === id || ids.length >= 2) continue;
+        if (other === 'barnRackW' && !s.world.gates.shift) continue;
         const m = minuteOfDay(s.t);
         const due = other === 'paddockFeeder' ? m >= 6 * 60 && m < 15 * 60 : m >= 15 * 60 || m < 6 * 60;
         if (due && s.world.feeders[other].hay < 55) ids.push(other);
@@ -478,31 +737,71 @@ export class AutoKeeper {
     return { name: `hay:${id}`, steps: [go(st('hayStack')), act('take:hay'), go(st(id)), act(`loadFeeder:${id}:hay`)] };
   }
 
-  // Туалет в бак у тренировочной стенки: бак — к стенке, позвать, «Давай гуляй», наградить, вылить
-  private toiletTank(e: Elephant): Job {
+  // Ночной туалет: взять бак, подойти так, чтобы видела, «пошли» — довести рядом с собой до
+  // бетона, «стоять», подставить бак у её бока, «давай», наградить и забрать бак (вылить — потом).
+  // Не пошла — не повторять сразу: поговорить, подождать и попросить снова. Бак не подставить
+  // (стоит на соломе) — «давай» не говорить: на подстилку пусть не учится.
+  private toiletWalk(e: Elephant): Job {
     const id = e.id;
+    const tankUnderHer = (x: State) => x.world.items.some((it) => it.kind === 'tank' && dist(it, rearPos(her(x, id))) < 1.35);
     return {
-      name: 'toiletTank',
+      name: 'toiletWalk',
       steps: [
         go(TANK_HOME, 0.9),
         pick('takeTank', (_s, o) => o.ref.verb === 'pickUp' && o.label.includes('бак')),
-        go(st('trainingWall'), 0.4),
-        act(`call:${id}:toilet`, true),
-        wait((x) => {
-          const q = x.elephants.find((z) => z.id === id)!;
-          return dist(q, STATIONS.trainingWall.slots![1]) <= 1.1 || (q.act.kind !== 'follow' && !q.signal);
-        }, 30),
-        act(`tankPlace:${id}`, true),
-        act(`toiletCmd:${id}`, true),
-        wait((x) => {
-          const q = x.elephants.find((z) => z.id === id)!;
-          return q.act.kind !== 'urinate';
-        }, 6),
-        act(`treat:${id}`, true),
+        go((x) => meetPoint(x, her(x, id)), 0.7),
+        this.greet(id),
+        this.lead(id, 0),
+        expand((x) =>
+          onConcrete(her(x, id))
+            ? [
+                ...(her(x, id).act.kind === 'stay' ? [] : [act(`voice:${id}:stay`, true)]),
+                go((y) => this.flank(y, her(y, id)), 0.35),
+                wait((y) => her(y, id).speed < 0.25, 3),
+                act(`tankPlace:${id}`, true),
+              ]
+            : [],
+        ),
+        expand((x) => (tankUnderHer(x) ? [act(`voice:${id}:toilet`, true), wait((y) => her(y, id).act.kind !== 'urinate', 6), act(`treat:${id}`, true)] : [])),
+        go((x) => {
+          const t = x.world.items.find((it) => it.kind === 'tank');
+          return t && !x.keeper.held ? this.standNear(x, t, 0.9) : null;
+        }, 0.35),
         pick('tankTake', (_s, o) => o.ref.verb === 'tankTake', true),
         expand((x) => (x.keeper.held?.kind === 'tank' ? [] : [pick('tankPick', (_s, o) => o.ref.verb === 'pickUp' && o.label.includes('бак'), true)])),
       ],
     };
+  }
+
+  // К стоку: подойти, заговорить, «пошли» — довести до стока, «давай» — встанет над решёткой
+  private drainWalk(e: Elephant): Job {
+    const id = e.id;
+    const near = (x: State) => dist(her(x, id), TOILET_STANCE) < 3.5 && hardFloor(her(x, id).x, her(x, id).y);
+    return {
+      name: 'drainWalk',
+      steps: [
+        go((x) => meetPoint(x, her(x, id)), 0.7),
+        this.greet(id),
+        this.lead(id, 0, () => ({ x: 26.7, y: 30.6 }), near),
+        expand((x) => (near(x) ? [act(`voice:${id}:toilet`, true), wait((y) => her(y, id).act.kind !== 'follow' && her(y, id).act.kind !== 'urinate', 8), act(`treat:${id}`, true)] : [])),
+      ],
+    };
+  }
+
+  // Довести её рядом с собой туда, куда нужно (по умолчанию — на ближайший бетон)
+  private lead(id: string, n: number, spot: (s: State) => Vec = (y) => concreteSpot(y, her(y, id)), there: (s: State) => boolean = (y) => onConcrete(her(y, id))): Step {
+    return expand((x) => {
+      const e = her(x, id);
+      if (there(x) || n >= 3) return [];
+      if (e.act.kind === 'walkWith')
+        return [go(spot, 0.5), wait((y) => her(y, id).speed < 0.2 || her(y, id).act.kind !== 'walkWith', 10), act(`voice:${id}:stay`, true)];
+      return [
+        ...(n > 0 ? [act(`voice:${id}:talk`, true), wait(() => false, 1.7)] : []),
+        act(`voice:${id}:follow`, true),
+        wait((y) => her(y, id).act.kind === 'walkWith', 2),
+        this.lead(id, n + 1, spot, there),
+      ];
+    });
   }
 
   // Мытьё из шланга: шланг с катушки, к ограде у слонихи (восточный участок — докуда хватает шланга),
@@ -520,7 +819,7 @@ export class AutoKeeper {
         go(st('hoseReel'), 0.5),
         act('takeHose'),
         go(spot, 0.6),
-        expand((x) => (touch(x) ? [] : [act(`call:${id}`, true), wait(touch, 25)])),
+        expand((x) => (touch(x) ? [] : [act(`voice:${id}:come`, true), wait(touch, 25)])),
         act(`hoseWash:${id}`, true),
         act(`hoseWash:${id}`, true),
         act(`hoseWash:${id}`, true),
@@ -532,47 +831,24 @@ export class AutoKeeper {
 
   private porridge(itemId: number, e: Elephant, s: State): Job {
     const id = e.id;
-    const target = (x: State) => contactPoint(x.elephants.find((q) => q.id === id) ?? e);
     const it = s.world.items.find((x) => x.id === itemId);
     const atStation = it && dist(it, st('porridgeStation')) < 2.5;
     return {
       name: 'porridge',
-      steps: [
-        ...(atStation ? [go(st('porridgeStation')), act(`takePorridge:${itemId}`)] : [go(it ?? st('porridgeStation'), 0.8), act(`pickUp:${itemId}`)]),
-        go(target, 0.6),
-        expand((s) => (availableActions(s).some((o) => o.id === `feedPorridge:${id}` && o.enabled) ? [] : [act(`call:${id}`, true), wait((x) => availableActions(x).some((o) => o.id === `feedPorridge:${id}`), 25)])),
-        act(`feedPorridge:${id}`, true),
-      ],
+      steps: [...(atStation ? [go(st('porridgeStation')), act(`takePorridge:${itemId}`)] : [go(it ?? st('porridgeStation'), 0.8), act(`pickUp:${itemId}`)]), ...this.reach(id), act(`feedPorridge:${id}`, true)],
     };
   }
 
+  // Пустой таз: подойти и поднять (среди слонов — рядом с ним), на выгуле — крюком через ограду
   private collectTub(s: State, tubId: number, a: AreaId): Job {
-    if (this.inside(s, a) && a !== 'paddock') {
-      const e = ENTRY[a];
-      return {
-        name: 'collectTub',
-        steps: [
-          go(e.out, 0.4),
-          go(e.in, 0.5),
-          go((x) => {
-            const t = x.world.tubs.find((q) => q.id === tubId);
-            return t && t.where === 'floor' ? this.standNear(x, t, 0.95) : null;
-          }, 0.4),
-          act(`collectTub:${tubId}`, true),
-          expand((x) => {
-            if (x.keeper.held?.kind !== 'tub') this.skip.set(`tub:${tubId}`, x.t + 120);
-            return [go(e.in, 0.5), go(e.out, 0.5)];
-          }),
-        ],
-      };
-    }
+    const hook = a === 'paddock' && !this.inside(s, a);
     return {
-      name: 'collectTubHook',
+      name: hook ? 'collectTubHook' : 'collectTub',
       steps: [
         go((x) => {
           const t = x.world.tubs.find((q) => q.id === tubId);
-          if (!t) return null;
-          return t.y < 20 ? { x: Math.max(31, Math.min(45, t.x)), y: 21.1 } : { x: Math.max(10.9, Math.min(29.1, t.x)), y: 31.0 };
+          if (!t || t.where !== 'floor') return null;
+          return hook ? { x: Math.max(31, Math.min(45, t.x)), y: 21.1 } : this.standNear(x, t, 0.95);
         }, 0.4),
         act(`collectTub:${tubId}`, true),
         expand((x) => {
@@ -835,6 +1111,7 @@ export class AutoKeeper {
       const a = (i / 12) * Math.PI * 2;
       const q = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r };
       if (keeperFieldAt(q.x, q.y, nav) < 0.45) continue;
+      if (s.elephants.some((o) => gapToBody(o, q) < KEEPER.radius + 0.15)) continue;
       const d = dist(q, s.keeper);
       if (d < bestD) {
         bestD = d;
@@ -890,8 +1167,7 @@ export class AutoKeeper {
   // Вещь в руках: инструмент — на стойку, корм — по назначению, бак — вылить и на место
   private dispose(s: State): Job {
     const h = s.keeper.held!;
-    const here = areaAt(s.keeper.x, s.keeper.y);
-    const exit: Step[] = here ? [go(ENTRY[here].in, 0.5), go(ENTRY[here].out, 0.5)] : [];
+    const exit: Step[] = [];
     switch (h.kind) {
       case 'shovel':
         if (h.load > 0) return { name: 'emptyShovel', steps: [...exit, go(st('container'), 1.6), act('dumpShovel:container')] };
@@ -927,9 +1203,7 @@ export class AutoKeeper {
             return {
               name: 'porridgeFeed',
               steps: [
-                go((x) => contactPoint(x.elephants.find((q) => q.id === e.id) ?? e), 0.6),
-                act(`call:${e.id}`, true),
-                wait((x) => availableActions(x).some((o) => o.id === `feedPorridge:${e.id}`), 25),
+                ...this.reach(e.id),
                 act(`feedPorridge:${e.id}`, true),
                 expand((x) => {
                   if (!x.keeper.held || x.keeper.held.kind !== 'porridge' || x.keeper.held.load <= 0) this.tries.delete(`porridge:${e.id}`);

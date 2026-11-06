@@ -51,7 +51,7 @@ export const C = {
   barnSandDark: '#b0843f',
   strawBed: '#e0bb66',
   strawBedDark: '#b8913f',
-  barnConcrete: '#cdc6b8', // бетонная полоса у решётки
+  barnConcrete: '#cdc6b8', // бетонная полоса у южной стены зала
   barnConcreteDark: '#b2aa9a',
   roomBlue: '#D1D5DB', // помещения: холодный бетон и стяжка
   roomNeutral: '#C5C9CD',

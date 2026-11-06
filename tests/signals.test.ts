@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { runMinutes, step } from '../src/sim';
-import { STATIONS, TANK_HOME } from '../src/data/facility';
+import { availableActions, runMinutes, step, NO_INPUT } from '../src/sim';
+import { STATIONS, TANK_HOME, TOILET_STANCE, hardFloor } from '../src/data/facility';
+import { rearPos } from '../src/sim/behavior/perceive';
 import { act, at, atStation, game } from './helpers';
-import type { State } from '../src/sim';
+import type { Elephant, State } from '../src/sim';
+
+// Дойти до точки шагом (как игрок с клавиатуры)
+function goTo(s: State, x: number, y: number, maxSec = 30): void {
+  for (let i = 0; i < maxSec * 30; i++) {
+    const dx = x - s.keeper.x;
+    const dy = y - s.keeper.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.25) return;
+    step(s, { ...NO_INPUT, move: { x: dx / d, y: dy / d } });
+  }
+}
+
+// Встать перед ней на расстоянии (в зале, к югу — к бетону) и повернуться к ней; она смотрит на кипера
+function faceHer(s: State, e: Elephant, metres: number): void {
+  const ang = Math.PI / 2 - 0.5;
+  at(s, e.x + Math.cos(ang) * metres, e.y + Math.sin(ang) * metres);
+  e.heading = ang;
+  s.keeper.facing = ang + Math.PI;
+}
 
 // Одна слониха в слоновнике, ворота закрыты, пузырь почти полон
 function toiletScene(seed: number, expressiveness: number, expectation: number): State {
@@ -20,6 +40,15 @@ function toiletScene(seed: number, expressiveness: number, expectation: number):
   return s;
 }
 
+// Занятие читаем через функцию: сужение типов TypeScript не знает, что act() его меняет
+function kindOf(e: Elephant): string {
+  return e.act.kind;
+}
+
+function actionsFor(s: State, id: string) {
+  return availableActions(s).find((a) => a.id === id);
+}
+
 function runUntil(s: State, minutes: number, cond: () => boolean): boolean {
   const end = s.t + minutes;
   while (s.t < end) {
@@ -35,7 +64,8 @@ describe('сигналы и научение', () => {
     const e = s.elephants[0];
     expect(runUntil(s, 40, () => e.signal?.kind === 'toilet')).toBe(true);
     const before = e.learned.expectation;
-    atStation(s, 'gatePanel');
+    // Ворота открывают руками, стоя у створки
+    at(s, 13.2, 20.9);
     expect(act(s, 'gate:outer')).toBe(true);
     step(s);
     expect(e.signal).toBeNull();
@@ -46,7 +76,7 @@ describe('сигналы и научение', () => {
     expect(e.day.urineBedding).toBe(0);
   });
 
-  it('если на сигнал не ответить — ожидание падает, а моча оказывается на подстилке', () => {
+  it('если на сигнал не ответить — ожидание падает, а моча оказывается где пришлось, не в баке', () => {
     const s = toiletScene(2, 0.9, 0.7);
     const e = s.elephants[0];
     expect(runUntil(s, 40, () => e.signal?.kind === 'toilet')).toBe(true);
@@ -54,7 +84,8 @@ describe('сигналы и научение', () => {
     runMinutes(s, 90);
     expect(e.day.ignored).toBeGreaterThanOrEqual(1);
     expect(e.learned.expectation).toBeLessThan(before);
-    expect(e.day.urineBedding + e.day.urineDrain).toBeGreaterThanOrEqual(1);
+    expect(e.day.urineBedding + e.day.urineDrain + e.day.urineOutside).toBeGreaterThanOrEqual(1);
+    expect(e.day.urineTank).toBe(0);
   });
 
   it('молчаливая и разуверившаяся почти не зовёт, но физиология та же', () => {
@@ -85,31 +116,47 @@ describe('сигналы и научение', () => {
     const first = e.day.signals;
     const exp1 = e.learned.expectation;
     e.day.signals = 0;
-    runMinutes(s, 720);
+    // До утренней смены дня: в 8:00 выученное чуть тянется к врождённому — это забывание, не научение
+    runMinutes(s, 700);
     expect(e.learned.expectation).toBeLessThan(exp1);
     expect(e.day.signals).toBeLessThanOrEqual(first);
   });
 
-  it('туалет по зову: к стенке боком, бак под неё, «Давай гуляй» — моча в баке, награда учит', () => {
+  it('туалет с баком: подойти, заговорить, «пошли» — на бетон рядом с кипером, «стоять», бак под неё, «давай» — моча в баке, награда учит', () => {
     const s = toiletScene(8, 0.9, 0.7);
     const e = s.elephants[0];
     e.learned.cooperation = 0.8;
+    e.learned.trust = 0.75;
+    for (const c of ['follow', 'stay'] as const) e.learned.cues[c] = 0.9;
     expect(runUntil(s, 40, () => e.signal?.kind === 'toilet')).toBe(true);
-    // Бак стоит в проходе у стенки — взять
+    // Бак — в инвентарной у двери в зал
     at(s, TANK_HOME.x, TANK_HOME.y);
     expect(act(s, 'pickUp:')).toBe(true);
     expect(s.keeper.held?.kind).toBe('tank');
-    atStation(s, 'trainingWall');
-    expect(act(s, `call:${e.id}:toilet`)).toBe(true);
-    expect(e.act.kind).toBe('follow');
-    expect(runUntil(s, 20, () => (e.mem.call?.arrivedAt ?? -1) >= 0)).toBe(true);
-    const stance = STATIONS.trainingWall.slots![1];
-    expect(Math.hypot(e.x - stance.x, e.y - stance.y)).toBeLessThan(1.1);
-    // Без команды она ждёт — сама не идёт, пока терпимо
-    expect(e.day.urineBedding + e.day.urineDrain).toBe(0);
+    // Подойти так, чтобы видела, окликнуть и заговорить — тогда подпустит
+    faceHer(s, e, 3.2);
+    act(s, `voice:${e.id}:name`); // окликнуть, если ещё не смотрит на тебя
+    expect(act(s, `voice:${e.id}:talk`)).toBe(true);
+    for (let i = 0; i < 4 && kindOf(e) !== 'walkWith'; i++) {
+      act(s, `voice:${e.id}:follow`);
+      if (kindOf(e) !== 'walkWith') runMinutes(s, 1.7);
+    }
+    expect(e.act.kind).toBe('walkWith');
+    // Довести рядом с собой до бетона у южной стены
+    goTo(s, 15.6, 31.6);
+    runMinutes(s, 1);
+    expect(hardFloor(rearPos(e).x, rearPos(e).y)).toBe(true);
+    expect(act(s, `voice:${e.id}:stay`)).toBe(true);
+    expect(e.act.kind).toBe('stay');
+    // К её боку, ближе к задним ногам
+    const c = Math.cos(e.heading);
+    const sn = Math.sin(e.heading);
+    const g = 0.95 * e.profile.look.size * e.profile.look.girth + 0.5;
+    at(s, e.x - c * 0.4 - sn * g, e.y - sn * 0.4 + c * g);
     expect(act(s, `tankPlace:${e.id}`)).toBe(true);
-    expect(act(s, `toiletCmd:${e.id}`)).toBe(true);
+    expect(act(s, `voice:${e.id}:toilet`)).toBe(true);
     expect(runUntil(s, 10, () => e.day.urineTank > 0)).toBe(true);
+    expect(e.day.urineBedding).toBe(0);
     const tank = s.world.items.find((it) => it.kind === 'tank')!;
     expect(tank.load).toBeGreaterThan(0);
     const learned = e.learned.toilet;
@@ -117,6 +164,7 @@ describe('сигналы и научение', () => {
     expect(e.learned.toilet).toBeGreaterThan(learned);
     // Забрать бак, вылить в слив и помыть, поставить на место
     runMinutes(s, 3);
+    at(s, tank.x + 0.8, tank.y);
     expect(act(s, 'tankTake:')).toBe(true);
     expect(s.keeper.held?.kind).toBe('tank');
     atStation(s, 'washSink');
@@ -128,38 +176,79 @@ describe('сигналы и научение', () => {
     expect(s.keeper.held).toBeNull();
   });
 
-  it('у стока при полном пузыре — сама, моча уходит в сток, а не на подстилку', () => {
+  it('на соломе бак не подставить — сначала отвести на бетон', () => {
+    const s = toiletScene(12, 0.9, 0.7);
+    const e = s.elephants[0];
+    e.x = 15;
+    e.y = 23.5;
+    e.heading = 0;
+    e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 1e6, doStart: s.t, forced: true, target: null, key: 'idle' };
+    s.keeper.held = { kind: 'tank', load: 0, aux: 0, owner: null };
+    at(s, 15, 23.5 + 0.95 * e.profile.look.size * e.profile.look.girth + 0.5);
+    act(s, `voice:${e.id}:name`);
+    const o = actionsFor(s, `tankPlace:${e.id}`);
+    expect(o?.enabled).toBe(false);
+    expect(o?.reason).toMatch(/соломе/);
+  });
+
+  it('у стока: «давай» — встаёт над решёткой стока сама, моча уходит в сток, а не на подстилку', () => {
     const s = toiletScene(11, 0.9, 0.7);
     const e = s.elephants[0];
     e.learned.cooperation = 0.8;
-    atStation(s, 'trainingWall');
-    for (let i = 0; i < 6 && e.act.kind !== 'follow'; i++) act(s, `call:${e.id}:toilet`);
-    expect(e.act.kind).toBe('follow');
-    // Терпит, пока идёт; у стенки, когда совсем приспичит, — сама, над стоком
-    e.needs.bladder = 89;
-    expect(runUntil(s, 30, () => e.day.urineDrain > 0)).toBe(true);
+    e.learned.trust = 0.75;
+    e.learned.toilet = 0.6;
+    e.needs.bladder = 85;
+    // Стоит на бетоне в паре метров от стока
+    e.x = TOILET_STANCE.x + 1.4;
+    e.y = TOILET_STANCE.y + 1.2;
+    e.heading = Math.PI;
+    e.path = [];
+    e.pathGoal = null;
+    e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 5, doStart: s.t, forced: false, target: null, key: 'idle' };
+    faceHer(s, e, 3.0);
+    act(s, `voice:${e.id}:name`);
+    let ok = false;
+    for (let i = 0; i < 5 && !ok; i++) {
+      act(s, `voice:${e.id}:toilet`);
+      ok = e.act.kind === 'follow' || e.act.kind === 'urinate';
+      if (!ok) runMinutes(s, 1.7);
+    }
+    expect(ok).toBe(true);
+    expect(runUntil(s, 20, () => e.day.urineDrain > 0)).toBe(true);
     expect(e.day.urineBedding).toBe(0);
   });
 
-  it('пришла на зов и получила угощение — покладистость растёт; без похвалы — падает', () => {
+  it('пришла, когда позвали «иди сюда», и получила угощение — покладистость растёт; без похвалы — падает', () => {
     const run = (reward: boolean) => {
       const s = game(9, 1, [{ cooperation: 0.9 }]);
       const e = s.elephants[0];
       e.learned.cooperation = 0.9;
       e.learned.trust = 0.8;
+      e.learned.cues.come = 0.9;
       e.needs.hunger = 5;
+      e.needs.thirst = 0;
       e.needs.bladder = 0;
-      at(s, 19.5, 31);
-      for (let i = 0; i < 10 && e.act.kind !== 'follow'; i++) act(s, `call:${e.id}`);
+      e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 5, doStart: s.t, forced: false, target: null, key: 'idle' };
+      faceHer(s, e, 6);
+      act(s, `voice:${e.id}:name`);
+      for (let i = 0; i < 6 && kindOf(e) !== 'follow'; i++) {
+        act(s, `voice:${e.id}:come`);
+        if (kindOf(e) !== 'follow') runMinutes(s, 1.7);
+      }
       expect(e.act.kind).toBe('follow');
       const c0 = e.learned.cooperation;
+      const k0 = e.learned.cues.come;
       runUntil(s, 20, () => e.mem.call !== null && e.mem.call.arrivedAt >= 0);
       if (reward) act(s, `treat:${e.id}`);
       runMinutes(s, 10);
-      return e.learned.cooperation - c0;
+      return { coop: e.learned.cooperation - c0, cue: e.learned.cues.come - k0 };
     };
-    expect(run(true)).toBeGreaterThan(0);
-    expect(run(false)).toBeLessThan(0);
+    const yes = run(true);
+    const no = run(false);
+    expect(yes.coop).toBeGreaterThan(0);
+    expect(yes.cue).toBeGreaterThan(0);
+    expect(no.coop).toBeLessThan(0);
+    expect(no.cue).toBeLessThan(0);
   });
 
   it('просит воды у пустой поилки — налитая вода снимает сигнал', () => {
@@ -177,7 +266,7 @@ describe('сигналы и научение', () => {
     step(s);
     expect(e.signal).toBeNull();
     expect(e.day.answered).toBe(1);
-    expect(STATIONS.barnWaterW.slots).toHaveLength(2);
+    expect(STATIONS.barnWaterW.slots).toHaveLength(1);
   });
 
   it('манера звать — своя: топает именно своей ногой, урчит или выпрашивает', () => {

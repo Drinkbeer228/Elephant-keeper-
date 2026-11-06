@@ -11,8 +11,8 @@ export interface KCtx {
   k: Keeper;
   w: World;
   h: Held | null;
-  area: AreaId | null; // кипер внутри отсека (он пуст — иначе дверь бы не открылась)
-  contact: KeeperContact | null; // кипер у решётки или ограды
+  area: AreaId | null; // кипер среди слонов: в зале или на выгуле
+  contact: KeeperContact | null; // кипер снаружи у ограды выгула
   barrow: Barrow;
   pushing: boolean;
   barrowNear: boolean; // тачка стоит рядом
