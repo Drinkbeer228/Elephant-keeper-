@@ -11,6 +11,7 @@ import {
   GATE,
   HOSE_LENGTH,
   STATIONS,
+  TOOL_SLOTS,
   inRect,
   zoneAt,
   type DoorDef,
@@ -121,7 +122,6 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
     b.x = k.x + Math.cos(b.heading) * 0.95;
     b.y = k.y + Math.sin(b.heading) * 0.95;
   }
-  void want;
 }
 
 // ---------------------------------------------------------------------------
@@ -819,3 +819,82 @@ export function inBarnRect(x: number, y: number): boolean {
 }
 
 export { cellOf };
+
+// Где в мире находится цель действия — для подсказки-кольца на карте
+export function actionTarget(s: State, o: ActionOption): { x: number; y: number } | null {
+  const t = o.ref.target;
+  const e = s.elephants.find((x) => x.id === t);
+  const mid = (id: StationId) => {
+    const r = STATIONS[id].rect;
+    return r ? { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 } : STATIONS[id].keeper;
+  };
+  switch (o.ref.verb) {
+    case 'treat':
+    case 'scratch':
+    case 'shower':
+    case 'handFeed':
+      return e ? { x: e.x + Math.cos(e.heading) * 1.7 * e.profile.look.size, y: e.y + Math.sin(e.heading) * 1.7 * e.profile.look.size } : null;
+    case 'call':
+      return e ? { x: e.x, y: e.y } : null;
+    case 'loadHay':
+      return t === 'barnRack' || t === 'paddockFeeder' ? mid(t) : null;
+    case 'fillTrough':
+    case 'clearTrough':
+      return mid('barnTrough');
+    case 'valve':
+      return t === 'pool' ? { x: 44.5, y: 20.4 } : t === 'barnWater' ? { x: 9.55, y: 24 } : { x: 5.5, y: 20.45 };
+    case 'gate':
+      return mid('gateControl');
+    case 'takeTool':
+    case 'returnTool':
+      return t === 'fork' || t === 'rake' ? { x: TOOL_SLOTS[t].x, y: TOOL_SLOTS[t].y - 0.4 } : null;
+    case 'takeHose':
+    case 'returnHose':
+      return mid('hoseReel');
+    case 'takeHay':
+      return mid('hayStack');
+    case 'takeStraw':
+      return mid('strawStack');
+    case 'takeBrowse':
+      return mid('browsePile');
+    case 'prepRation':
+      return mid('prepTable');
+    case 'refillPouch':
+      return mid('fridge');
+    case 'journal':
+      return mid('desk');
+    case 'dumpBarrow':
+      return mid('container');
+    case 'emptyTool':
+      return t === 'container' ? mid('container') : { x: s.world.barrow.x, y: s.world.barrow.y };
+    case 'pushBarrow':
+    case 'parkBarrow':
+      return { x: s.world.barrow.x, y: s.world.barrow.y };
+    case 'fillDrum':
+      return DRUM;
+    case 'scatter':
+    case 'tossBrowse': {
+      const c = keeperContact(s);
+      return c ? c.spot : null;
+    }
+    case 'fork': {
+      const [kind, id] = t.split(':');
+      const list = kind === 'dung' ? s.world.dung : s.world.food;
+      const it = (list as { id: number; x: number; y: number }[]).find((x) => String(x.id) === id);
+      return it ? { x: it.x, y: it.y } : null;
+    }
+    case 'rake':
+    case 'hose': {
+      const i = Number(t);
+      return Number.isFinite(i) && i >= 0 ? cellCenter(i) : null;
+    }
+    case 'spreadStraw':
+      return { x: s.keeper.x, y: s.keeper.y };
+    case 'pickUp': {
+      const it = s.world.items.find((x) => String(x.id) === t);
+      return it ? { x: it.x, y: it.y } : null;
+    }
+    default:
+      return null;
+  }
+}

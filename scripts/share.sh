@@ -23,7 +23,8 @@ trap 'kill $PREVIEW_PID 2>/dev/null' EXIT
 sleep 1
 
 echo
-echo "Локально: http://localhost:$PORT"
+echo "Локально: http://localhost:$PORT/Elephant-keeper-/"
 echo "Поднимаю туннель… ссылка для друзей:"
 "$CF" tunnel --no-autoupdate --protocol http2 --url "http://127.0.0.1:$PORT" 2>&1 \
-  | grep --line-buffered -oE 'https://[a-z0-9-]+\.trycloudflare\.com'
+  | grep --line-buffered -oE 'https://[a-z0-9-]+\.trycloudflare\.com' \
+  | sed -u 's#$#/Elephant-keeper-/#'

@@ -5,6 +5,7 @@ import { clampHerdSize, generateHerd, initialBonds, initialLearned } from './her
 import { random, range } from './rng';
 import type { DayStats, Elephant, ElephantProfile, State, Traits } from './types';
 import { cellCenter, dropDung, forCells, touchCells } from './world';
+import { log } from './events';
 
 export const SAVE_VERSION = 2;
 
@@ -132,6 +133,7 @@ export function createState(opts: NewGameOptions): State {
   s.elephants = herd.map((p, i) => createElephant(s, p, i));
   for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation };
   if (opts.mess !== false) addNightMess(s);
+  log(s, 'info', 'Утро. Слоны ночевали в слоновнике. Проверь воду, положи сено на выгул и открой ворота — пульт в западном дворе.', { kind: 'welcome' });
   return s;
 }
 

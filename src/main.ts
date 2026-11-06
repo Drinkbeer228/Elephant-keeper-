@@ -6,6 +6,7 @@ import { sound } from './audio/sound';
 import { Input } from './input';
 import { WorldScene } from './render/WorldScene';
 import {
+  actionTarget,
   availableActions,
   clearLegacy,
   createState,
@@ -52,7 +53,7 @@ const hud = new Hud(document.getElementById('hud')!, {
   pauseToggle: () => setSpeed(speed === 0 ? 1 : 0),
   setPaused: (p) => (paused = p),
   newGame: (herd, seed) => {
-    state = createState({ seed: seed ?? Math.floor(Math.random() * 1e9), herdSize: herd });
+    state = createState({ seed: seed ?? (seedParam || Math.floor(Math.random() * 1e9)), herdSize: herd });
     selected = null;
     paused = false;
     sound.unlock();
@@ -192,7 +193,12 @@ function handlePresses(): void {
   }
 }
 
+const perf = { frameMs: 0, simMs: 0, hudMs: 0, steps: 0, frames: 0, dtSum: 0 };
+
 function frame(dt: number): SimEvent[] {
+  const f0 = performance.now();
+  perf.frames++;
+  perf.dtSum += dt;
   handlePresses();
   const events: SimEvent[] = [];
   const running = !paused && !hud.modalOpen && speed > 0 && state.pendingReport === null;
@@ -205,9 +211,11 @@ function frame(dt: number): SimEvent[] {
       const inp: StepInput = bot ? bot.decide(state) : { move, run: input.running(), actions: steps === 0 ? pending.splice(0) : [], cancel: false };
       events.push(...step(state, inp));
       steps++;
+      perf.steps++;
       if (state.pendingReport !== null) break;
     }
     if (acc > TIME.step * 4) acc = 0;
+    perf.simMs = perf.simMs * 0.9 + (performance.now() - f0) * 0.1;
   } else {
     acc = 0;
     pending.length = 0;
@@ -225,7 +233,10 @@ function frame(dt: number): SimEvent[] {
     if (r) hud.openReport(r);
     saveSlot(state, 'auto');
   }
+  const h0 = performance.now();
   hud.render(state, availableActions(state), selected);
+  perf.hudMs = perf.hudMs * 0.9 + (performance.now() - h0) * 0.1;
+  perf.frameMs = perf.frameMs * 0.9 + (performance.now() - f0) * 0.1;
   if (performance.now() > autosaveAt && running) {
     autosaveAt = performance.now() + 60_000;
     saveSlot(state, 'auto');
@@ -254,6 +265,11 @@ function start(): void {
     onSelect: (id) => (selected = id),
     selected: () => selected,
     showNames: () => showNames,
+    marker: () => {
+      if (state.keeper.task) return null;
+      const a = hud.actions.find((x) => x.enabled);
+      return a ? actionTarget(state, a) : null;
+    },
     dpr,
   });
   const game = new Phaser.Game({
@@ -278,6 +294,7 @@ function start(): void {
         state = v;
       },
       game,
+      perf,
     },
   });
 }

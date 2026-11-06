@@ -2,7 +2,7 @@
 
 export { createState, SAVE_VERSION, type NewGameOptions } from './state';
 export { step, runMinutes, NO_INPUT } from './step';
-export { availableActions, heldLabel, zoneEmpty, keeperZone, doorUnlocked } from './keeper';
+export { availableActions, actionTarget, heldLabel, zoneEmpty, keeperZone, doorUnlocked } from './keeper';
 export { clockText, shiftDay, minuteOfDay, darkness, temperature, isNight } from './time';
 export { describeCharacter, characterHints, salientTraits, TRAIT_LABELS, rankScore, bondKey } from './herd';
 export { wellbeing, pressingNeed, ambientTemp } from './behavior/needs';

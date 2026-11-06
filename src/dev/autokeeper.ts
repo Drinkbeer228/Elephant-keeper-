@@ -155,7 +155,7 @@ export class AutoKeeper {
     const k = s.keeper;
     const m = minuteOfDay(s.t);
     const day = Math.floor((s.t - 480) / 1440);
-    if (w.barrow.pushed) return this.barrowHome(s);
+    if (w.barrow.pushed) return this.barrowHome();
     if (k.held) return this.dispose(s);
     // Тачку, забытую в вольере, — вывезти прежде всего: иначе ворота не открыть
     if (zoneAt(w.barrow.x, w.barrow.y)) return this.barrowDump(s);
@@ -325,8 +325,7 @@ export class AutoKeeper {
     return { name: 'barrowDump', steps };
   }
 
-  private barrowHome(s: State): Job {
-    void s;
+  private barrowHome(): Job {
     return { name: 'barrowHome', steps: [go({ x: BARROW_HOME.x - 1.0, y: BARROW_HOME.y - 1.0 }, 0.6), act('parkBarrow')] };
   }
 

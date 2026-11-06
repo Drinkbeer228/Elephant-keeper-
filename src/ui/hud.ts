@@ -17,6 +17,7 @@ import {
   wellbeing,
   bond,
   type ActionOption,
+  type ActivityKind,
   type DayReport,
   type Elephant,
   type NeedKey,
@@ -93,6 +94,24 @@ const SIGNAL_TEXT: Record<string, string> = {
   water: 'просит воды',
   attention: 'просит внимания',
 };
+
+// Пока слон только идёт к цели, подпись говорит о пути, а не о самом занятии.
+const GOING: Partial<Record<ActivityKind, string>> = {
+  eat: 'идёт к еде',
+  drink: 'идёт к воде',
+  urinate: 'идёт в туалет',
+  sleep: 'идёт спать',
+  rest: 'идёт отдохнуть',
+  bathe: 'идёт к бассейну',
+  dust: 'идёт к песку',
+  play: 'идёт играть',
+};
+
+function doingText(e: Elephant): string {
+  if (e.lying) return 'спит лёжа';
+  if (e.act.phase === 'go' && !/^(идёт|выходит)/.test(e.act.note)) return GOING[e.act.kind] ?? e.act.note;
+  return e.act.note;
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -265,7 +284,7 @@ export class Hud {
     const key = s.elephants
       .map((e) => {
         const need = pressingNeed(e);
-        return `${e.id}:${e.act.note}:${e.signal?.kind ?? ''}:${need?.key ?? ''}:${Math.round(wellbeing(e) / 10)}:${selected === e.id}:${e.lying}`;
+        return `${e.id}:${doingText(e)}:${e.signal?.kind ?? ''}:${need?.key ?? ''}:${Math.round(wellbeing(e) / 10)}:${selected === e.id}`;
       })
       .join('|');
     if (key === this.cardsKey) return;
@@ -277,9 +296,9 @@ export class Hud {
         const sig = e.signal;
         const clear = sig ? signalClarity(e) >= 0.5 : false;
         const mood = wb >= 70 ? 'ok' : wb >= 45 ? 'warn' : 'bad';
-        return `<button class="card ${selected === e.id ? 'sel' : ''} ${sig ? 'signal' : ''}" data-id="${e.id}" aria-label="${esc(e.profile.name)}: ${esc(e.act.note)}">
+        return `<button class="card ${selected === e.id ? 'sel' : ''} ${sig ? 'signal' : ''}" data-id="${e.id}" aria-label="${esc(e.profile.name)}: ${esc(doingText(e))}">
           <span class="mood ${mood}" style="--c:${e.profile.color}" title="Самочувствие ${Math.round(wb)}"></span>
-          <span class="card-text"><b>${esc(e.profile.name)}</b><small>${esc(e.lying ? 'спит лёжа' : e.act.note)}</small></span>
+          <span class="card-text"><b>${esc(e.profile.name)}</b><small>${esc(doingText(e))}</small></span>
           ${sig ? `<span class="sig ${clear ? '' : 'faint'}" title="${SIGNAL_TEXT[sig.kind]}">${SIGNAL_ICON[sig.kind]}</span>` : need && NEED_ICON[need.key] ? `<span class="need" title="${NEED_LABELS[need.key]}">${NEED_ICON[need.key]}</span>` : ''}
         </button>`;
       })
@@ -339,7 +358,7 @@ export class Hud {
     }
     box.hidden = false;
     const n = e.needs;
-    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${e.act.note}:${e.signal?.kind}:${Math.round(e.learned.trust * 100)}:${Math.round(e.learned.cooperation * 100)}:${Math.round(e.learned.expectation * 100)}`;
+    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(e.learned.trust * 100)}:${Math.round(e.learned.cooperation * 100)}:${Math.round(e.learned.expectation * 100)}`;
     if (key === this.inspectKey) return;
     const first = this.inspectKey === '' || !box.querySelector(`[data-eid="${e.id}"]`);
     this.inspectKey = key;
@@ -362,7 +381,7 @@ export class Hud {
         </div>
         <button class="btn icon small close" data-close aria-label="Закрыть">${ICON.close}</button>
       </div>
-      <div class="now">${e.signal ? `<span class="sig">${SIGNAL_ICON[e.signal.kind]}</span>` : ''}<b>Сейчас:</b> ${esc(e.lying ? 'спит лёжа' : e.act.note)}${e.signal ? ` · <span class="warn-t">${SIGNAL_TEXT[e.signal.kind]}</span>` : ''}</div>
+      <div class="now">${e.signal ? `<span class="sig">${SIGNAL_ICON[e.signal.kind]}</span>` : ''}<b>Сейчас:</b> ${esc(doingText(e))}${e.signal ? ` · <span class="warn-t">${SIGNAL_TEXT[e.signal.kind]}</span>` : ''}</div>
       <div class="grid">
         ${needs.map((k) => `<div class="row"><span>${NEED_LABELS[k]}</span>${bar(n[k], k === 'social' ? 60 : 70)}</div>`).join('')}
       </div>
@@ -439,7 +458,7 @@ export class Hud {
   pushEvents(events: SimEvent[]): void {
     for (const ev of events) {
       if (!ev.text) continue;
-      if (ev.severity === 'info' && ev.kind !== 'refuse' && ev.kind !== 'report') continue;
+      if (ev.severity === 'info' && ev.kind !== 'refuse' && ev.kind !== 'report' && ev.kind !== 'welcome') continue;
       this.toast(ev.text, ev.severity);
     }
   }

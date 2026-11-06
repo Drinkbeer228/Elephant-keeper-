@@ -1,12 +1,12 @@
 // Изменчивая часть мира: подстилка и грязь, корм и вода, навоз, мяч, тачка, ворота, свет.
 
 import Phaser from 'phaser';
-import { BEDDING, DOORS, DRUM, GATE, H, POOL, STATIONS, TIRE, TOOL_SLOTS, TREES, W, BALL_START } from '../data/facility';
-import { cellCenter, darkness, doorUnlocked, isBeddingCell, troughSpoiled, zoneOf, type State } from '../sim';
+import { DOORS, DRUM, GATE, H, POOL, STATIONS, TIRE, TOOL_SLOTS, TREES, W, BALL_START } from '../data/facility';
+import { cellCenter, darkness, doorUnlocked, isBeddingCell, troughSpoiled, type State } from '../sim';
 import { rnd } from './art';
 import { bakeScale, D } from './ground';
 import { C, hex, mix } from './palette';
-import { originOf, placeImage, PPM, ART_SCALE } from './textures';
+import { placeImage, PPM, ART_SCALE } from './textures';
 
 const P = PPM;
 
@@ -34,9 +34,9 @@ export class WorldView {
   private canopies: { img: Phaser.GameObjects.Image; x: number; y: number; r: number }[] = [];
   private tire: Phaser.GameObjects.Image;
   private night: Phaser.GameObjects.Rectangle;
-  private lights: Phaser.GameObjects.Graphics;
+  private lights: Phaser.GameObjects.Image[] = [];
 
-  constructor(private scene: Phaser.Scene, s: State) {
+  constructor(private scene: Phaser.Scene) {
     // Пол вольеров рисуется векторно, но запекается в текстуру — только когда он меняется
     this.floor = scene.make.graphics({}, false);
     this.floorK = bakeScale(scene);
@@ -87,11 +87,18 @@ export class WorldView {
       this.canopies.push({ img: placeImage(scene, `canopy-${t.id}`, t.x, t.y, D.canopy), x: t.x, y: t.y, r: t.canopy });
     }
     this.night = scene.add.rectangle(-20 * P, -20 * P, (W + 40) * P, (H + 40) * P, hex('#1d2a36'), 0).setOrigin(0).setDepth(D.night);
-    this.lights = scene.add.graphics().setDepth(D.light).setBlendMode(Phaser.BlendModes.ADD);
-    void s;
+    for (const l of [
+      { x: 3, y: 20.9, r: 2.2 },
+      { x: 15.5, y: 31.6, r: 2.2 },
+      { x: 33.5, y: 31.6, r: 2.2 },
+      { x: 45.2, y: 24, r: 2.2 },
+      { x: 20, y: 24.5, r: 3.4 },
+    ]) {
+      this.lights.push(placeImage(scene, 'glow', l.x, l.y, D.light).setBlendMode(Phaser.BlendModes.ADD).setScale(ART_SCALE * l.r).setAlpha(0));
+    }
   }
 
-  update(s: State, time: number, dt: number, cam: Phaser.Cameras.Scene2D.Camera): void {
+  update(s: State, time: number, dt: number): void {
     const w = s.world;
     if (w.cellsVersion !== this.floorVersion) {
       this.floorVersion = w.cellsVersion;
@@ -143,23 +150,7 @@ export class WorldView {
     // Сумерки и ночь, фонари
     const dark = darkness(s.t);
     this.night.setFillStyle(hex('#1d2a36'), dark * 0.5);
-    void cam;
-    this.lights.clear();
-    if (dark > 0.05) {
-      const lamps = [
-        { x: 3, y: 20.9, r: 5 },
-        { x: 15.5, y: 31.6, r: 5 },
-        { x: 33.5, y: 31.6, r: 5 },
-        { x: 45.2, y: 24, r: 5 },
-        { x: 20, y: 25, r: 7 },
-      ];
-      for (const l of lamps) {
-        for (let i = 3; i >= 1; i--) {
-          this.lights.fillStyle(hex('#f7d388'), 0.05 * dark);
-          this.lights.fillCircle(l.x * P, l.y * P, (l.r * i) / 3 * P);
-        }
-      }
-    }
+    for (const l of this.lights) l.setAlpha(dark * 0.55);
   }
 
   // Подстилка: солома прядками; моча — тёмные влажные пятна; грязь — бурые разводы
@@ -200,7 +191,6 @@ export class WorldView {
         for (let j = 0; j < 3; j++) g.fillEllipse((p.x - 0.35 + r() * 0.7) * P, (p.y - 0.35 + r() * 0.7) * P, (0.35 + r() * 0.3) * P, (0.25 + r() * 0.2) * P, 14);
       }
     }
-    void BEDDING;
     g.setScale(this.floorK);
     this.floorRT.clear();
     this.floorRT.draw(g, -2 * P * this.floorK, -2 * P * this.floorK);
@@ -392,7 +382,5 @@ export class WorldView {
         this.items.delete(id);
       }
     }
-    void originOf;
-    void zoneOf;
   }
 }

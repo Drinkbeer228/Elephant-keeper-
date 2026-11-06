@@ -70,6 +70,7 @@ export function loadStaticArt(scene: Phaser.Scene): void {
     addArt(scene, `bubble-${icon}`, A.bubbleArt(icon === 'water' ? 'drop' : icon, tint));
   }
   addArt(scene, 'fx-z', drawZ());
+  addArt(scene, 'glow', drawGlow());
   addArt(scene, 'fx-heart', drawHeart());
   addArt(scene, 'fx-dot', drawDot());
   // Оборудование
@@ -124,6 +125,18 @@ function drawHeart(): A.Art {
   return A.draw(0.5, 0.5, 0.25, 0.25, (ctx) => {
     ctx.scale(0.8, 0.8);
     A.drawIcon(ctx, 'heart', A.C.terracotta);
+  });
+}
+
+// Тёплое пятно света фонаря: мягкий радиальный спад
+function drawGlow(): A.Art {
+  return A.draw(4, 4, 2, 2, (ctx) => {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 2);
+    g.addColorStop(0, 'rgba(255,214,140,0.85)');
+    g.addColorStop(0.35, 'rgba(255,205,130,0.38)');
+    g.addColorStop(1, 'rgba(255,200,120,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(-2, -2, 4, 4);
   });
 }
 

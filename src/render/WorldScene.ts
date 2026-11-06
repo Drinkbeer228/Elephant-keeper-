@@ -18,6 +18,7 @@ export interface SceneHooks {
   onSelect: (elephantId: string | null) => void;
   selected: () => string | null;
   showNames: () => boolean;
+  marker: () => { x: number; y: number } | null;
   dpr: number;
 }
 
@@ -32,6 +33,7 @@ export class WorldScene extends Phaser.Scene {
   private ready = false;
   private herdKey = '';
   private pinch: { d: number; z: number } | null = null;
+  private markerG!: Phaser.GameObjects.Graphics;
 
   constructor(private hooks: SceneHooks) {
     super('world');
@@ -41,9 +43,10 @@ export class WorldScene extends Phaser.Scene {
     const s = this.hooks.getState();
     loadStaticArt(this);
     buildGround(this);
-    this.world = new WorldView(this, s);
+    this.world = new WorldView(this);
     this.keeper = new KeeperView(this, s);
     this.fx = new Fx(this);
+    this.markerG = this.add.graphics().setDepth(72);
     this.rebuildHerd(s);
     const cam = this.cameras.main;
     cam.setBackgroundColor('#e8e4da');
@@ -55,7 +58,7 @@ export class WorldScene extends Phaser.Scene {
       this.setZoom(this.targetZoom * (dy > 0 ? 0.88 : 1.14));
     });
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointer(p));
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPinch(p));
+    this.input.on('pointermove', () => this.onPinch());
     this.input.on('pointerup', () => (this.pinch = null));
     this.input.addPointer(1);
     this.ready = true;
@@ -138,8 +141,7 @@ export class WorldScene extends Phaser.Scene {
     if (best) this.hooks.onSelect(best);
   }
 
-  private onPinch(p: Phaser.Input.Pointer): void {
-    void p;
+  private onPinch(): void {
     if (!this.pinch || !this.input.pointer1.isDown || !this.input.pointer2.isDown) return;
     const d = Phaser.Math.Distance.Between(this.input.pointer1.x, this.input.pointer1.y, this.input.pointer2.x, this.input.pointer2.y);
     this.setZoom(this.pinch.z * (d / Math.max(1, this.pinch.d)));
@@ -158,9 +160,14 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  update(time: number, delta: number): void {
+  private lastNow = 0;
+
+  update(time: number): void {
     if (!this.ready) return;
-    const dt = Math.min(0.1, delta / 1000);
+    // Реальное время между кадрами: Phaser сглаживает delta, а симуляции нужен честный счёт
+    const now = performance.now();
+    const dt = this.lastNow ? Math.min(0.25, (now - this.lastNow) / 1000) : 1 / 60;
+    this.lastNow = now;
     const events = this.hooks.frame(dt);
     const s = this.hooks.getState();
     this.rebuildHerd(s);
@@ -176,8 +183,16 @@ export class WorldScene extends Phaser.Scene {
     }
     this.keeper.update(s, dt);
     const cam = this.cameras.main;
-    this.world.update(s, t, dt, cam);
+    this.world.update(s, t, dt);
     this.fx.update(dt);
+    // Кольцо на цели главного действия: видно, что сделает E
+    const mk = this.hooks.marker();
+    this.markerG.clear();
+    if (mk) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+      this.markerG.lineStyle(0.07 * P, 0x2e5a44, 0.55 + 0.35 * pulse);
+      this.markerG.strokeCircle(mk.x * P, mk.y * P, (0.42 + 0.08 * pulse) * P);
+    }
     // Плавный зум
     const want = this.overview ? this.fitZoom() : this.baseZoom() * this.targetZoom;
     this.zoomLevel += (want - this.zoomLevel) * Math.min(1, dt * 7);
