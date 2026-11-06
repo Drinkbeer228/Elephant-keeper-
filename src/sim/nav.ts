@@ -1,269 +1,339 @@
-import { COMPLEXES, MAP, complexAt, inBarn, inPaddock, type ComplexId, type Segment } from '../data/map';
+// Навигация: сетка 0.5 м с полем зазора (расстояние до ближайшего препятствия).
+// Слон проходит там, где зазор не меньше его радиуса, — поэтому большой слон не
+// протиснется в дверь кипера, а ворота пропустят любого, когда открыты.
 
-export type Point = { x: number; y: number };
+import { DOORS, GATE, H, W, inEllipse, POOL, zoneAt, type Rect, type ZoneId } from '../data/facility';
+import { distToRect, elephantIndex, keeperIndex, type SpatialIndex } from './geometry';
+import type { Vec } from './types';
 
-export interface NavigationOptions {
-  gates?: Partial<Record<ComplexId, boolean>>;
-  deliveryOpen?: boolean;
-  animal?: ComplexId;
+export const CELL = 0.5;
+export const GW = Math.round(W / CELL);
+export const GH = Math.round(H / CELL);
+const MAXC = 1.25;
+
+function cellCenter(i: number): Vec {
+  return { x: ((i % GW) + 0.5) * CELL, y: (Math.floor(i / GW) + 0.5) * CELL };
 }
 
-type RouteOptions = NavigationOptions | boolean;
-
-const EMPTY: NavigationOptions = { gates: {}, deliveryOpen: false };
-
-function optionsOf(value: RouteOptions = EMPTY): NavigationOptions {
-  if (typeof value !== 'boolean') return value;
-  return { gates: { female: value, male: value }, deliveryOpen: value };
+export function cellIndex(x: number, y: number): number {
+  const cx = Math.max(0, Math.min(GW - 1, Math.floor(x / CELL)));
+  const cy = Math.max(0, Math.min(GH - 1, Math.floor(y / CELL)));
+  return cy * GW + cx;
 }
 
-function optionsKey(options: NavigationOptions): string {
-  return `${options.gates?.female ? 1 : 0}${options.gates?.male ? 1 : 0}${options.deliveryOpen ? 1 : 0}:${options.animal ?? ''}`;
-}
-
-function segmentDistance(x: number, y: number, w: Segment): number {
-  const dx = w.x1 - w.x0;
-  const dy = w.y1 - w.y0;
-  const t = Math.max(0, Math.min(1, ((x - w.x0) * dx + (y - w.y0) * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(x - (w.x0 + t * dx), y - (w.y0 + t * dy));
-}
-
-const wallBuckets = new Map<number, Segment[]>();
-
-function bucketKey(x: number, y: number): number {
-  return y * MAP.w + x;
-}
-
-for (const wall of [...MAP.walls, ...MAP.barriers]) {
-  const x0 = Math.max(0, Math.floor(Math.min(wall.x0, wall.x1) - 0.4));
-  const x1 = Math.min(MAP.w - 1, Math.floor(Math.max(wall.x0, wall.x1) + 0.4));
-  const y0 = Math.max(0, Math.floor(Math.min(wall.y0, wall.y1) - 0.4));
-  const y1 = Math.min(MAP.h - 1, Math.floor(Math.max(wall.y0, wall.y1) + 0.4));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const key = bucketKey(x, y);
-      const bucket = wallBuckets.get(key) ?? [];
-      bucket.push(wall);
-      wallBuckets.set(key, bucket);
+function buildField(index: SpatialIndex, extra: Rect[], allow: (x: number, y: number) => boolean): Float32Array {
+  const field = new Float32Array(GW * GH);
+  for (let i = 0; i < field.length; i++) {
+    const { x, y } = cellCenter(i);
+    if (!allow(x, y)) {
+      field[i] = 0;
+      continue;
     }
+    let d = index.clearance(x, y);
+    for (const r of extra) d = Math.min(d, distToRect(x, y, r));
+    field[i] = Math.min(MAXC, d);
   }
+  return field;
 }
 
-function onGate(
-  x: number,
-  y: number,
-  gate: { orientation: 'horizontal' | 'vertical'; coord: number; opening: { start: number; end: number } },
-): boolean {
-  if (gate.orientation === 'horizontal') {
-    return Math.abs(y - gate.coord) < 0.4 && x > gate.opening.start - 0.3 && x < gate.opening.end + 0.3;
+// ---------------------------------------------------------------------------
+// Поля зазора для слонов (ворота закрыты / открыты) и для кипера
+// ---------------------------------------------------------------------------
+
+const doorRects = DOORS.map((d) => d.rect);
+const inElephantZone = (x: number, y: number) => zoneAt(x, y) !== null;
+
+let elephantFields: { closed: Float32Array; open: Float32Array } | null = null;
+
+function elephantField(gateOpen: boolean): Float32Array {
+  if (!elephantFields) {
+    elephantFields = {
+      closed: buildField(elephantIndex, [GATE, ...doorRects], inElephantZone),
+      open: buildField(elephantIndex, doorRects, inElephantZone),
+    };
   }
-  return Math.abs(x - gate.coord) < 0.4 && y > gate.opening.start - 0.3 && y < gate.opening.end + 0.3;
+  return gateOpen ? elephantFields.open : elephantFields.closed;
 }
 
-export function walkable(x: number, y: number, rawOptions: RouteOptions = EMPTY): boolean {
-  const options = optionsOf(rawOptions);
-  if (x < 0.4 || y < 0.4 || x > MAP.w - 0.4 || y > MAP.h - 0.4) return false;
-  if (x < MAP.forest.x1 + 0.3) return false;
+export function elephantClearance(x: number, y: number, gateOpen: boolean): number {
+  if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+  return elephantField(gateOpen)[cellIndex(x, y)];
+}
 
-  const truckYard = MAP.areas.truckYard;
-  if (x >= truckYard.x0 && x < truckYard.x1 && y >= truckYard.y0 && y < truckYard.y1 && !options.deliveryOpen) return false;
-  if (complexAt(x, y) !== null && options.animal && complexAt(x, y) !== options.animal) return false;
+// Точная проверка позиции слона (между узлами сетки)
+export function elephantCanStand(x: number, y: number, r: number, gateOpen: boolean): boolean {
+  if (zoneAt(x, y) === null) return false;
+  let d = elephantIndex.clearance(x, y);
+  if (!gateOpen) d = Math.min(d, distToRect(x, y, GATE));
+  for (const door of doorRects) d = Math.min(d, distToRect(x, y, door));
+  return d >= r;
+}
 
-  for (const gate of MAP.gates) {
-    if (!options.gates?.[gate.id] && onGate(x, y, gate)) return false;
+// Кипер: двери открыты или заперты — четыре варианта поля, строятся по требованию
+const keeperFields = new Map<string, Float32Array>();
+
+export interface KeeperNavState {
+  gateOpen: boolean;
+  barnDoor: boolean;
+  paddockDoor: boolean;
+}
+
+function keeperKey(s: KeeperNavState): string {
+  return `${s.gateOpen ? 1 : 0}${s.barnDoor ? 1 : 0}${s.paddockDoor ? 1 : 0}`;
+}
+
+function keeperField(s: KeeperNavState): Float32Array {
+  const key = keeperKey(s);
+  let f = keeperFields.get(key);
+  if (!f) {
+    const extra: Rect[] = [];
+    if (!s.gateOpen) extra.push(GATE);
+    for (const d of DOORS) if (!(d.id === 'barnDoor' ? s.barnDoor : s.paddockDoor)) extra.push(d.rect);
+    const blockedZone = (x: number, y: number) => {
+      const z = zoneAt(x, y);
+      if (z === 'barn' && !s.barnDoor) return false;
+      if (z === 'paddock' && !s.paddockDoor) return false;
+      return !inEllipse(POOL, x, y, 0.3);
+    };
+    f = buildField(keeperIndex, extra, (x, y) => x > 0.5 && y > 0.5 && x < W - 0.5 && y < H - 0.5 && blockedZone(x, y));
+    keeperFields.set(key, f);
   }
-  if (!options.deliveryOpen && onGate(x, y, MAP.deliveryGate)) return false;
+  return f;
+}
 
-  if (options.animal) {
-    for (const passage of MAP.staffPassages) {
-      if (passage.group !== options.animal) continue;
-      if (onGate(x, y, passage)) return false;
+// ---------------------------------------------------------------------------
+// A* по сетке с порогом зазора
+// ---------------------------------------------------------------------------
+
+class Heap {
+  private items: number[] = [];
+  private prio: number[] = [];
+  get size(): number {
+    return this.items.length;
+  }
+  push(item: number, p: number): void {
+    const items = this.items;
+    const prio = this.prio;
+    let i = items.length;
+    items.push(item);
+    prio.push(p);
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (prio[parent] <= p) break;
+      items[i] = items[parent];
+      prio[i] = prio[parent];
+      i = parent;
     }
+    items[i] = item;
+    prio[i] = p;
   }
-
-  const nearbyWalls = wallBuckets.get(bucketKey(Math.floor(x), Math.floor(y))) ?? [];
-  for (const wall of nearbyWalls) if (segmentDistance(x, y, wall) < 0.3) return false;
-
-  const dump = MAP.stations.dump;
-  if (Math.abs(x - dump.x) < dump.w / 2 + 0.3 && Math.abs(y - dump.y) < dump.h / 2 + 0.3) return false;
-  if (!options.animal) {
-    for (const pool of MAP.pools) {
-      const dx = (x - pool.x) / pool.rx;
-      const dy = (y - pool.y) / pool.ry;
-      if (dx * dx + dy * dy < 1) return false;
-    }
-  }
-  return true;
-}
-
-const GRID = 0.5;
-const GRID_W = Math.round(MAP.w / GRID);
-const GRID_H = Math.round(MAP.h / GRID);
-const grids = new Map<string, Uint8Array>();
-const routes = new Map<string, Point[]>();
-
-function gridFor(options: NavigationOptions): Uint8Array {
-  const key = optionsKey(options);
-  let grid = grids.get(key);
-  if (!grid) {
-    grid = new Uint8Array(GRID_W * GRID_H);
-    for (let y = 0; y < GRID_H; y++) {
-      for (let x = 0; x < GRID_W; x++) {
-        grid[y * GRID_W + x] = walkable((x + 0.5) * GRID, (y + 0.5) * GRID, options) ? 1 : 0;
+  pop(): number {
+    const items = this.items;
+    const prio = this.prio;
+    const top = items[0];
+    const lastItem = items.pop()!;
+    const lastPrio = prio.pop()!;
+    if (items.length) {
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        if (l >= items.length) break;
+        const r = l + 1;
+        const c = r < items.length && prio[r] < prio[l] ? r : l;
+        if (prio[c] >= lastPrio) break;
+        items[i] = items[c];
+        prio[i] = prio[c];
+        i = c;
       }
+      items[i] = lastItem;
+      prio[i] = lastPrio;
     }
-    grids.set(key, grid);
+    return top;
   }
-  return grid;
 }
 
-function clearPath(a: Point, b: Point, options: NavigationOptions): boolean {
-  const steps = Math.ceil(Math.hypot(a.x - b.x, a.y - b.y) / 0.2);
-  for (let i = 1; i <= steps; i++) {
-    const x = a.x + ((b.x - a.x) * i) / steps;
-    const y = a.y + ((b.y - a.y) * i) / steps;
-    if (!walkable(x, y, options)) return false;
-  }
-  return true;
-}
+const gScore = new Float32Array(GW * GH);
+const cameFrom = new Int32Array(GW * GH);
+const stamp = new Uint32Array(GW * GH);
+let stampId = 1;
 
-type FrontierEntry = [score: number, node: number];
-
-function pushFrontier(frontier: FrontierEntry[], entry: FrontierEntry): void {
-  let i = frontier.length;
-  frontier.push(entry);
-  while (i > 0) {
-    const parent = Math.floor((i - 1) / 2);
-    if (frontier[parent][0] <= entry[0]) break;
-    frontier[i] = frontier[parent];
-    i = parent;
-  }
-  frontier[i] = entry;
-}
-
-function popFrontier(frontier: FrontierEntry[]): FrontierEntry | undefined {
-  const first = frontier[0];
-  const last = frontier.pop();
-  if (!first || !last || !frontier.length) return first;
-  let i = 0;
-  while (true) {
-    const left = i * 2 + 1;
-    if (left >= frontier.length) break;
-    const right = left + 1;
-    const child = right < frontier.length && frontier[right][0] < frontier[left][0] ? right : left;
-    if (frontier[child][0] >= last[0]) break;
-    frontier[i] = frontier[child];
-    i = child;
-  }
-  frontier[i] = last;
-  return first;
-}
-
-function node(p: Point): number {
-  const x = Math.max(0, Math.min(GRID_W - 1, Math.floor(p.x / GRID)));
-  const y = Math.max(0, Math.min(GRID_H - 1, Math.floor(p.y / GRID)));
-  return y * GRID_W + x;
-}
-
-function nearestWalkableNode(p: Point, grid: Uint8Array): number | null {
-  const center = node(p);
-  if (grid[center]) return center;
-  const cx = center % GRID_W;
-  const cy = Math.floor(center / GRID_W);
-  for (let radius = 1; radius <= 4; radius++) {
-    let best: number | null = null;
-    let bestDistance = Infinity;
-    for (let y = Math.max(0, cy - radius); y <= Math.min(GRID_H - 1, cy + radius); y++) {
-      for (let x = Math.max(0, cx - radius); x <= Math.min(GRID_W - 1, cx + radius); x++) {
-        const candidate = y * GRID_W + x;
-        if (!grid[candidate]) continue;
-        const distance = Math.hypot((x + 0.5) * GRID - p.x, (y + 0.5) * GRID - p.y);
-        if (distance < bestDistance) {
-          best = candidate;
-          bestDistance = distance;
+function nearestOpen(field: Float32Array, i: number, need: number): number {
+  if (field[i] >= need) return i;
+  const cx = i % GW;
+  const cy = Math.floor(i / GW);
+  for (let rad = 1; rad <= 8; rad++) {
+    let best = -1;
+    let bestD = Infinity;
+    for (let y = cy - rad; y <= cy + rad; y++) {
+      for (let x = cx - rad; x <= cx + rad; x++) {
+        if (x < 0 || y < 0 || x >= GW || y >= GH) continue;
+        if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== rad) continue;
+        const j = y * GW + x;
+        if (field[j] < need) continue;
+        const d = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = j;
         }
       }
     }
-    if (best !== null) return best;
+    if (best >= 0) return best;
   }
-  return null;
+  return -1;
 }
 
-function aStar(from: Point, to: Point, options: NavigationOptions): Point[] {
-  const grid = gridFor(options);
-  const start = nearestWalkableNode(from, grid);
-  const goal = nearestWalkableNode(to, grid);
-  if (start === null || goal === null) return [];
-  const costs = new Map<number, number>([[start, 0]]);
-  const previous = new Map<number, number>();
-  const frontier: FrontierEntry[] = [[0, start]];
-  const visited = new Set<number>();
-  const heuristic = (n: number) =>
-    Math.hypot((n % GRID_W) - (goal % GRID_W), Math.floor(n / GRID_W) - Math.floor(goal / GRID_W));
+function lineClear(field: Float32Array, a: Vec, b: Vec, need: number): boolean {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const n = Math.max(1, Math.ceil(len / 0.25));
+  for (let k = 1; k <= n; k++) {
+    const x = a.x + ((b.x - a.x) * k) / n;
+    const y = a.y + ((b.y - a.y) * k) / n;
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    if (field[cellIndex(x, y)] < need) return false;
+  }
+  return true;
+}
 
-  while (frontier.length) {
-    const [, current] = popFrontier(frontier)!;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    if (current === goal) break;
-    const x = current % GRID_W;
-    const y = Math.floor(current / GRID_W);
+function astar(field: Float32Array, from: Vec, to: Vec, need: number, cost?: (i: number) => number): Vec[] | null {
+  const start = nearestOpen(field, cellIndex(from.x, from.y), need);
+  const goal = nearestOpen(field, cellIndex(to.x, to.y), need);
+  if (start < 0 || goal < 0) return null;
+  stampId++;
+  const open = new Heap();
+  gScore[start] = 0;
+  cameFrom[start] = -1;
+  stamp[start] = stampId;
+  const gx = goal % GW;
+  const gy = Math.floor(goal / GW);
+  const h = (i: number) => {
+    const dx = Math.abs((i % GW) - gx);
+    const dy = Math.abs(Math.floor(i / GW) - gy);
+    return Math.max(dx, dy) + 0.414 * Math.min(dx, dy);
+  };
+  open.push(start, h(start));
+  const closed = new Set<number>();
+  let found = false;
+  let guard = 0;
+  while (open.size && guard++ < 40000) {
+    const cur = open.pop();
+    if (cur === goal) {
+      found = true;
+      break;
+    }
+    if (closed.has(cur)) continue;
+    closed.add(cur);
+    const cx = cur % GW;
+    const cy = Math.floor(cur / GW);
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dy) continue;
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= GRID_W || ny >= GRID_H) continue;
-        const next = ny * GRID_W + nx;
-        if (!grid[next]) continue;
-        if (dx && dy && (!grid[y * GRID_W + nx] || !grid[ny * GRID_W + x])) continue;
-        const cost = (costs.get(current) ?? 0) + (dx && dy ? 1.414 : 1);
-        if (cost < (costs.get(next) ?? Infinity)) {
-          costs.set(next, cost);
-          previous.set(next, current);
-          pushFrontier(frontier, [cost + heuristic(next), next]);
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+        const ni = ny * GW + nx;
+        if (field[ni] < need) continue;
+        if (dx && dy && (field[cy * GW + nx] < need || field[ny * GW + cx] < need)) continue;
+        const step = (dx && dy ? 1.4142 : 1) * (cost ? cost(ni) : 1);
+        const g = gScore[cur] + step;
+        if (stamp[ni] !== stampId || g < gScore[ni]) {
+          stamp[ni] = stampId;
+          gScore[ni] = g;
+          cameFrom[ni] = cur;
+          open.push(ni, g + h(ni));
         }
       }
     }
   }
-
-  if (start !== goal && !previous.has(goal)) return [];
-  const path: Point[] = [to];
-  let current = goal;
-  while (previous.has(current)) {
-    current = previous.get(current)!;
-    if (current !== start) path.unshift({ x: ((current % GRID_W) + 0.5) * GRID, y: (Math.floor(current / GRID_W) + 0.5) * GRID });
+  if (!found) return null;
+  const cells: Vec[] = [];
+  for (let i = goal; i !== -1 && i !== start; i = cameFrom[i]) cells.push(cellCenter(i));
+  cells.reverse();
+  // Сглаживание: от центра стартовой клетки — к самой дальней видимой. Результат зависит
+  // только от клеток, поэтому кеш маршрутов детерминирован (важно для повтора после загрузки)
+  const raw = [cellCenter(start), ...cells];
+  if (field[cellIndex(to.x, to.y)] >= need) raw.push(to);
+  const out: Vec[] = [];
+  let anchor = raw[0];
+  let i = 1;
+  while (i < raw.length) {
+    let j = raw.length - 1;
+    while (j > i && !lineClear(field, anchor, raw[j], need)) j--;
+    out.push(raw[j]);
+    anchor = raw[j];
+    i = j + 1;
   }
-  return path;
+  if (!out.length) out.push(to);
+  return out;
 }
 
-export function route(from: Point, to: Point, rawOptions: RouteOptions = EMPTY): Point[] {
-  const options = optionsOf(rawOptions);
-  if (clearPath(from, to, options)) return [to];
-  const key = `${node(from)}-${node(to)}-${optionsKey(options)}`;
-  let path = routes.get(key);
-  if (!path) {
-    const found = aStar(from, to, options);
-    if (!found.length) return [];
-    path = found.slice(0, -1);
-    if (routes.size > 2000) routes.clear();
-    routes.set(key, path);
+const pathCache = new Map<string, Vec[] | null>();
+
+function poolCost(i: number): number {
+  const c = cellCenter(i);
+  return inEllipse(POOL, c.x, c.y) ? 1.8 : 1;
+}
+
+// Маршрут слона от точки к точке; null — недостижимо (например, ворота закрыты)
+export function elephantRoute(from: Vec, to: Vec, radius: number, gateOpen: boolean): Vec[] | null {
+  const field = elephantField(gateOpen);
+  const need = Math.round(radius * 20) / 20;
+  if (lineClear(field, from, to, need) && field[cellIndex(to.x, to.y)] >= need) return [to];
+  const key = `${cellIndex(from.x, from.y)}:${cellIndex(to.x, to.y)}:${need}:${gateOpen ? 1 : 0}`;
+  let path = pathCache.get(key);
+  if (path === undefined) {
+    path = astar(field, from, to, need, poolCost);
+    if (pathCache.size > 800) pathCache.clear();
+    pathCache.set(key, path);
   }
-  const points = [...path, to];
-  while (points.length > 1 && clearPath(from, points[1], options)) points.shift();
-  return points;
+  if (!path) return null;
+  // Путь из кеша начинался из центра клетки: срезаем видимые точки от фактической позиции
+  const pts = path.map((p) => ({ x: p.x, y: p.y }));
+  while (pts.length > 1 && lineClear(field, from, pts[1], need)) pts.shift();
+  return pts;
 }
 
-export function routeForAnimal(from: Point, to: Point, group: ComplexId, gates: Record<ComplexId, boolean>): Point[] {
-  return route(from, to, { animal: group, gates });
+export function keeperRoute(from: Vec, to: Vec, s: KeeperNavState): Vec[] | null {
+  const field = keeperField(s);
+  const need = 0.34;
+  if (lineClear(field, from, to, need)) return [to];
+  return astar(field, from, to, need);
 }
 
-export function complexBounds(group: ComplexId): typeof COMPLEXES[ComplexId]['bounds'] {
-  return COMPLEXES[group].bounds;
+export function keeperFieldAt(x: number, y: number, s: KeeperNavState): number {
+  return keeperField(s)[cellIndex(x, y)];
 }
 
-export function isOutdoorWalkable(x: number, y: number, group: ComplexId, gates: Record<ComplexId, boolean>): boolean {
-  if (complexAt(x, y) !== group) return false;
-  if (!inPaddock(x, y) && !inBarn(x, y)) return false;
-  return walkable(x, y, { animal: group, gates });
+// Ближайшая точка, где слон с таким радиусом может стоять
+export function nearestStandable(p: Vec, radius: number, gateOpen: boolean): Vec | null {
+  const field = elephantField(gateOpen);
+  const i = nearestOpen(field, cellIndex(p.x, p.y), radius);
+  if (i < 0) return null;
+  if (field[cellIndex(p.x, p.y)] >= radius) return { x: p.x, y: p.y };
+  return cellCenter(i);
+}
+
+// Достижимы ли зоны друг из друга
+export function zonesConnected(a: ZoneId, b: ZoneId, gateOpen: boolean): boolean {
+  return a === b || gateOpen;
+}
+
+// Случайные точки по зоне выбирают из списка открытых клеток — заранее посчитанного
+const openCellsCache = new Map<string, Vec[]>();
+
+export function openCells(zone: ZoneId, radius: number): Vec[] {
+  // Поле зазора ограничено ~1.2 м, поэтому порог тоже ограничиваем: иначе крупной слонихе «негде встать»
+  const need = Math.min(1.15, Math.round(radius * 10) / 10);
+  const key = `${zone}:${need}`;
+  let list = openCellsCache.get(key);
+  if (!list) {
+    const field = elephantField(false);
+    list = [];
+    for (let i = 0; i < field.length; i++) {
+      if (field[i] < need) continue;
+      const c = cellCenter(i);
+      if (zoneAt(c.x, c.y) === zone) list.push(c);
+    }
+    openCellsCache.set(key, list);
+  }
+  return list;
 }

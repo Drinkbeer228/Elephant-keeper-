@@ -1,92 +1,54 @@
-import { createShift, tick, availableAction, type State } from '../src/sim';
-import { route } from '../src/dev/bot';
-import { advance } from '../src/sim';
-import { profileOf } from '../src/sim/elephants';
-import { basinsOnRack } from '../src/sim/items';
-import { MAP, type StationId } from '../src/data/map';
+import { createState, runMinutes, step, availableActions, NO_INPUT, type State, type Traits, type StepInput } from '../src/sim';
+import { STATIONS, type StationId } from '../src/data/facility';
 import type { Elephant } from '../src/sim/types';
 
-// Смена без ночной грязи
-export function cleanShift(seed = 1): State {
-  const s = createShift(seed, { mess: false });
-  s.log = [];
-  s.partner.timer = 1e9;
-  s.musthEventsRemaining = 0;
-  s.tires.forEach((tire) => (tire.cooldown = Number.POSITIVE_INFINITY));
+export function game(seed = 1, herd = 3, overrides?: Partial<Traits>[], mess = false): State {
+  const s = createState({ seed, herdSize: herd, overrides, mess });
+  s.journal = [];
   return s;
 }
 
-export function el(s: State, id: string): Elephant {
-  return s.elephants.find((e) => e.id === id)!;
+export function el(s: State, i: number): Elephant {
+  return s.elephants[i];
 }
 
 export function at(s: State, x: number, y: number): void {
-  s.player.x = x;
-  s.player.y = y;
+  s.keeper.x = x;
+  s.keeper.y = y;
 }
 
-// Нажать «Действие». Если там меню — выбрать пункт по началу его названия
-export function act(s: State, pick?: string): string | undefined {
-  const a = availableAction(s);
-  if (a?.choices && pick !== undefined) {
-    const i = a.choices.findIndex((c) => c.label.startsWith(pick));
-    tick(s, 0, [{ type: 'action', choice: i }]);
-    return a.choices[i]?.label;
-  }
-  tick(s, 0, [{ type: 'action' }]);
-  return a?.label;
+export function atStation(s: State, id: StationId): void {
+  const p = STATIONS[id].keeper;
+  at(s, p.x, p.y);
 }
 
-// Встать рядом со станцией: обычно сверху; у стойки — справа, у раковины — снизу (сверху стена)
-export function stand(s: State, id: StationId): void {
-  const st = MAP.stations[id];
-  if (id === 'rack' || id === 'basinRack') at(s, st.x + st.w / 2 + 0.6, st.y);
-  else if (id === 'vegRack') at(s, st.x - st.w / 2 - 0.5, st.y);
-  else if (id === 'wash') at(s, st.x, st.y + st.h / 2 + 0.5);
-  else at(s, st.x, st.y - st.h / 2 - 0.5);
+export function actions(s: State): string[] {
+  return availableActions(s).map((a) => a.id);
 }
 
-// Заморозить слониху на месте, чтобы она не уходила
-export function hold(e: Elephant, x: number, y: number): void {
-  e.x = e.tx = x;
-  e.y = e.ty = y;
-  e.state = 'idle';
-  e.timer = 1e9;
+// Выполнить действие (по точному id или префиксу) и дождаться окончания работы
+export function act(s: State, idOrPrefix: string): boolean {
+  const list = availableActions(s);
+  const a = list.find((x) => x.id === idOrPrefix) ?? list.find((x) => x.id.startsWith(idOrPrefix));
+  if (!a || !a.enabled) return false;
+  step(s, { ...NO_INPUT, actions: [a.id] });
+  let guard = 0;
+  while (s.keeper.task && guard++ < 2000) step(s);
+  return true;
 }
 
-export function texts(s: State): string {
-  return s.log.map((l) => l.text).join('\n');
+export function walk(s: State, dx: number, dy: number, seconds: number, run = false): void {
+  const input: StepInput = { move: { x: dx, y: dy }, run, actions: [], cancel: false };
+  const n = Math.round(seconds * 30);
+  for (let i = 0; i < n; i++) step(s, input);
 }
 
-// Довести кипера (и тачку, если он её везёт) до точки по маршруту бота: кадры по 1/30 с, не дольше минуты
-export function driveTo(s: State, goal: { x: number; y: number }): void {
-  for (let i = 0; i < 30 * 60; i++) {
-    const p = s.player;
-    if (Math.hypot(goal.x - p.x, goal.y - p.y) < 0.3) return;
-    const w = route(p, goal)[0];
-    tick(s, 1 / 30, [{ type: 'move', dx: w.x - p.x, dy: w.y - p.y }]);
-  }
+// Заморозить слона в точке (тесты, где мешает его собственная жизнь)
+export function park(e: Elephant, x: number, y: number): void {
+  e.x = x;
+  e.y = y;
+  e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 1e6, doStart: 0, forced: true, target: null, key: 'idle' };
+  e.path = [];
 }
 
-// Каша к 13:00 готова: слонихи отведены в угол, кипер у кормовой
-export function kashaReady(seed = 1): State {
-  const s = cleanShift(seed);
-  s.elephants.forEach((e) => hold(e, 6, 3));
-  advance(s, 280);
-  stand(s, 'stove');
-  act(s);
-  advance(s, 21);
-  return s;
-}
-
-// Взять со стеллажа таз с едой и поставить на место слонихи
-export function serve(s: State, elephantId: string): void {
-  const b = basinsOnRack(s).find((x) => x.food && x.owner === elephantId)!;
-  at(s, b.x + 0.5, b.y);
-  const elephant = s.elephants.find((x) => x.id === elephantId)!;
-  const food = b.food === 'kasha' ? 'таз с кашей' : 'таз с овощами';
-  act(s, `Взять: ${food} для ${profileOf(elephant).name}`);
-  const slot = profileOf(elephant).slot;
-  at(s, slot.x, slot.y + 0.9);
-  act(s);
-}
+export { runMinutes, step };

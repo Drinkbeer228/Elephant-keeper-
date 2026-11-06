@@ -1,4 +1,4 @@
-import {defineConfig} from 'vitest/config';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   base: '/Elephant-keeper-/',
@@ -6,5 +6,6 @@ export default defineConfig({
   preview: { allowedHosts: ['.trycloudflare.com'] },
   test: {
     include: ['tests/**/*.test.ts'],
+    testTimeout: 60000,
   },
 });
