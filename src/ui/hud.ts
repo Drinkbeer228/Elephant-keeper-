@@ -1,19 +1,24 @@
-// Интерфейс: верхняя строка (время, смена, скорость), карточки стада, контекстное действие,
-// уведомления, осмотр слона, журнал, меню, итог смены. Мир остаётся главным — панели компактны.
+// Интерфейс: верхняя строка (время, смена, скорость), карточки стада, действия рядом (строка и
+// панель Q), уведомления, осмотр слона, журнал смены с рационом, меню с настройками, итог смены.
+// Мир остаётся главным — панели компактны.
 
 import {
+  bodyDirt,
   characterHints,
   clockText,
   describeCharacter,
+  dietOf,
   heldLabel,
   minuteOfDay,
   pressingNeed,
   shiftDay,
   signalClarity,
+  signalHabitText,
   slotInfo,
   temperature,
   TRAIT_KEYS,
   TRAIT_LABELS,
+  tubKg,
   wellbeing,
   bond,
   type ActionOption,
@@ -27,6 +32,8 @@ import {
 } from '../sim';
 import { CAPACITY } from '../data/facility';
 import { KEEPER } from '../data/balance';
+import { MEALS, VEG_LABEL, vegPlan, type VegKind } from '../data/rations';
+import { BIND_LABEL, keyName, type BindAction } from '../input';
 import { ICON } from './icons';
 import { portrait } from './portrait';
 
@@ -41,10 +48,10 @@ export interface HudHandlers {
   continueGame: () => boolean;
   save: (slot: SlotId) => string;
   load: (slot: SlotId) => string | null;
-  exportSave: () => void;
-  importSave: (file: File) => void;
   toggleSound: () => boolean;
   soundMuted: () => boolean;
+  volume: () => number;
+  setVolume: (v: number) => void;
   toggleNames: () => boolean;
   namesOn: () => boolean;
   closeReport: () => void;
@@ -52,6 +59,9 @@ export interface HudHandlers {
   overview: () => void;
   legacyCount: () => number;
   clearLegacy: () => void;
+  binds: () => Record<BindAction, string[]>;
+  rebind: (a: BindAction, done: () => void) => void;
+  resetBinds: () => void;
 }
 
 const NEED_LABELS: Record<NeedKey, string> = {
@@ -105,11 +115,14 @@ const GOING: Partial<Record<ActivityKind, string>> = {
   bathe: 'идёт к бассейну',
   dust: 'идёт к песку',
   play: 'идёт играть',
+  shake: 'идёт к яблоне',
+  manipulate: 'идёт к вещи',
 };
 
 function doingText(e: Elephant): string {
-  if (e.lying) return 'спит лёжа';
-  if (e.act.phase === 'go' && !/^(идёт|выходит)/.test(e.act.note)) return GOING[e.act.kind] ?? e.act.note;
+  if (e.lying) return e.act.kind === 'lie' ? 'лежит по просьбе' : 'спит лёжа';
+  if (e.act.phase === 'go' && !/^(идёт|выходит|уносит)/.test(e.act.note)) return GOING[e.act.kind] ?? e.act.note;
+  if (e.tipsy > 0.35) return `${e.act.note} (захмелела)`;
   return e.act.note;
 }
 
@@ -135,14 +148,19 @@ export class Hud {
   private toasts: { el: HTMLElement; until: number }[] = [];
   private cardsKey = '';
   private bannerKey = '__init__';
+  private panelKey = '';
   private inspectId: string | null = null;
   private inspectKey = '';
   private journalOpen = false;
   private journalKey = '';
+  private panelOpen = false;
   private modal: 'title' | 'menu' | 'report' | null = null;
   private lastSpeed = 1;
   private herdChoice = 3;
+  private state: State | null = null;
   actions: ActionOption[] = [];
+  bannerList: ActionOption[] = [];
+  panelList: ActionOption[] = [];
 
   constructor(root: HTMLElement, private h: HudHandlers) {
     root.innerHTML = `
@@ -156,20 +174,21 @@ export class Hud {
         </div>
         <div class="grow"></div>
         <div class="seg" role="group" aria-label="Скорость времени" data-r="speed">
-          <button data-speed="0" title="Пауза (P)" aria-label="Пауза">${ICON.pause}</button>
-          <button data-speed="1" title="Обычная скорость (T)">1×</button>
-          <button data-speed="2" title="Быстрее (T)">2×</button>
-          <button data-speed="4" title="Ещё быстрее (T)">4×</button>
+          <button data-speed="0" title="Пауза" aria-label="Пауза">${ICON.pause}</button>
+          <button data-speed="1" title="Обычная скорость">1×</button>
+          <button data-speed="2" title="Быстрее">2×</button>
+          <button data-speed="4" title="Ещё быстрее">4×</button>
         </div>
-        <button class="btn icon" data-r="mapBtn" title="Обзор всей территории (Tab)" aria-label="Обзор карты">${ICON.map}</button>
-        <button class="btn" data-r="journalBtn" title="Журнал смены (J)"><span class="ico">${ICON.journal}</span><span class="lbl">Журнал</span></button>
-        <button class="btn icon" data-r="soundBtn" title="Звук (M)" aria-label="Звук">${ICON.sound}</button>
-        <button class="btn icon" data-r="menuBtn" title="Меню и сохранения (Esc)" aria-label="Меню">${ICON.menu}</button>
+        <button class="btn icon" data-r="mapBtn" title="Обзор всей территории" aria-label="Обзор карты">${ICON.map}</button>
+        <button class="btn" data-r="journalBtn" title="Журнал смены и рацион"><span class="ico">${ICON.journal}</span><span class="lbl">Журнал</span></button>
+        <button class="btn icon" data-r="soundBtn" title="Звук" aria-label="Звук">${ICON.sound}</button>
+        <button class="btn icon" data-r="menuBtn" title="Меню, сохранения и настройки" aria-label="Меню">${ICON.menu}</button>
       </header>
       <div class="toasts" data-r="toasts" aria-live="polite"></div>
       <aside class="herd" data-r="herd" aria-label="Стадо"></aside>
       <aside class="drawer" data-r="inspect" hidden></aside>
       <aside class="drawer right" data-r="journal" hidden></aside>
+      <section class="panel" data-r="panel" hidden aria-label="Все действия рядом"></section>
       <footer class="bottom">
         <div class="pill held" data-r="held"></div>
         <div class="banner" data-r="banner"></div>
@@ -181,8 +200,9 @@ export class Hud {
       <div class="touch" data-r="touch">
         <div class="stick" data-r="stick"><div class="knob" data-r="knob"></div></div>
         <div class="touch-btns">
+          <button class="btn round small" data-r="tMore" aria-label="Все действия рядом">${ICON.dots}</button>
           <button class="btn round small" data-r="tDrop" aria-label="Положить вещь">${ICON.drop2}</button>
-          <button class="btn round primary" data-r="tAct" aria-label="Действие">${ICON.hand}</button>
+          <button class="btn round primary" data-r="tAct" aria-label="Главное действие">${ICON.hand}</button>
         </div>
       </div>
       <div class="modal-wrap" data-r="modal" hidden></div>
@@ -193,7 +213,7 @@ export class Hud {
       if (b?.dataset.speed) this.h.speed(Number(b.dataset.speed));
     });
     this.refs.journalBtn.addEventListener('click', () => this.toggleJournal());
-    this.refs.soundBtn.addEventListener('click', () => this.updateSoundBtn(this.h.toggleSound()));
+    this.refs.soundBtn.addEventListener('click', () => this.updateSound(this.h.toggleSound()));
     this.refs.menuBtn.addEventListener('click', () => this.openMenu());
     this.refs.mapBtn.addEventListener('click', () => this.h.overview());
     this.refs.zoomIn.addEventListener('click', () => this.h.zoom(1.15));
@@ -205,6 +225,14 @@ export class Hud {
     this.refs.banner.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
       if (b) this.h.action(b.dataset.action!);
+      else if ((e.target as HTMLElement).closest('[data-more]')) this.togglePanel();
+    });
+    this.refs.panel.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+      if (b) {
+        this.h.action(b.dataset.action!);
+        if (window.matchMedia('(max-width: 760px)').matches) this.togglePanel(false);
+      } else if ((e.target as HTMLElement).closest('[data-close]')) this.togglePanel(false);
     });
     this.refs.tAct.addEventListener('click', () => {
       const first = this.actions.find((a) => a.enabled);
@@ -214,18 +242,23 @@ export class Hud {
       const d = this.actions.find((a) => a.ref.verb === 'drop');
       if (d) this.h.action(d.id);
     });
-    this.updateSoundBtn(this.h.soundMuted());
+    this.refs.tMore.addEventListener('click', () => this.togglePanel());
+    this.updateSound(this.h.soundMuted());
   }
 
   get modalOpen(): boolean {
     return this.modal !== null;
   }
 
+  get panelShown(): boolean {
+    return this.panelOpen;
+  }
+
   stickElements(): { base: HTMLElement; knob: HTMLElement } {
     return { base: this.refs.stick, knob: this.refs.knob };
   }
 
-  private updateSoundBtn(muted: boolean): void {
+  updateSound(muted: boolean): void {
     this.refs.soundBtn.innerHTML = muted ? ICON.mute : ICON.sound;
     this.refs.soundBtn.setAttribute('aria-pressed', String(!muted));
   }
@@ -240,6 +273,7 @@ export class Hud {
   // -------------------------------------------------------------------------
 
   render(s: State, actions: ActionOption[], selected: string | null): void {
+    this.state = s;
     this.actions = actions;
     const m = minuteOfDay(s.t);
     const night = m >= 21 * 60 || m < 5.5 * 60;
@@ -251,6 +285,7 @@ export class Hud {
     this.renderHeld(s);
     this.renderCards(s, selected);
     this.renderBanner(s, actions);
+    if (this.panelOpen) this.renderPanel(s, actions);
     if (selected !== this.inspectId) {
       this.inspectId = selected;
       this.inspectKey = '';
@@ -273,8 +308,8 @@ export class Hud {
   private renderHeld(s: State): void {
     const k = s.keeper;
     const b = s.world.barrow;
-    const parts = [`<span class="ico">${ICON.hand}</span>${esc(heldLabel(k.held))}`];
-    if (b.pushed || b.load > 0) parts.push(`тачка ${b.load}/${KEEPER.barrowMax}`);
+    const parts = [`<span class="ico">${ICON.hand}</span>${esc(heldLabel(k.held, s))}`];
+    if (b.pushed || b.load > 0 || b.cargo.length) parts.push(`тачка ${b.load}/${KEEPER.barrowMax}${b.cargo.length ? ` +${b.cargo.length}` : ''}`);
     parts.push(`лакомства ${k.pouch}`);
     const html = parts.join('<span class="dot">·</span>');
     if (this.refs.held.innerHTML !== html) this.refs.held.innerHTML = html;
@@ -305,44 +340,97 @@ export class Hud {
       .join('');
   }
 
+  private keyFor(a: BindAction): string {
+    const k = this.h.binds()[a][0];
+    return k ? keyName(k) : '';
+  }
+
   private renderBanner(s: State, actions: ActionOption[]): void {
     const task = s.keeper.task;
-    const key = task ? `task:${task.label}:${Math.floor((task.elapsed / task.dur) * 10)}` : actions.map((a) => `${a.id}:${a.enabled}:${a.label}`).join('|');
+    const list = actions.filter((a) => a.ref.verb !== 'drop' || actions.length === 1);
+    const drop = actions.find((a) => a.ref.verb === 'drop');
+    const key = task ? `task:${task.label}:${Math.floor((task.elapsed / task.dur) * 10)}` : `${actions.map((a) => `${a.id}:${a.enabled}:${a.label}`).join('|')}:${this.keyFor('action')}`;
     if (key === this.bannerKey) return;
     this.bannerKey = key;
     const b = this.refs.banner;
     if (task) {
       b.className = 'banner busy';
       b.innerHTML = `<span class="spin"></span><span>${esc(task.label)}…</span>`;
+      this.bannerList = [];
       return;
     }
-    const list = actions.filter((a) => a.ref.verb !== 'drop' || actions.length === 1);
-    const drop = actions.find((a) => a.ref.verb === 'drop');
     if (!list.length && !drop) {
       b.className = 'banner idle';
       b.innerHTML = `<span class="muted">Подойди к слону, станции или вещи</span>`;
+      this.bannerList = [];
       return;
     }
     const main = list[0] ?? drop!;
-    const rest = list.slice(1, 4);
+    const rest = list.slice(1, 6);
+    this.bannerList = [main, ...rest];
+    const more = list.length + (drop && main !== drop ? 1 : 0) - this.bannerList.length;
     b.className = 'banner';
     b.innerHTML = `
       <button class="act main ${main.enabled ? '' : 'off'}" data-action="${main.id}" title="${esc(main.reason)}">
-        <kbd>E</kbd><span>${esc(main.label)}</span>${main.enabled ? '' : `<small>${esc(main.reason)}</small>`}
+        <kbd>${esc(this.keyFor('action'))}</kbd><span>${esc(main.label)}</span>${main.enabled ? '' : `<small>${esc(main.reason)}</small>`}
       </button>
       ${rest
-        .map(
-          (a, i) =>
-            `<button class="act ${a.enabled ? '' : 'off'}" data-action="${a.id}" title="${esc(a.reason)}"><kbd>${i + 2}</kbd><span>${esc(a.label)}</span></button>`,
-        )
+        .map((a, i) => `<button class="act ${a.enabled ? '' : 'off'}" data-action="${a.id}" title="${esc(a.reason)}"><kbd>${i + 2}</kbd><span>${esc(a.label)}</span></button>`)
         .join('')}
-      ${drop && main !== drop ? `<button class="act ghost" data-action="${drop.id}"><kbd>Q</kbd><span>${esc(drop.label)}</span></button>` : ''}`;
+      ${drop && main !== drop ? `<button class="act ghost" data-action="${drop.id}"><kbd>${esc(this.keyFor('drop'))}</kbd><span>${esc(drop.label)}</span></button>` : ''}
+      ${more > 0 ? `<button class="act ghost more" data-more><kbd>${esc(this.keyFor('panel'))}</kbd><span>все действия (${list.length + (drop ? 1 : 0)})</span></button>` : ''}`;
   }
 
-  // Действия по клавишам: E — главное, 2…6 — остальные, Q — положить
+  // Действия по клавишам: главное, 2…6 — остальные в строке; в открытой панели — по номерам панели
   actionForKey(index: number): ActionOption | undefined {
-    const list = this.actions.filter((a) => a.ref.verb !== 'drop' || this.actions.length === 1);
-    return list[index];
+    if (this.panelOpen) return this.panelList[index];
+    return this.bannerList[index];
+  }
+
+  // -------------------------------------------------------------------------
+  // Панель «все действия рядом» (Q)
+  // -------------------------------------------------------------------------
+
+  togglePanel(force?: boolean): void {
+    this.panelOpen = force ?? !this.panelOpen;
+    this.refs.panel.hidden = !this.panelOpen;
+    this.panelKey = '';
+    if (this.panelOpen && this.state) this.renderPanel(this.state, this.actions);
+  }
+
+  private renderPanel(s: State, actions: ActionOption[]): void {
+    const key = `${actions.map((a) => `${a.id}:${a.enabled}:${a.label}:${a.reason}`).join('|')}:${s.keeper.task ? 1 : 0}`;
+    if (key === this.panelKey) return;
+    this.panelKey = key;
+    // Группы по цели: ближние — выше; внутри группы — по важности
+    const groups = new Map<string, ActionOption[]>();
+    for (const a of actions) {
+      const g = a.group || 'Рядом';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g)!.push(a);
+    }
+    const ordered = [...groups.entries()].sort((a, b) => Math.min(...a[1].map((x) => x.dist)) - Math.min(...b[1].map((x) => x.dist)) || Math.max(...b[1].map((x) => x.priority)) - Math.max(...a[1].map((x) => x.priority)));
+    this.panelList = [];
+    let n = 0;
+    const html = ordered
+      .map(([g, list]) => {
+        const rows = list
+          .sort((a, b) => Number(b.enabled) - Number(a.enabled) || b.priority - a.priority)
+          .map((a) => {
+            this.panelList.push(a);
+            n++;
+            const num = n <= 9 ? `<kbd>${n}</kbd>` : '<kbd class="blank"></kbd>';
+            return `<button class="prow ${a.enabled ? '' : 'off'}" data-action="${a.id}">${num}<span>${esc(a.label)}${a.enabled ? '' : `<small>${esc(a.reason)}</small>`}</span>${a.timed ? `<i class="timed" title="займёт время">${ICON.clock}</i>` : ''}</button>`;
+          })
+          .join('');
+        const d = Math.min(...list.map((x) => x.dist));
+        return `<div class="pgroup"><h4>${esc(g)}<small>${d > 0.2 ? `${d.toFixed(1)} м` : ''}</small></h4>${rows}</div>`;
+      })
+      .join('');
+    this.refs.panel.innerHTML = `
+      <div class="panel-head"><h3>Что можно сделать здесь</h3><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
+      <div class="panel-body">${html || '<p class="muted">Рядом ничего нет — подойди к слону у решётки, станции или вещи.</p>'}</div>
+      <p class="panel-hint">Действия зависят от того, что в руках, где ты стоишь, кто рядом и в каком они настроении. Цифры — быстрый выбор.</p>`;
   }
 
   // -------------------------------------------------------------------------
@@ -358,7 +446,8 @@ export class Hud {
     }
     box.hidden = false;
     const n = e.needs;
-    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(e.learned.trust * 100)}:${Math.round(e.learned.cooperation * 100)}:${Math.round(e.learned.expectation * 100)}`;
+    const b = e.body;
+    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(e.learned.trust * 100)}:${Math.round(e.learned.cooperation * 100)}:${Math.round(e.learned.expectation * 100)}:${Math.round(e.learned.toilet * 100)}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
     if (key === this.inspectKey) return;
     const first = this.inspectKey === '' || !box.querySelector(`[data-eid="${e.id}"]`);
     this.inspectKey = key;
@@ -367,10 +456,12 @@ export class Hud {
     const friends = s.elephants
       .filter((o) => o !== e)
       .map((o) => ({ o, b: bond(s, e.id, o.id) }))
-      .sort((a, b) => b.b - a.b);
+      .sort((a, c) => c.b - a.b);
     const rel = friends
-      .map(({ o, b }) => `<li><span class="dotc" style="--c:${o.profile.color}"></span>${esc(o.profile.name)} <span class="muted">${b > 0.4 ? 'подруга' : b > 0.1 ? 'ладят' : b > -0.15 ? 'нейтрально' : 'не ладят'}</span></li>`)
+      .map(({ o, b: bd }) => `<li><span class="dotc" style="--c:${o.profile.color}"></span>${esc(o.profile.name)} <span class="muted">${bd > 0.4 ? 'подруга' : bd > 0.1 ? 'ладят' : bd > -0.15 ? 'нейтрально' : 'не ладят'}</span></li>`)
       .join('');
+    const diet = dietOf(p);
+    const skinNote = bodyDirt(e) > 0.45 ? 'грязная — помой' : bodyDirt(e) > 0.2 ? 'немного запачкана' : 'чистая';
     const body = `
       <div class="ins-head" data-eid="${e.id}">
         <div class="portrait" data-r2="portrait"></div>
@@ -385,14 +476,26 @@ export class Hud {
       <div class="grid">
         ${needs.map((k) => `<div class="row"><span>${NEED_LABELS[k]}</span>${bar(n[k], k === 'social' ? 60 : 70)}</div>`).join('')}
       </div>
+      <h3>Кожа <small class="muted">${esc(skinNote)}${e.wet > 0.3 ? ' · мокрая' : ''}</small></h3>
+      <div class="grid">
+        <div class="row"><span>Спина</span>${bar(b.back * 100, 30)}</div>
+        <div class="row"><span>Бока</span>${bar(b.side * 100, 30)}</div>
+        <div class="row"><span>Ноги</span>${bar(b.legs * 100, 40)}</div>
+        <div class="row"><span>Сено на спине</span>${bar(b.hay * 100, 50)}</div>
+        ${b.soap > 0.05 ? `<div class="row"><span>Пена (смыть!)</span>${bar(b.soap * 100, 10)}</div>` : ''}
+      </div>
       <h3>Отношения с кипером</h3>
       <div class="grid">
         <div class="row"><span>Доверие</span>${bar(e.learned.trust * 100, 0, true)}</div>
         <div class="row"><span>Покладистость</span>${bar(e.learned.cooperation * 100, 0, true)}</div>
         <div class="row"><span>Ждёт ответа на сигналы</span>${bar(e.learned.expectation * 100, 0, true)}</div>
+        <div class="row"><span>Приучена к баку</span>${bar(e.learned.toilet * 100, 0, true)}</div>
       </div>
       <h3>Характер</h3>
       <ul class="hints">${characterHints(p).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>
+      <p class="muted small-p">${esc(signalHabitText(p))}</p>
+      <h3>Рацион</h3>
+      <p class="small-p">Сено ${diet.hayKg} кг в сутки, ветки ${diet.branchesKg} кг. Каша в 13:00 и 17:00 — ${esc(diet.porridge.product)}, ${String(diet.porridge.kg).replace('.', ',')} кг (запарить за час). Овощи в 19:00 — свой таз. <span class="muted">По данным SlonVet (рацион «${esc(diet.source)}»).</span></p>
       <details><summary>Черты подробно</summary><div class="grid traits">${TRAIT_KEYS.map((k) => `<div class="row"><span>${TRAIT_LABELS[k]}</span><span class="bar neutral"><i style="width:${(p.traits[k] * 100).toFixed(0)}%"></i></span></div>`).join('')}</div></details>
       ${rel ? `<h3>В стаде</h3><ul class="rel">${rel}</ul>` : ''}
       <div class="ins-actions"><button class="btn" data-focus>${ICON.target}<span>Показать на карте</span></button></div>`;
@@ -407,8 +510,12 @@ export class Hud {
   }
 
   // -------------------------------------------------------------------------
-  // Журнал
+  // Журнал смены: распорядок, рацион по SlonVet, что требует внимания, события
   // -------------------------------------------------------------------------
+
+  openJournal(): void {
+    if (!this.journalOpen) this.toggleJournal();
+  }
 
   toggleJournal(): void {
     this.journalOpen = !this.journalOpen;
@@ -419,19 +526,40 @@ export class Hud {
   }
 
   private renderJournal(s: State): void {
-    const key = `${s.journal.length}:${s.journal[s.journal.length - 1]?.id}:${s.alerts.length}:${Math.floor(s.t / 10)}`;
+    const key = `${s.journal.length}:${s.journal[s.journal.length - 1]?.id}:${s.alerts.length}:${Math.floor(s.t / 5)}`;
     if (key === this.journalKey) return;
     this.journalKey = key;
     const m = minuteOfDay(s.t);
     const routine = [
-      { from: 8 * 60, to: 10 * 60, text: 'Утро: проверь воду, положи сено на выгул, открой ворота' },
-      { from: 10 * 60, to: 12 * 60, text: 'Слоны снаружи — закрой ворота и убери слоновник' },
-      { from: 12 * 60, to: 14 * 60, text: 'Овощи: в кормушку, с руки или разбросать по выгулу' },
-      { from: 14 * 60, to: 17 * 60, text: 'Обогащение: ветки, барабан, душ в жару' },
-      { from: 17 * 60, to: 20 * 60, text: 'Сено на ночь в слоновник, открой ворота — пусть заходят' },
-      { from: 20 * 60, to: 24 * 60, text: 'Закрой ворота, убери выгул' },
-      { from: 0, to: 8 * 60, text: 'Ночь: слоны спят, но могут позвать' },
+      { from: 8 * 60, to: 10 * 60, text: 'Утро: поилки, сено на выгул, ворота на выгул (пульт в проходе)' },
+      { from: 10 * 60, to: 12 * 60, text: 'Слоны снаружи — закрой ворота, убери стойла: лопата, тачка, солома' },
+      { from: 12 * 60, to: 13 * 60, text: 'Запарь кашу к 13:00 — за час (кормокухня)' },
+      { from: 13 * 60, to: 16 * 60, text: 'Каша, мытьё поилок, ветки и бамбук, душ в жару' },
+      { from: 16 * 60, to: 17 * 60 + 30, text: 'Каша к 17:00 — снова запарить за час' },
+      { from: 17 * 60 + 30, to: 19 * 60 + 30, text: 'Овощи к 19:00: нарезать по тазу на каждую, сено на ночь' },
+      { from: 19 * 60 + 30, to: 24 * 60, text: 'Слоны в стойлах, собери тазы, убери выгул' },
+      { from: 0, to: 8 * 60, text: 'Ночь: слоны спят, но могут позвать — бак у тренировочной стенки' },
     ];
+    const day = shiftDay(s.t);
+    const plan = vegPlan(s.seed, day);
+    const planKg = Object.values(plan).reduce((a, b) => a + (b ?? 0), 0);
+    const planText = (Object.entries(plan) as [VegKind, number][]).map(([v, kg]) => `${VEG_LABEL[v].toLowerCase()} ${kg}`).join(', ');
+    const ration = s.elephants
+      .map((e) => {
+        const d = dietOf(e.profile);
+        const porridge = s.world.checks.porridge[e.id] ?? [];
+        const tub = s.world.tubs.find((t) => t.owner === e.id);
+        const vegKg = Math.max(s.world.checks.vegTub[e.id] ?? 0, tub && tub.where !== 'floor' ? tubKg(tub) : 0);
+        const tick = (ok: boolean) => (ok ? '<span class="good-t">✓</span>' : '<span class="muted">○</span>');
+        return `<li><b>${esc(e.profile.name)}</b> <span class="muted">· рацион «${esc(d.source)}»</span>
+          <div class="ration">
+            <span>${tick(porridge.length >= 1)} 13:00 каша: ${esc(d.porridge.product)} ${String(d.porridge.kg).replace('.', ',')} кг</span>
+            <span>${tick(porridge.length >= 2)} 17:00 каша</span>
+            <span>${tick(vegKg >= planKg - 1)} 19:00 овощи: ${Math.round(vegKg)}/${planKg} кг</span>
+            <span class="muted">Сено ${d.hayKg} кг/сут · ветки ${d.branchesKg} кг · 07:00 зерносмесь: ${d.grain.map((g) => `${g.name.toLowerCase()} ${String(g.qty).replace('.', ',')} ${g.unit}`).join(', ')}</span>
+          </div></li>`;
+      })
+      .join('');
     const alerts = s.alerts
       .slice(-6)
       .map((a) => `<li class="${a.severity}">${esc(a.text)}</li>`)
@@ -445,6 +573,9 @@ export class Hud {
       <div class="drawer-head"><h2>Журнал смены</h2><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
       <h3>Распорядок</h3>
       <ul class="routine">${routine.map((r) => `<li class="${m >= r.from && m < r.to ? 'now' : ''}">${esc(r.text)}</li>`).join('')}</ul>
+      <h3>Рацион на сегодня</h3>
+      <p class="muted small-p">${MEALS.map((x) => `${clockText(x.time)} ${x.title.toLowerCase()}`).join(' · ')}. Таз овощей: ${esc(planText)} кг. Данные — SlonVet.</p>
+      <ul class="rations">${ration}</ul>
       ${alerts ? `<h3>Требует внимания</h3><ul class="alerts">${alerts}</ul>` : ''}
       <h3>События</h3>
       <ul class="log">${entries || '<li class="muted">Пока тихо</li>'}</ul>`;
@@ -457,8 +588,9 @@ export class Hud {
 
   pushEvents(events: SimEvent[]): void {
     for (const ev of events) {
+      if (ev.kind === 'openJournal') this.openJournal();
       if (!ev.text) continue;
-      if (ev.severity === 'info' && ev.kind !== 'refuse' && ev.kind !== 'report' && ev.kind !== 'welcome') continue;
+      if (ev.severity === 'info' && !['refuse', 'report', 'welcome', 'tank', 'lie', 'prepDone', 'tipsy'].includes(ev.kind)) continue;
       this.toast(ev.text, ev.severity);
     }
   }
@@ -475,7 +607,7 @@ export class Hud {
   }
 
   // -------------------------------------------------------------------------
-  // Окна: заставка, меню, итог смены
+  // Окна: заставка, меню с настройками, итог смены
   // -------------------------------------------------------------------------
 
   private showModal(kind: 'title' | 'menu' | 'report', html: string): HTMLElement {
@@ -492,24 +624,30 @@ export class Hud {
     this.refs.modal.innerHTML = '';
   }
 
+  private helpHtml(): string {
+    const k = (a: BindAction) => `<kbd>${esc(this.keyFor(a))}</kbd>`;
+    return `<div class="help">
+        <div>${k('up')}${k('left')}${k('down')}${k('right')} / стрелки — идти, ${k('run')} — бежать (пугает нервных)</div>
+        <div>${k('action')} — главное действие, <kbd>2</kbd>…<kbd>6</kbd> — другие, ${k('panel')} — все действия рядом, ${k('drop')} — положить</div>
+        <div>Клик по слону — осмотр · ${k('journal')} — журнал и рацион · ${k('speed')} — скорость · ${k('overview')} — карта</div>
+        <div class="muted">На телефоне: стик, кнопка руки — главное действие, «⋯» — все действия.</div>
+      </div>`;
+  }
+
   openTitle(hasContinue: string | null): void {
     const legacy = this.h.legacyCount();
     const m = this.showModal(
       'title',
       `<div class="title-mark">${ICON.logo}</div>
       <h1>Elephant Keeper</h1>
-      <p class="lead">Смена смотрителя в небольшом слоновнике. Слоны живут своей жизнью: едят, пьют, играют, спят — и зовут тебя, когда без тебя не обойтись. У каждой свой характер, и каждая запоминает, отвечаешь ли ты.</p>
+      <p class="lead">Смена смотрителя в небольшом слоновнике защищённого контакта. Слоны живут своей жизнью: едят, пьют, играют, спят — и зовут тебя, когда без тебя не обойтись. У каждой свой характер, своя манера просить и своя память о том, отвечаешь ли ты.</p>
       ${hasContinue ? `<button class="btn primary wide" data-go="continue">${ICON.play}<span>Продолжить смену</span><small>${esc(hasContinue)}</small></button>` : ''}
       <div class="newgame">
         <span>Новое стадо:</span>
         <div class="seg" data-herd>${Array.from({ length: CAPACITY }, (_, i) => `<button data-n="${i + 1}" class="${i + 1 === this.herdChoice ? 'on' : ''}">${i + 1}</button>`).join('')}</div>
         <button class="btn ${hasContinue ? '' : 'primary'}" data-go="new">Начать</button>
       </div>
-      <div class="help">
-        <div><kbd>WASD</kbd>/<kbd>стрелки</kbd> — идти, <kbd>Shift</kbd> — бежать (пугает нервных)</div>
-        <div><kbd>E</kbd> — действие, <kbd>2</kbd>…<kbd>6</kbd> — другие варианты, <kbd>Q</kbd> — положить</div>
-        <div>Клик по слону — осмотр · <kbd>J</kbd> — журнал · <kbd>T</kbd> — скорость · <kbd>Tab</kbd> — карта</div>
-      </div>
+      ${this.helpHtml()}
       ${legacy ? `<p class="legacy">Найдены сохранения старой пиксельной версии (${legacy}) — с новой игрой они несовместимы. <button class="link" data-legacy>Удалить их</button></p>` : ''}`,
     );
     m.querySelector('[data-herd]')!.addEventListener('click', (e) => {
@@ -539,6 +677,8 @@ export class Hud {
     if (this.modal) return;
     this.h.setPaused(true);
     const slots: SlotId[] = ['auto', 'slot-1', 'slot-2', 'slot-3'];
+    const binds = this.h.binds();
+    const order: BindAction[] = ['action', 'panel', 'drop', 'up', 'down', 'left', 'right', 'run', 'inspect', 'journal', 'pause', 'speed', 'overview', 'recenter', 'zoomIn', 'zoomOut', 'names', 'mute'];
     const m = this.showModal(
       'menu',
       `<div class="drawer-head"><h2>Пауза</h2><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
@@ -550,9 +690,24 @@ export class Hud {
             <div class="slot-btns">${id !== 'auto' ? `<button class="btn small" data-save="${id}">Сохранить</button>` : ''}<button class="btn small" data-load="${id}" ${info.ok ? '' : 'disabled'}>Загрузить</button></div></li>`;
         })
         .join('')}</ul>
-      <div class="row-btns"><button class="btn small" data-export>Скачать .json</button><label class="btn small">Открыть .json<input type="file" accept="application/json,.json" data-import hidden></label></div>
+      <p class="muted small-p">Смена сохраняется автоматически раз в минуту и при сворачивании.</p>
       <h3>Настройки</h3>
       <div class="row-btns"><button class="btn small" data-names>${this.h.namesOn() ? 'Имена над слонами: вкл' : 'Имена над слонами: выкл'}</button><button class="btn small" data-sound>${this.h.soundMuted() ? 'Звук: выкл' : 'Звук: вкл'}</button></div>
+      <label class="vol">Громкость <input type="range" min="5" max="100" step="5" value="${Math.round(this.h.volume() * 100)}" data-vol></label>
+      <h3>Управление</h3>
+      <div class="touch-help small-p">
+        <div><b>Стик</b> — идти; если тянуть за край — бежать (нервных это пугает).</div>
+        <div><b>Рука</b> — главное действие, <b>⋯</b> — все действия рядом, <b>стрелка вниз</b> — положить вещь.</div>
+        <div><b>Касание слона</b> или карточки — осмотр. <b>Два пальца</b> — приблизить или отдалить.</div>
+        <div>Вверху — время, скорость, журнал и это меню. <b>Нарезка овощей</b>: левая половина экрана — взять и бросить, правая — нож.</div>
+      </div>
+      <div class="key-help">
+        <p class="muted small-p">Действия зависят от того, что в руках, у чего стоишь и в каком состоянии слоны. ${esc(this.keyFor('panel'))} — список всего, что можно сделать рядом. Нажми «Изменить», затем нужную клавишу (Esc — отмена).</p>
+        <ul class="binds">${order
+          .map((a) => `<li><span>${esc(BIND_LABEL[a])}</span><span class="keys">${binds[a].map((c) => `<kbd>${esc(keyName(c))}</kbd>`).join(' ') || '<span class="muted">—</span>'}</span><button class="btn small" data-bind="${a}">Изменить</button></li>`)
+          .join('')}</ul>
+        <div class="row-btns"><button class="btn small" data-reset-binds>Сбросить клавиши</button></div>
+      </div>
       <h3>Новое стадо</h3>
       <div class="newgame"><div class="seg" data-herd>${Array.from({ length: CAPACITY }, (_, i) => `<button data-n="${i + 1}" class="${i + 1 === this.herdChoice ? 'on' : ''}">${i + 1}</button>`).join('')}</div><button class="btn danger small" data-new>Начать заново</button></div>
       <p class="muted small-p">Текущая смена при этом не сохраняется — сначала сохрани её в слот.</p>
@@ -574,21 +729,30 @@ export class Hud {
         else this.closeMenu();
       }),
     );
-    m.querySelector('[data-export]')!.addEventListener('click', () => this.h.exportSave());
-    m.querySelector<HTMLInputElement>('[data-import]')!.addEventListener('change', (e) => {
-      const f = (e.target as HTMLInputElement).files?.[0];
-      if (f) {
-        this.h.importSave(f);
-        this.closeMenu();
-      }
-    });
     m.querySelector('[data-names]')!.addEventListener('click', (e) => {
       (e.target as HTMLElement).textContent = this.h.toggleNames() ? 'Имена над слонами: вкл' : 'Имена над слонами: выкл';
     });
     m.querySelector('[data-sound]')!.addEventListener('click', (e) => {
       const muted = this.h.toggleSound();
-      this.updateSoundBtn(muted);
+      this.updateSound(muted);
       (e.target as HTMLElement).textContent = muted ? 'Звук: выкл' : 'Звук: вкл';
+    });
+    m.querySelector<HTMLInputElement>('[data-vol]')!.addEventListener('input', (e) => this.h.setVolume(Number((e.target as HTMLInputElement).value) / 100));
+    m.querySelectorAll<HTMLElement>('[data-bind]').forEach((b) =>
+      b.addEventListener('click', () => {
+        b.textContent = 'Нажми клавишу…';
+        this.h.rebind(b.dataset.bind as BindAction, () => {
+          this.closeModal();
+          this.modal = null;
+          this.openMenu();
+        });
+      }),
+    );
+    m.querySelector('[data-reset-binds]')!.addEventListener('click', () => {
+      this.h.resetBinds();
+      this.closeModal();
+      this.modal = null;
+      this.openMenu();
     });
     m.querySelector('[data-herd]')!.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-n]');
@@ -625,8 +789,8 @@ export class Hud {
       <h2>${r.score} <small>из 100</small></h2>
       <p class="lead">${esc(r.verdict)}</p>
       <table class="rep"><thead><tr><th>Слон</th><th>Самочувствие</th><th>Сон</th><th>Ответ на сигналы</th><th>Доверие</th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="facts"><span>Слоновник чистый на ${r.barnClean}%</span><span>Выгул — ${r.paddockClean}%</span><span>Ответов на сигналы: ${r.responseRate}%</span><span>Лакомств: ${r.treats}</span></div>
-      ${r.notes.length ? `<ul class="notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+      <div class="facts"><span>Стойла чистые на ${r.barnClean}%</span><span>Выгул — ${r.paddockClean}%</span><span>Ответов на сигналы: ${r.responseRate}%</span><span>Лакомств: ${r.treats}</span></div>
+      ${r.notes.length ? `<h3>Замечания сменщика</h3><ul class="notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
       <button class="btn primary wide" data-next>${ICON.play}<span>Следующая смена</span></button>`,
     );
     m.querySelector('[data-next]')!.addEventListener('click', () => {

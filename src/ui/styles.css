@@ -1029,6 +1029,402 @@ details .traits {
 }
 
 /* ---------------------------------------------------------------------------
+   Панель «все действия рядом» (Q / кнопка ⋯)
+   --------------------------------------------------------------------------- */
+
+.panel {
+  position: absolute;
+  left: 50%;
+  bottom: calc(78px + var(--safe-b));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(62vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  z-index: 2;
+  animation: toastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px 6px 16px;
+}
+
+.panel-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.panel-body {
+  overflow-y: auto;
+  padding: 0 10px 8px;
+  display: grid;
+  gap: 8px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.pgroup h4 {
+  margin: 4px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pgroup h4 small {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.prow {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  font: 600 13px var(--font);
+  color: var(--ink);
+  cursor: pointer;
+  min-height: 40px;
+}
+
+.prow:hover {
+  background: #fff;
+  border-color: var(--stone-line);
+}
+
+.prow kbd {
+  min-width: 20px;
+  text-align: center;
+}
+
+.prow kbd.blank {
+  visibility: hidden;
+}
+
+.prow span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.prow small {
+  font-weight: 400;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+}
+
+.prow.off {
+  opacity: 0.62;
+}
+
+.prow .timed {
+  width: 15px;
+  height: 15px;
+  color: var(--ink-muted);
+  display: inline-flex;
+}
+
+.prow .timed svg {
+  width: 100%;
+  height: 100%;
+}
+
+.panel-hint {
+  margin: 0;
+  padding: 8px 16px 12px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  border-top: 1px solid var(--stone-line);
+}
+
+/* Журнал: рацион по слонихам */
+
+.rations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.rations li {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--stone-line);
+}
+
+.ration {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/* Меню: громкость и клавиши */
+
+.vol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.vol input {
+  flex: 1;
+  accent-color: var(--sage);
+  touch-action: pan-x;
+}
+
+.binds {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.binds li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--stone-line);
+  font-size: 12.5px;
+}
+
+.binds .keys {
+  display: flex;
+  gap: 4px;
+}
+
+.touch-help {
+  display: none;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+@media (pointer: coarse) {
+  .touch-help {
+    display: grid;
+  }
+  .key-help {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Нарезка овощей (крупный план)
+   --------------------------------------------------------------------------- */
+
+.toasts {
+  z-index: 5;
+}
+
+.modal-wrap {
+  z-index: 6;
+}
+
+.prep {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: auto;
+  background: #cfd3d6;
+  touch-action: none;
+  transition: opacity 0.3s;
+}
+
+.prep[hidden] {
+  display: none;
+}
+
+.prep.out {
+  opacity: 0;
+}
+
+.prep canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.prep-head {
+  position: absolute;
+  top: calc(10px + var(--safe-t));
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1.5px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.prep-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.prep-title b {
+  font-size: 14px;
+}
+
+.prep-title span {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.prep-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--stone-line);
+  background: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chip i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  border: 1px solid var(--ink);
+}
+
+.chip.now {
+  border-color: var(--sage);
+  box-shadow: inset 0 0 0 1.5px var(--sage);
+}
+
+.chip.done {
+  background: var(--sage-soft);
+  color: var(--sage);
+}
+
+.chip.total {
+  background: var(--ink);
+  color: var(--stone);
+  border-color: var(--ink);
+}
+
+.chip.combo {
+  background: var(--ochre);
+  border-color: #8a6a2a;
+  font-weight: 700;
+}
+
+.prep-sides {
+  position: absolute;
+  left: calc(12px + var(--safe-l));
+  right: calc(12px + var(--safe-r));
+  bottom: calc(28px + var(--safe-b));
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1.5px solid var(--stone-line);
+  border-radius: 12px;
+  font-size: 13px;
+  min-height: 44px;
+}
+
+.side .t {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.side.want {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 3px var(--sage-soft), var(--shadow);
+}
+
+.prep-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(6px + var(--safe-b));
+  margin: 0;
+  padding: 0 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .side kbd.k {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .prep-head {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .chip {
+    font-size: 11px;
+    padding: 2px 7px;
+  }
+  .side {
+    font-size: 12px;
+    padding: 6px 9px;
+    flex-wrap: wrap;
+  }
+}
+
+/* ---------------------------------------------------------------------------
    Сенсорное управление
    --------------------------------------------------------------------------- */
 
@@ -1162,6 +1558,28 @@ details .traits {
   }
   .act span {
     font-size: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .panel {
+    left: calc(8px + var(--safe-l));
+    right: calc(8px + var(--safe-r));
+    width: auto;
+    transform: none;
+    bottom: calc(8px + var(--safe-b));
+    max-height: 72vh;
+    z-index: 4;
+  }
+  .prow {
+    min-height: 46px;
+  }
+  .binds li {
+    grid-template-columns: 1fr auto;
+  }
+  .binds li .btn {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 

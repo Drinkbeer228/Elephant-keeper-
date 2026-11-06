@@ -4,9 +4,9 @@
 import Phaser from 'phaser';
 import { headPos, signalClarity, type Elephant, type State } from '../sim';
 import { STATIONS, TIRE, DRUM } from '../data/facility';
-import { bodyGeom, ELEPHANT_INK } from './art';
+import { bodyGeom, ELEPHANT_INK, rnd } from './art';
 import { D } from './ground';
-import { C, hex, shade } from './palette';
+import { C, hex, mix, shade } from './palette';
 import { ART_SCALE, originOf, PPM } from './textures';
 
 const P = PPM;
@@ -52,6 +52,12 @@ export class ElephantView {
   private earR: Phaser.GameObjects.Image;
   private trunk: Phaser.GameObjects.Graphics;
   private ripple: Phaser.GameObjects.Graphics;
+  private skinFx: Phaser.GameObjects.Graphics;
+  private headFx: Phaser.GameObjects.Graphics;
+  private tuft: Phaser.GameObjects.Image;
+  private stompFoot = -1;
+  private stompT = 0;
+  private skinKey = '';
   readonly name: Phaser.GameObjects.Image;
   private bubble: Phaser.GameObjects.Image;
   private ring: Phaser.GameObjects.Graphics;
@@ -89,11 +95,14 @@ export class ElephantView {
     this.earR = img(`el-earR-${id}`);
     this.headImg = img(`el-head-${id}`);
     this.trunk = scene.add.graphics();
+    this.skinFx = scene.add.graphics();
+    this.headFx = scene.add.graphics();
+    this.tuft = img('hay-tuft').setVisible(false);
     const R = this.geom.headR;
     this.earL.setPosition(-R * 0.05 * P, -R * 0.78 * P);
     this.earR.setPosition(-R * 0.05 * P, R * 0.78 * P);
-    this.headGroup = scene.add.container(this.geom.headX * P, 0, [this.earL, this.earR, this.headImg, this.trunk]);
-    this.root = scene.add.container(e.x * P, e.y * P, [this.ripple, this.feet, this.tail, this.body, this.dustCoat, this.lyingBody, this.headGroup]);
+    this.headGroup = scene.add.container(this.geom.headX * P, 0, [this.earL, this.earR, this.headImg, this.headFx, this.trunk, this.tuft]);
+    this.root = scene.add.container(e.x * P, e.y * P, [this.ripple, this.feet, this.tail, this.body, this.dustCoat, this.lyingBody, this.skinFx, this.headGroup]);
     this.name = img(`el-name-${id}`).setDepth(D.label).setScale(ART_SCALE * 0.85);
     this.bubble = img('bubble-dots').setDepth(D.bubble).setVisible(false);
     this.heading = e.heading;
@@ -101,15 +110,24 @@ export class ElephantView {
     this.lastY = e.y;
   }
 
+  // Сигнал «топаю ногой»: какая нога — личная привычка
+  stomp(foot: string): void {
+    this.stompFoot = foot === 'FR' ? 0 : foot === 'FL' ? 1 : foot === 'HR' ? 2 : 3;
+    this.stompT = 0.6;
+  }
+
   update(e: Elephant, s: State, time: number, dt: number, showNames: boolean): void {
     const t = time + this.seed;
+    this.stompT = Math.max(0, this.stompT - dt);
     const a = e.act;
     const moved = Math.hypot(e.x - this.lastX, e.y - this.lastY);
     this.lastX = e.x;
     this.lastY = e.y;
     this.walkPhase += moved * 3.2 / e.profile.look.size;
     this.heading = angLerp(this.heading, e.heading, Math.min(1, dt * 12));
-    this.root.setPosition(e.x * P, e.y * P).setRotation(this.heading).setDepth(D.actor + e.y / 100);
+    // Захмелевшую слегка покачивает
+    const sway = e.tipsy > 0.05 ? Math.sin(t * 2.1) * 0.07 * e.tipsy : 0;
+    this.root.setPosition(e.x * P, e.y * P).setRotation(this.heading + sway).setDepth(D.actor + e.y / 100);
     this.lieK = lerp(this.lieK, e.lying ? 1 : 0, Math.min(1, dt * 2.5));
     const lying = this.lieK > 0.5;
     this.body.setVisible(!lying);
@@ -159,7 +177,11 @@ export class ElephantView {
           break;
         }
         case 'signal': {
-          if (a.signal === 'attention') {
+          if (e.profile.habits.signal === 'beg' && (a.signal === 'attention' || a.signal === 'food')) {
+            const l = local(s.keeper);
+            want = { reach: 1.6 + Math.sin(t * 5) * 0.15, side: l.ang * 0.8, curl: Math.sin(t * 4) * 0.5, raise: 0 };
+            ears = 0.8;
+          } else if (a.signal === 'attention') {
             const l = local(s.keeper);
             want = { reach: 1.5 + Math.sin(t * 3) * 0.1, side: l.ang * 0.8, curl: 0.1 + Math.sin(t * 2) * 0.15, raise: 0 };
             ears = 0.75;
@@ -226,6 +248,30 @@ export class ElephantView {
           want = { reach: 0.55, side: 0.1, curl: 0.4, raise: 0 };
           ears = 0.35;
           break;
+        case 'toss': {
+          const cyc = (Math.sin(t * 2.6) + 1) / 2;
+          want = cyc > 0.55 ? { reach: 0.6, side: 0.4, curl: 0.8, raise: 1 } : { reach: 1.3, side: Math.sin(t) * 0.5, curl: 0.2, raise: 0 };
+          ears = 0.45;
+          break;
+        }
+        case 'shake': {
+          want = { reach: 1.55, side: Math.sin(t * 9) * 0.18, curl: 0.1, raise: 0.25 + Math.abs(Math.sin(t * 9)) * 0.2 };
+          ears = 0.7 + Math.sin(t * 7) * 0.2;
+          headTurn = Math.sin(t * 9) * 0.12;
+          break;
+        }
+        case 'manipulate': {
+          want = { reach: 1.25 + Math.sin(t * 4) * 0.25, side: Math.sin(t * 3.2) * 0.45, curl: 0.5 + Math.sin(t * 5) * 0.3, raise: 0 };
+          ears = 0.55;
+          headTurn = Math.sin(t * 2.5) * 0.25;
+          break;
+        }
+        case 'lie':
+          want = { reach: 1.0, side: 0.35, curl: 0.6, raise: 0 };
+          ears = 0.3;
+          headTurn = 0.2;
+          tailSwing *= 0.4;
+          break;
         case 'pace':
           headTurn = Math.sin(t * 2.4) * 0.35;
           break;
@@ -234,6 +280,14 @@ export class ElephantView {
       }
     }
     if (a.kind === 'avoid' || (a.kind === 'signal' && a.phase === 'go')) ears = 0.7;
+    if (a.kind === 'signal' && a.phase === 'do' && e.profile.habits.signal === 'stare') {
+      // Молча смотрит на кипера: уши вперёд, хобот опущен
+      const l = local(s.keeper);
+      headTurn = Math.max(-0.45, Math.min(0.45, l.ang * 0.6));
+      want = { reach: 0.6, side: 0, curl: 0.3, raise: 0 };
+      ears = 0.95;
+    }
+    if (e.trunk.kind) want = { reach: 0.7, side: 0.25, curl: 0.9, raise: 0.15 };
     const k = Math.min(1, dt * 5);
     this.pose = {
       reach: lerp(this.pose.reach, want.reach, k),
@@ -262,9 +316,13 @@ export class ElephantView {
       this.earR.setRotation(fold);
       this.earL.setRotation(-fold);
     }
+    // Мокрая кожа заметно темнее; пыль на мокром не держится
     const wet = Math.min(1, e.wet);
-    const tint = wet > 0.02 ? Phaser.Display.Color.GetColor(Math.round(255 - 85 * wet), Math.round(255 - 80 * wet), Math.round(255 - 72 * wet)) : 0xffffff;
+    const tint = wet > 0.02 ? Phaser.Display.Color.GetColor(Math.round(255 - 112 * wet), Math.round(255 - 106 * wet), Math.round(255 - 92 * wet)) : 0xffffff;
     for (const im of [this.body, this.lyingBody, this.headImg, this.earL, this.earR]) im.setTint(tint);
+    this.dustCoat.setAlpha(Math.min(0.55, e.dust * 0.55) * (1 - wet));
+    this.drawSkin(e, lying, t);
+    this.tuft.setVisible(!!e.trunk.kind && !lying);
 
     this.drawFeet(e, walking);
     this.drawTail(tailSwing, tailRaise, lying);
@@ -309,18 +367,90 @@ export class ElephantView {
     const { a, b, cx } = this.geom;
     const s = e.profile.look.size;
     const stride = walking ? 0.22 * s : 0;
+    // Порядок: передняя правая (+y), передняя левая, задняя правая, задняя левая
     const feet = [
       { x: cx + a * 0.52, y: b * 0.74, ph: 0 },
       { x: cx + a * 0.52, y: -b * 0.74, ph: Math.PI },
       { x: cx - a * 0.6, y: b * 0.72, ph: Math.PI },
       { x: cx - a * 0.6, y: -b * 0.72, ph: 0 },
     ];
-    for (const f of feet) {
-      const off = Math.sin(this.walkPhase + f.ph) * stride;
-      g.fillStyle(hex(shade(this.skin, -0.22)), 1);
-      g.fillEllipse((f.x + off) * P, f.y * P, 0.42 * s * P, 0.36 * s * P);
+    const mud = Math.min(1, e.body.legs);
+    const footColor = mix(shade(this.skin, -0.22), '#6b5439', mud * 0.7);
+    feet.forEach((f, i) => {
+      let off = Math.sin(this.walkPhase + f.ph) * stride;
+      let lift = 1;
+      if (i === this.stompFoot && this.stompT > 0) {
+        // Подняла и с силой опустила
+        const k = this.stompT / 0.6;
+        lift = 1 + 0.35 * Math.sin(k * Math.PI);
+        off += 0.12 * Math.sin(k * Math.PI);
+      }
+      g.fillStyle(hex(footColor), 1);
+      g.fillEllipse((f.x + off) * P, f.y * P, 0.42 * s * lift * P, 0.36 * s * lift * P);
       g.lineStyle(0.04 * P, hex(ELEPHANT_INK), 1);
-      g.strokeEllipse((f.x + off) * P, f.y * P, 0.42 * s * P, 0.36 * s * P);
+      g.strokeEllipse((f.x + off) * P, f.y * P, 0.42 * s * lift * P, 0.36 * s * lift * P);
+    });
+  }
+
+  // Состояние кожи: блеск мокрой, грязь на боках и спине, сено на спине, мыльная пена
+  private drawSkin(e: Elephant, lying: boolean, t: number): void {
+    const b = e.body;
+    const key = `${lying ? 1 : 0}:${Math.round(e.wet * 10)}:${Math.round(b.side * 10)}:${Math.round(b.back * 10)}:${Math.round(b.head * 10)}:${Math.round(b.hay * 10)}:${Math.round(b.soap * 10)}`;
+    if (key === this.skinKey && e.wet < 0.02) return;
+    this.skinKey = key;
+    const g = this.skinFx;
+    const hg = this.headFx;
+    g.clear();
+    hg.clear();
+    const { a, b: bb, cx } = this.geom;
+    const r = rnd(e.profile.look.seed % 9973);
+    const yScale = lying ? 1.2 : 1;
+    // Грязь: бурые пятна по бокам, по хребту — со спины
+    const mud = (amount: number, side: number, n: number) => {
+      if (amount < 0.06) return;
+      for (let i = 0; i < n; i++) {
+        const x = cx + (r() - 0.5) * a * 1.5;
+        const y = side === 0 ? (r() - 0.5) * bb * 0.4 : side * bb * (0.35 + r() * 0.45) * yScale;
+        g.fillStyle(hex(i % 2 ? '#6d5a42' : '#7c6648'), Math.min(0.8, amount * 0.9));
+        g.fillEllipse(x * P, y * P, (0.25 + r() * 0.35) * P, (0.14 + r() * 0.2) * P, 14);
+      }
+    };
+    mud(b.side, 1, 6);
+    mud(b.side, -1, 6);
+    mud(b.back, 0, 5);
+    // Сено на спине
+    if (b.hay > 0.05) {
+      g.lineStyle(0.03 * P, hex(C.hay), Math.min(1, b.hay + 0.2));
+      for (let i = 0; i < Math.round(4 + b.hay * 12); i++) {
+        const x = cx + (r() - 0.5) * a * 1.4;
+        const y = (r() - 0.5) * bb * 0.9;
+        const ang = r() * Math.PI;
+        g.lineBetween(x * P, y * P, (x + Math.cos(ang) * 0.28) * P, (y + Math.sin(ang) * 0.28) * P);
+      }
+    }
+    // Пена
+    if (b.soap > 0.05) {
+      for (let i = 0; i < 12; i++) {
+        g.fillStyle(0xffffff, 0.75 * b.soap);
+        g.fillCircle((cx + (r() - 0.5) * a * 1.5) * P, ((r() - 0.5) * bb * 1.4) * P, (0.07 + r() * 0.08) * P);
+      }
+    }
+    // Мокрая кожа блестит
+    if (e.wet > 0.05) {
+      g.lineStyle(0.05 * P, 0xffffff, 0.28 * e.wet);
+      g.beginPath();
+      g.arc((cx - 0.1) * P, 0, a * 0.7 * P, -2.2, -1.1);
+      g.strokePath();
+      g.lineStyle(0.03 * P, 0xffffff, 0.22 * e.wet);
+      g.beginPath();
+      g.arc((cx + 0.2) * P, 0.05 * P, a * 0.5 * P, -2.0, -1.3);
+      g.strokePath();
+      void t;
+    }
+    if (b.head > 0.06) {
+      const R = this.geom.headR;
+      hg.fillStyle(hex('#6d5a42'), Math.min(0.7, b.head));
+      hg.fillEllipse(-R * 0.2 * P, R * 0.3 * P, R * 0.6 * P, R * 0.35 * P, 12);
     }
   }
 
@@ -382,6 +512,7 @@ export class ElephantView {
       left.push({ x: x - (dy / len) * w, y: y + (dx / len) * w });
       right.push({ x: x + (dy / len) * w, y: y - (dx / len) * w });
     }
+    this.tuft.setPosition(tx * P, ty * P);
     const pts = [...left, ...right.reverse()].map((q) => new Phaser.Math.Vector2(q.x * P, q.y * P));
     g.fillStyle(hex(this.skin), 1);
     g.fillPoints(pts, true);
@@ -426,6 +557,7 @@ function foodPoint(s: State, e: Elephant): { x: number; y: number } | null {
   if (!t) return null;
   if (t.t === 'slot') return STATIONS[t.station].reach ?? null;
   if (t.t === 'food') return s.world.food.find((f) => f.id === t.id) ?? null;
+  if (t.t === 'tub') return s.world.tubs.find((x) => x.id === t.id) ?? null;
   if (t.t === 'obj' && t.id === 'drum') return DRUM;
   if (t.t === 'obj' && t.id === 'tire') return TIRE;
   return null;

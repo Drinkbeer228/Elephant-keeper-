@@ -11,14 +11,14 @@ import { ELEPHANT, LEARN } from '../../data/balance';
 import { fx, log } from '../events';
 import { dist } from '../geometry';
 import { elephantCanStand } from '../nav';
-import { chance, clamp, range } from '../rng';
+import { chance, clamp, random, range } from '../rng';
 import type { Elephant, State } from '../types';
-import { trample } from '../world';
+import { lyingComfort, trample } from '../world';
 import { activityFrom, finishActivity, forceElimination, spook, startActivity, stepActivity } from './act';
 import { onCallUnrewarded, onSpooked } from './learning';
 import { updateNeeds } from './needs';
-import { candidates, type Candidate } from './options';
-import { adjustBond, bond, rankOf, radiusOf, zoneOf } from './perceive';
+import { candidates, urg, type Candidate } from './options';
+import { adjustBond, bond, gateMask, rankOf, radiusOf, zoneOf } from './perceive';
 import { updateSignal } from './signals';
 import { nameCase } from '../herd';
 
@@ -47,6 +47,12 @@ function updateOne(s: State, e: Elephant, dt: number, dtSec: number): void {
 
   updateSignal(s, e);
   spookCheck(s, e, dt);
+  // Захмелевшая иногда спотыкается и замирает
+  if (e.tipsy > 0.45 && !e.lying && e.speed > 0.3 && random(s) < dt * 0.12 * e.tipsy) {
+    e.speed = 0;
+    fx('stumble', e.x, e.y, e.id);
+    log(s, 'info', `${e.profile.name} спотыкается — яблоки были забродившие.`, { key: `stumble:${e.id}`, cooldown: 40, elephantId: e.id, silent: true });
+  }
 
   const a = e.act;
   const idleDone = a.kind === 'idle' && a.phase === 'do' && s.t - a.doStart >= a.dur;
@@ -74,8 +80,8 @@ function resolveCall(s: State, e: Elephant): void {
   if (!call) return;
   if (call.arrivedAt >= 0 && s.t - call.arrivedAt > LEARN.rewardWindow) {
     if (!call.rewarded) {
-      onCallUnrewarded(e);
-      log(s, 'info', `${e.profile.name} пришла на зов, но похвалы не дождалась.`, { elephantId: e.id, silent: true });
+      onCallUnrewarded(e, call.why);
+      log(s, 'info', `${e.profile.name} ${call.why === 'lie' ? 'полежала по просьбе' : call.why === 'toilet' ? 'сходила по команде' : 'пришла на зов'}, но похвалы не дождалась.`, { elephantId: e.id, silent: true });
     }
     e.mem.call = null;
   } else if (call.arrivedAt < 0 && s.t > call.until) {
@@ -93,7 +99,14 @@ function interruptible(s: State, e: Elephant, best: Candidate): boolean {
     case 'follow':
     case 'avoid':
     case 'sleep':
+    case 'lie':
       return false;
+    case 'carry':
+      return a.phase === 'go' && a.flag === 0;
+    case 'shake':
+    case 'toss':
+    case 'manipulate':
+      return elapsed >= 1 || a.phase === 'go';
     case 'signal':
       // Физиология сильнее желаний: голод, жажда и сон прерывают ожидание у ворот
       if (a.phase === 'go') return true;
@@ -233,7 +246,7 @@ function bodyCircles(e: Elephant): { x: number; y: number; r: number }[] {
 
 function separate(s: State): void {
   const es = s.elephants;
-  const gate = s.world.gateOpen;
+  const gate = gateMask(s);
   for (let i = 0; i < es.length; i++) {
     for (let j = i + 1; j < es.length; j++) {
       const a = es[i];
@@ -274,6 +287,12 @@ function separate(s: State): void {
   }
 }
 
+// «Торгующаяся» без лакомства в сумке слушается неохотно, с лакомством — охотнее
+function negotiation(e: Elephant, hasTreats: boolean): number {
+  if (e.profile.habits.signal !== 'beg') return 1;
+  return hasTreats ? 1.2 : 0.45;
+}
+
 // Зов кипера: пойдёт или нет — покладистость, доверие, голод, чем занята сейчас
 export function callCompliance(e: Elephant, hasTreats: boolean, atDrain: boolean): number {
   const T = e.profile.traits;
@@ -281,9 +300,48 @@ export function callCompliance(e: Elephant, hasTreats: boolean, atDrain: boolean
   const a = e.act;
   const engaged = a.kind === 'idle' || a.kind === 'wander' ? 0 : clamp(a.score) * (0.5 + T.persistence);
   let p = 0.08 + 0.45 * L.cooperation + 0.22 * L.trust + 0.2 * T.foodDrive * (hasTreats ? 1 : 0.35) - 0.3 * engaged - 0.25 * (e.needs.stress / 100);
-  if (e.signal?.kind === 'toilet' && atDrain) p += 0.55;
+  if (e.signal?.kind === 'toilet' && atDrain) p += 0.45 + 0.3 * L.toilet;
   if (e.signal?.kind === 'attention') p += 0.3;
   if (e.lying) p *= 0.35;
+  p *= negotiation(e, hasTreats);
+  return clamp(p, 0.03, 0.97);
+}
+
+// Просьба лечь: доверие и покладистость, удобство пола, усталость, нервы, недавний испуг
+export function lieCompliance(s: State, e: Elephant, hasTreats: boolean): { p: number; why: string } {
+  const T = e.profile.traits;
+  const L = e.learned;
+  const n = e.needs;
+  if (e.lying) return { p: 0, why: 'уже лежит' };
+  const busy = ['eat', 'drink', 'urinate', 'defecate', 'avoid', 'play', 'bathe'].includes(e.act.kind) && e.act.phase === 'do';
+  const comfort = lyingComfort(s, e.x, e.y);
+  let p = 0.02 + 0.55 * L.trust + 0.35 * L.cooperation - 0.35 * T.nervousness - 0.3 * (n.stress / 100) + 0.25 * urg(n.fatigue, 20, 80);
+  let why = 'не хочет';
+  if (comfort < 0.32) {
+    p -= 0.25 + 0.3 * T.sensitivity;
+    why = 'здесь жёстко или мокро — на такое не ляжет';
+  }
+  if (busy) {
+    p -= 0.35;
+    why = 'занята';
+  }
+  if (s.t - e.mem.spooked < 30) {
+    p -= 0.3;
+    why = 'ещё не успокоилась после испуга';
+  }
+  if (L.trust < 0.3) why = 'не доверяет настолько';
+  if (e.profile.habits.signal === 'beg' && !hasTreats) why = 'ждёт, что сначала покажешь лакомство';
+  p *= negotiation(e, hasTreats);
+  return { p: clamp(p, 0.02, 0.95), why };
+}
+
+// Команда «Давай гуляй» у бака: есть ли что — и приучена ли
+export function toiletCompliance(e: Elephant, hasTreats: boolean): number {
+  const n = e.needs;
+  const L = e.learned;
+  if (n.bladder < 28) return 0.04;
+  let p = 0.1 + 0.6 * urg(n.bladder, 28, 85) + 0.35 * L.toilet + 0.15 * L.cooperation + 0.1 * L.trust;
+  p *= negotiation(e, hasTreats);
   return clamp(p, 0.03, 0.97);
 }
 

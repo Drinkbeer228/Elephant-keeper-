@@ -4,8 +4,9 @@
 // энергичные чаще играют, но двух одинаковых слонов не бывает.
 
 import { CAPACITY } from '../data/facility';
+import { DIETS, type DietId } from '../data/rations';
 import { clamp, gauss, mulberry } from './rng';
-import { TRAIT_KEYS, type ElephantProfile, type FoodKind, type Learned, type Look, type TraitKey, type Traits } from './types';
+import { TRAIT_KEYS, type ElephantProfile, type FoodKind, type Foot, type Habits, type Learned, type Look, type SignalStyle, type TraitKey, type Traits } from './types';
 
 export const NAMES = [
   'Тара',
@@ -52,6 +53,10 @@ function round3(v: number): number {
   return Math.round(v * 1000) / 1000;
 }
 
+// Черты, из которых строится профиль; «шкодливость» добавляется отдельным потоком случайных чисел,
+// чтобы стада прежних версий с тем же seed остались теми же слонихами
+const BASE_TRAITS: TraitKey[] = TRAIT_KEYS.filter((k) => k !== 'mischief');
+
 function makeTraits(next: () => number, age: number): Traits {
   const bold = gauss(next);
   const energy = gauss(next);
@@ -70,6 +75,7 @@ function makeTraits(next: () => number, age: number): Traits {
     persistence: z2t(0.4 * bold - 0.3 * kind + 0.75 * n()),
     expressiveness: z2t(0.4 * energy + 0.35 * bold + 0.65 * n()),
     sensitivity: z2t(-0.35 * bold + 0.85 * n()),
+    mischief: 0.5,
   };
   for (const k of TRAIT_KEYS) t[k] = round3(t[k]);
   return t;
@@ -98,8 +104,82 @@ function makeLook(next: () => number, age: number): Look {
 
 function traitDistance(a: Traits, b: Traits): number {
   let d = 0;
-  for (const k of TRAIT_KEYS) d += (a[k] - b[k]) ** 2;
+  for (const k of BASE_TRAITS) d += (a[k] - b[k]) ** 2;
   return Math.sqrt(d);
+}
+
+// Дополнительный поток для каждой слонихи: шкодливость, манера сигналить, форма свистка
+export interface ProfileExtra {
+  mischief: number;
+  signal: SignalStyle;
+  foot: Foot;
+  whistle: { up: boolean; step: number; notes: number; gap: number; wave: 'sine' | 'triangle' };
+}
+
+export function extraProfile(seed: number, index: number, p: { age: number; traits: Traits }): ProfileExtra {
+  const next = mulberry(((seed ^ 0x7f4a7c15) + index * 0x9e3779b1) >>> 0);
+  const t = p.traits;
+  const youth = clamp((24 - p.age) / 18, -1, 1);
+  const mischief = round3(z2t(2 * (t.playfulness - 0.5) + 1.4 * (t.curiosity - 0.5) - 1.2 * (t.cooperation - 0.5) + 0.3 * youth + 0.75 * gauss(next)));
+  // Манера сигнала: у каждой своя, по характеру и с долей случайности
+  const w: Record<SignalStyle, number> = {
+    stomp: 0.6 + 1.2 * t.activity + 0.6 * t.expressiveness,
+    rumble: 0.4 + 2.8 * t.expressiveness * t.sociability,
+    stare: 0.5 + 1.3 * (1 - t.expressiveness),
+    gate: 0.4 + 1.0 * t.persistence + 0.6 * (1 - t.expressiveness),
+    beg: t.foodDrive > 0.55 && t.cooperation < 0.55 ? 2.2 * t.foodDrive : 0.15,
+  };
+  const total = Object.values(w).reduce((a, b) => a + b, 0);
+  let roll = next() * total;
+  let signal: SignalStyle = 'stomp';
+  for (const k of Object.keys(w) as SignalStyle[]) {
+    roll -= w[k];
+    if (roll <= 0) {
+      signal = k;
+      break;
+    }
+  }
+  const feet: Foot[] = ['FL', 'FR', 'HL', 'HR'];
+  const foot = feet[Math.floor(next() * 4)];
+  const notes = 1 + Math.floor(next() * 3);
+  const up = next() < 0.55;
+  const step = round3(0.18 + next() * 0.3);
+  const wave: 'sine' | 'triangle' = next() < 0.5 ? 'sine' : 'triangle';
+  const gap = round3(0.08 + next() * 0.1);
+  return { mischief, signal, foot, whistle: { up, step, notes, gap, wave } };
+}
+
+// Свистки в одном стаде не должны путаться: высоты разносим по «лестнице»
+export function makeHabits(herd: { extra: ProfileExtra }[], seed: number, diets: DietId[]): Habits[] {
+  const next = mulberry((seed ^ 0x3c6ef372) >>> 0);
+  const ladder = [980, 1120, 1260, 1400, 1540, 1680];
+  for (let i = ladder.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [ladder[i], ladder[j]] = [ladder[j], ladder[i]];
+  }
+  return herd.map(({ extra }, i) => {
+    const f0 = ladder[i % ladder.length] + Math.round((next() - 0.5) * 40);
+    const w = extra.whistle;
+    const f1 = Math.round(f0 * (w.up ? 1 + w.step : 1 - w.step * 0.6));
+    return { signal: extra.signal, foot: extra.foot, whistle: { f0, f1, notes: w.notes, gap: w.gap, wave: w.wave }, diet: diets[i] };
+  });
+}
+
+// Рацион из SlonVet: самой молодой — смесь «Юниор», самой крупной — ФормаМакс, остальным — Mono Grass
+export function assignDiets(herd: { age: number; look: Look }[]): DietId[] {
+  const out: DietId[] = herd.map(() => 'monograss');
+  if (!herd.length) return out;
+  const byAge = herd.map((p, i) => ({ i, age: p.age, size: p.look.size })).sort((a, b) => a.age - b.age || a.i - b.i);
+  const young = byAge[0];
+  out[young.i] = 'optiform';
+  const rest = byAge.filter((x) => x !== young).sort((a, b) => b.size - a.size || a.i - b.i);
+  if (rest.length) out[rest[0].i] = 'formamax';
+  for (const x of rest.slice(1)) out[x.i] = x.age < 16 ? 'optiform' : x.size > 1.03 ? 'formamax' : 'monograss';
+  return out;
+}
+
+export function dietOf(p: ElephantProfile) {
+  return DIETS[p.habits.diet];
 }
 
 export interface HerdOptions {
@@ -123,6 +203,7 @@ export function generateHerd(opts: HerdOptions): ElephantProfile[] {
   }
   const colors = [...MARK_COLORS];
   const herd: ElephantProfile[] = [];
+  const extras: { extra: ProfileExtra }[] = [];
   for (let i = 0; i < size; i++) {
     // Из нескольких кандидатов берём самого непохожего на уже выбранных:
     // стадо получается разнообразным, а не шестью «средними» слонами
@@ -138,19 +219,26 @@ export function generateHerd(opts: HerdOptions): ElephantProfile[] {
       }
     }
     const { age, traits } = best!;
-    Object.assign(traits, opts.overrides?.[i] ?? {});
     const foodRoll = next();
     const favoriteFood: FoodKind = foodRoll < 0.5 ? 'produce' : foodRoll < 0.8 ? 'browse' : 'hay';
+    const look = makeLook(next, age);
+    const extra = extraProfile(opts.seed, i, { age, traits });
+    traits.mischief = extra.mischief;
+    Object.assign(traits, opts.overrides?.[i] ?? {});
+    extras.push({ extra });
     herd.push({
       id: `e${i + 1}`,
       name: names[i % names.length],
       age,
       traits,
-      look: makeLook(next, age),
+      look,
       favoriteFood,
       color: colors[i % colors.length],
+      habits: { signal: extra.signal, foot: extra.foot, whistle: { f0: 1200, f1: 1500, notes: 1, gap: 0.1, wave: 'sine' }, diet: 'monograss' },
     });
   }
+  const habits = makeHabits(extras, opts.seed, assignDiets(herd));
+  herd.forEach((p, i) => (p.habits = habits[i]));
   return herd;
 }
 
@@ -160,6 +248,7 @@ export function initialLearned(p: ElephantProfile): Learned {
     trust: round3(clamp(0.25 + 0.35 * (1 - t.nervousness) + 0.15 * t.sociability, 0.1, 0.85)),
     cooperation: round3(clamp(0.15 + 0.6 * t.cooperation, 0.1, 0.85)),
     expectation: round3(clamp(0.3 + 0.4 * t.expressiveness, 0.15, 0.85)),
+    toilet: round3(clamp(0.15 + 0.3 * t.cooperation + 0.1 * t.expressiveness, 0.1, 0.6)),
   };
 }
 
@@ -203,6 +292,7 @@ const TRAIT_WORDS: Record<TraitKey, [string, string]> = {
   persistence: ['переменчивая', 'упрямая'],
   expressiveness: ['молчаливая', 'разговорчивая'],
   sensitivity: ['неприхотливая', 'чувствительная'],
+  mischief: ['бережная к вещам', 'шкодливая'],
 };
 
 export const TRAIT_LABELS: Record<TraitKey, string> = {
@@ -217,6 +307,7 @@ export const TRAIT_LABELS: Record<TraitKey, string> = {
   persistence: 'Упрямство',
   expressiveness: 'Выразительность сигналов',
   sensitivity: 'Чувствительность',
+  mischief: 'Шкодливость',
 };
 
 export function salientTraits(t: Traits, count = 3): { key: TraitKey; high: boolean; strength: number }[] {
@@ -251,6 +342,9 @@ export function characterHints(p: ElephantProfile): string[] {
   if (t.cooperation > 0.64) out.push('Охотно откликается на зов, если за это хвалят.');
   if (t.activity < 0.36) out.push('Много отдыхает, двигается неспешно.');
   if (t.activity > 0.64) out.push('Почти не стоит на месте.');
+  if (t.mischief > 0.62) out.push('Тянет и грызёт всё, до чего дотянется; пустой таз или шланг у решётки может испортить.');
+  if (t.mischief < 0.36) out.push('Бережно обращается с вещами.');
+  out.push(signalHabitText(p));
   const food = p.favoriteFood === 'produce' ? 'овощи и фрукты' : p.favoriteFood === 'browse' ? 'свежие ветки' : 'сено';
   out.push(`Любимая еда — ${food}.`);
   return out;
@@ -259,6 +353,29 @@ export function characterHints(p: ElephantProfile): string[] {
 // ---------------------------------------------------------------------------
 // Склонение имён (женские имена на -а/-я склоняются, на -и/-у и согласную — нет)
 // ---------------------------------------------------------------------------
+
+const FOOT_TEXT: Record<Foot, string> = { FL: 'левой передней', FR: 'правой передней', HL: 'левой задней', HR: 'правой задней' };
+
+export function footText(f: Foot): string {
+  return FOOT_TEXT[f];
+}
+
+// Как она просится — подсказка в осмотре
+export function signalHabitText(p: ElephantProfile): string {
+  const h = p.habits;
+  switch (h.signal) {
+    case 'stomp':
+      return `Просится, топая ${FOOT_TEXT[h.foot]} ногой.`;
+    case 'rumble':
+      return 'Просится голосом: урчит и встряхивает хоботом.';
+    case 'stare':
+      return 'Просится молча: встаёт у решётки и пристально смотрит на кипера.';
+    case 'gate':
+      return 'Просится, подолгу стоя у ворот.';
+    case 'beg':
+      return 'Торгуется: тянет хобот за лакомством и без него слушается неохотно.';
+  }
+}
 
 export type NameCase = 'acc' | 'gen' | 'dat' | 'ins';
 

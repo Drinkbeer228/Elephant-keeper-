@@ -1,7 +1,7 @@
-// Что слон «знает» о мире: зоны, места у кормушек, где кипер, кто рядом.
+// Что слон «знает» о мире: отсеки и ворота, места у кормушек, где кипер, кто рядом.
 
 import { ELEPHANT, KEEPER } from '../../data/balance';
-import { CONTACT_LINES, STATIONS, zoneAt, type StationId, type ZoneId } from '../../data/facility';
+import { AREA_ZONE, CONTACT_LINES, GATES, STATIONS, areaAt, zoneAt, type AreaId, type GateId, type StationId, type ZoneId } from '../../data/facility';
 import { closestOnSegment, dist } from '../geometry';
 import { bondKey, rankScore } from '../herd';
 import type { Elephant, State, Vec } from '../types';
@@ -10,12 +10,98 @@ export function zoneOf(e: { x: number; y: number }): ZoneId {
   return zoneAt(e.x, e.y) ?? (e.y < 20 ? 'paddock' : 'barn');
 }
 
+export function areaOf(e: { x: number; y: number }): AreaId {
+  return areaAt(e.x, e.y) ?? (e.y < 20 ? 'paddock' : e.x < 20 ? 'stallW' : 'stallE');
+}
+
+// Маска открытых ворот — ключ для полей навигации
+export function gateMask(s: State): number {
+  return (s.world.gates.outer ? 1 : 0) | (s.world.gates.shift ? 2 : 0);
+}
+
+export function maskOpen(mask: number, id: GateId): boolean {
+  return id === 'outer' ? (mask & 1) !== 0 : (mask & 2) !== 0;
+}
+
+// Отсеки, соединённые с данным открытыми воротами (включая его самого)
+export function connectedAreas(s: State, area: AreaId): AreaId[] {
+  return connectedByMask(gateMask(s), area);
+}
+
+const connCache = new Map<string, AreaId[]>();
+
+export function connectedByMask(mask: number, area: AreaId): AreaId[] {
+  const key = `${mask}:${area}`;
+  let out = connCache.get(key);
+  if (out) return out;
+  out = [area];
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const g of GATES) {
+      if (!maskOpen(mask, g.id)) continue;
+      const hasA = out.includes(g.a);
+      const hasB = out.includes(g.b);
+      if (hasA && !hasB) {
+        out.push(g.b);
+        changed = true;
+      } else if (hasB && !hasA) {
+        out.push(g.a);
+        changed = true;
+      }
+    }
+  }
+  connCache.set(key, out);
+  return out;
+}
+
+export function reachableAreas(s: State, e: Elephant): AreaId[] {
+  return connectedAreas(s, areaOf(e));
+}
+
 export function reachableZones(s: State, e: Elephant): ZoneId[] {
-  return s.world.gateOpen ? ['barn', 'paddock'] : [zoneOf(e)];
+  const out: ZoneId[] = [];
+  for (const a of reachableAreas(s, e)) if (!out.includes(AREA_ZONE[a])) out.push(AREA_ZONE[a]);
+  return out;
 }
 
 export function canReachZone(s: State, e: Elephant, zone: ZoneId): boolean {
-  return s.world.gateOpen || zoneOf(e) === zone;
+  return reachableZones(s, e).includes(zone);
+}
+
+export function canReachArea(s: State, e: Elephant, area: AreaId | null | undefined): boolean {
+  return !!area && reachableAreas(s, e).includes(area);
+}
+
+export function canReachPoint(s: State, e: Elephant, p: { x: number; y: number }): boolean {
+  return canReachArea(s, e, areaAt(p.x, p.y));
+}
+
+// Первые закрытые ворота на пути из одного отсека в другой (null — путь открыт или его нет)
+export function blockingGate(s: State, from: AreaId, to: AreaId): GateId | null {
+  if (from === to) return null;
+  // Поиск в ширину по графу отсеков, ворота — рёбра
+  const prev = new Map<AreaId, { area: AreaId; gate: GateId }>();
+  const queue: AreaId[] = [from];
+  const seen = new Set<AreaId>([from]);
+  while (queue.length) {
+    const a = queue.shift()!;
+    if (a === to) break;
+    for (const g of GATES) {
+      const b = g.a === a ? g.b : g.b === a ? g.a : null;
+      if (!b || seen.has(b)) continue;
+      seen.add(b);
+      prev.set(b, { area: a, gate: g.id });
+      queue.push(b);
+    }
+  }
+  if (!prev.has(to)) return null;
+  const chain: GateId[] = [];
+  for (let a: AreaId = to; a !== from; ) {
+    const p = prev.get(a)!;
+    chain.unshift(p.gate);
+    a = p.area;
+  }
+  return chain.find((g) => !s.world.gates[g]) ?? null;
 }
 
 export function radiusOf(e: Elephant): number {
@@ -79,6 +165,7 @@ export function freeSlot(s: State, e: Elephant, station: StationId): number {
 
 // Кипер у решётки или ограды: ближайшая точка линии контакта и место для слона напротив
 export interface KeeperContact {
+  area: AreaId;
   zone: ZoneId;
   keeper: Vec;
   line: Vec;
@@ -96,18 +183,18 @@ export function keeperContact(s: State): KeeperContact | null {
       bestD = c.d;
       // Слону — по другую сторону линии, на расстоянии длины корпуса от решётки
       const spot = { x: c.x, y: c.y - l.keeperSide * 1.95 };
-      best = { zone: l.zone, keeper: { x: k.x, y: k.y }, line: { x: c.x, y: c.y }, spot, face: l.keeperSide > 0 ? Math.PI / 2 : -Math.PI / 2 };
+      best = { area: l.area, zone: AREA_ZONE[l.area], keeper: { x: k.x, y: k.y }, line: { x: c.x, y: c.y }, spot, face: l.keeperSide > 0 ? Math.PI / 2 : -Math.PI / 2 };
     }
   }
   return best;
 }
 
-// Ближайшая точка у линии контакта к произвольной точке — для зова и подхода к киперу
-export function contactSpotNear(zone: ZoneId, x: number, y: number): { spot: Vec; face: number; line: Vec } | null {
+// Ближайшая точка у линии контакта отсека к произвольной точке — для зова и подхода к киперу
+export function contactSpotNear(area: AreaId, x: number, y: number): { spot: Vec; face: number; line: Vec } | null {
   let best: { spot: Vec; face: number; line: Vec } | null = null;
   let bestD = Infinity;
   for (const l of CONTACT_LINES) {
-    if (l.zone !== zone) continue;
+    if (l.area !== area) continue;
     const c = closestOnSegment(x, y, l.x0, l.y0, l.x1, l.y1);
     if (c.d < bestD) {
       bestD = c.d;
@@ -122,8 +209,20 @@ export function keeperDistanceToHead(s: State, e: Elephant): number {
   return dist(headPos(e, 1.7), s.keeper);
 }
 
+// Ближайшая к киперу точка корпуса (для работы с лежащей или стоящей боком слонихой)
+export function keeperDistanceToBody(s: State, e: Elephant): number {
+  const L = e.profile.look;
+  const half = 1.05 * L.size * L.length;
+  const c = Math.cos(e.heading);
+  const sn = Math.sin(e.heading);
+  const cl = closestOnSegment(s.keeper.x, s.keeper.y, e.x - c * half, e.y - sn * half, e.x + c * half, e.y + sn * half);
+  return Math.max(0, cl.d - 0.95 * L.size * L.girth);
+}
+
+// Можно ли дотянуться до слона через решётку: до головы — стоящую, до бока — лежащую или стоящую боком
 export function keeperCanTouch(s: State, e: Elephant): boolean {
-  return keeperDistanceToHead(s, e) <= KEEPER.elephantReach && !e.lying;
+  if (e.lying) return keeperDistanceToBody(s, e) <= 1.3;
+  return keeperDistanceToHead(s, e) <= KEEPER.elephantReach || keeperDistanceToBody(s, e) <= 0.9;
 }
 
 export function nearestOther(s: State, e: Elephant): { o: Elephant; d: number } | null {

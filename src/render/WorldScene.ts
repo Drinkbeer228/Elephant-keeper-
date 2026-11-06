@@ -171,7 +171,11 @@ export class WorldScene extends Phaser.Scene {
     const events = this.hooks.frame(dt);
     const s = this.hooks.getState();
     this.rebuildHerd(s);
-    for (const ev of events) this.fx.handle(ev);
+    for (const ev of events) {
+      this.fx.handle(ev);
+      if (ev.kind.startsWith('stomp:') && ev.elephantId) this.elephants.get(ev.elephantId)?.stomp(ev.kind.slice(6));
+      if (ev.kind === 'shake') this.world.shakeTree(ev.x, ev.y);
+    }
     const t = time / 1000;
     const sel = this.hooks.selected();
     const names = this.hooks.showNames();
