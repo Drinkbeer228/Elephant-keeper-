@@ -1,180 +1,296 @@
+// Точка входа: фиксированный шаг симуляции, рендер Phaser и DOM-интерфейс.
+
 import Phaser from 'phaser';
-import { AUTOSAVE_SLOT, availableAction, createShift, inspect, saveToSlot, tick, type Command, type LoadContext, type State } from './sim';
-import { MAP, MAP_ID } from './data/map';
-import { Input } from './game/input';
-import { WorldScene, type FrameResult } from './game/world';
-import { OverlayScene } from './game/overlay';
-import { sound } from './game/sound';
-import '@fontsource/press-start-2p';
+import { TIME } from './data/balance';
+import { sound } from './audio/sound';
+import { Input } from './input';
+import { WorldScene } from './render/WorldScene';
+import {
+  availableActions,
+  clearLegacy,
+  createState,
+  deserialize,
+  LOAD_FAILURE_TEXT,
+  legacyKeys,
+  loadSlot,
+  saveSlot,
+  serialize,
+  slotInfo,
+  step,
+  type SimEvent,
+  type State,
+  type StepInput,
+} from './sim';
 import { Hud } from './ui/hud';
-import { setSpriteSources } from './ui/icons';
-import { barrowUrl, itemUrl, portraitUrl, vegUrl } from './game/textures';
-
-// Спрайты для интерфейса подставляет игровой слой — UI не импортирует textures напрямую
-setSpriteSources({ itemUrl, portraitUrl, vegUrl, barrowUrl });
-
-const loadCtx = (): LoadContext => ({ mapId: MAP_ID, cols: MAP.floor.cols, rows: MAP.floor.rows });
+import './ui/styles.css';
 
 const params = new URLSearchParams(location.search);
-let state: State = createShift(Number(params.get('seed')) || Date.now() % 1_000_000);
-// ?bot — смену играет бот (для проверки и демо), ?speed=N — ускорение
-const speed = Math.min(20, Math.max(1, Number(params.get('speed')) || 1));
-let bot: { frame(): Command[] } | null = null;
-if (params.has('bot')) void import('./dev/bot').then((m) => (bot = new m.Bot(state)));
-let paused = false;
-const pending: Command[] = [];
+const seedParam = Number(params.get('seed'));
+const herdParam = Number(params.get('herd'));
+
+let state: State = createState({ seed: seedParam || Math.floor(Math.random() * 1e9), herdSize: herdParam || 3 });
+let paused = true;
+let speed = Math.max(0, Math.min(4, Number(params.get('speed')) || 1));
+let selected: string | null = null;
+let showNames = true;
+let acc = 0;
+let autosaveAt = performance.now() + 60_000;
+let bot: { decide(s: State): StepInput } | null = null;
+let scene: WorldScene | null = null;
+const pending: string[] = [];
 const input = new Input();
-let worldScene: WorldScene | null = null;
-let autosaveAccum = 0;
 
-const hud = new Hud(document.getElementById('hud')!, input, {
-  restart: () => location.reload(),
-  prepCut: (spot) => pending.push({ type: 'prepCut', spot }),
-  prepClose: () => pending.push({ type: 'prepClose' }),
+const hud = new Hud(document.getElementById('hud')!, {
+  action: (id) => {
+    sound.unlock();
+    sound.click();
+    pending.push(id);
+  },
+  select: (id) => (selected = id),
+  focus: (x, y) => scene?.focus(x, y),
+  speed: (v) => setSpeed(v),
+  pauseToggle: () => setSpeed(speed === 0 ? 1 : 0),
   setPaused: (p) => (paused = p),
-  getState: () => state,
-  loadState: (next) => {
-    state = next;
-    if (params.has('bot')) void import('./dev/bot').then((m) => (bot = new m.Bot(state)));
+  newGame: (herd, seed) => {
+    state = createState({ seed: seed ?? Math.floor(Math.random() * 1e9), herdSize: herd });
+    selected = null;
+    paused = false;
+    sound.unlock();
+    saveSlot(state, 'auto');
   },
-  focusPoint: (x, y) => {
-    worldScene?.focusWorldPoint(x, y);
+  continueGame: () => {
+    const res = loadSlot('auto');
+    if (!res || !res.ok) {
+      hud.toast(res && !res.ok ? LOAD_FAILURE_TEXT[res.reason] : 'Автосохранения нет.', 'warn');
+      return false;
+    }
+    state = res.state;
+    paused = false;
+    sound.unlock();
+    return true;
   },
-  toggleOverview: () => worldScene?.toggleOverview() ?? false,
-  isOverview: () => worldScene?.isOverview() ?? false,
+  save: (slot) => {
+    const r = saveSlot(state, slot);
+    return r.ok ? 'Смена сохранена.' : `Не удалось сохранить: ${r.error}`;
+  },
+  load: (slot) => {
+    const res = loadSlot(slot);
+    if (!res) return 'Слот пуст.';
+    if (!res.ok) return LOAD_FAILURE_TEXT[res.reason];
+    state = res.state;
+    selected = null;
+    return null;
+  },
+  exportSave: () => {
+    const blob = new Blob([serialize(state)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `elephant-keeper-day${Math.floor((state.t - TIME.start) / 1440) + 1}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+  importSave: (file) => {
+    void file.text().then((text) => {
+      const res = deserialize(text);
+      if (!res.ok) hud.toast(LOAD_FAILURE_TEXT[res.reason], 'warn');
+      else {
+        state = res.state;
+        selected = null;
+        hud.toast('Смена загружена из файла.', 'good');
+      }
+    });
+  },
+  toggleSound: () => {
+    sound.unlock();
+    return sound.toggle();
+  },
+  soundMuted: () => sound.muted,
+  toggleNames: () => (showNames = !showNames),
+  namesOn: () => showNames,
+  closeReport: () => {
+    state.pendingReport = null;
+    paused = false;
+  },
+  zoom: (k) => scene?.zoomBy(k),
+  overview: () => scene?.toggleOverview(),
+  legacyCount: () => legacyKeys().length,
+  clearLegacy: () => clearLegacy(),
 });
 
-if (params.has('bot') || params.get('autostart') === '1') {
-  hud.closeIntro();
+function setSpeed(v: number): void {
+  speed = v;
+  hud.setSpeed(v);
+}
+setSpeed(speed);
+
+const stick = hud.stickElements();
+input.bindStick(stick.base, stick.knob);
+
+function nearestElephant(): string | null {
+  let best: string | null = null;
+  let bestD = 7;
+  for (const e of state.elephants) {
+    const d = Math.hypot(e.x - state.keeper.x, e.y - state.keeper.y);
+    if (d < bestD) {
+      bestD = d;
+      best = e.id;
+    }
+  }
+  return best;
 }
 
-// Телефон свернул игру или погас экран — по возвращении ждёт пауза и автосохранение
+function handlePresses(): void {
+  for (const p of input.take()) {
+    sound.unlock();
+    if (p.kind === 'pause') {
+      if (hud.modalOpen) hud.closeMenu();
+      else hud.openMenu();
+      continue;
+    }
+    if (hud.modalOpen) continue;
+    switch (p.kind) {
+      case 'action': {
+        const a = hud.actionForKey(0);
+        if (a) pending.push(a.id);
+        break;
+      }
+      case 'choice': {
+        const a = hud.actionForKey(p.index);
+        if (a) pending.push(a.id);
+        break;
+      }
+      case 'drop': {
+        const d = hud.actions.find((a) => a.ref.verb === 'drop');
+        if (d) pending.push(d.id);
+        break;
+      }
+      case 'inspect':
+        selected = selected ? null : nearestElephant();
+        break;
+      case 'journal':
+        hud.toggleJournal();
+        break;
+      case 'mute':
+        sound.toggle();
+        break;
+      case 'speed':
+        setSpeed(speed === 0 ? 1 : speed === 1 ? 2 : speed === 2 ? 4 : 1);
+        break;
+      case 'zoom':
+        scene?.zoomBy(p.dir > 0 ? 1.15 : 0.87);
+        break;
+      case 'overview':
+        scene?.toggleOverview();
+        break;
+      case 'recenter':
+        scene?.recenter();
+        break;
+      case 'names':
+        showNames = !showNames;
+        break;
+    }
+  }
+}
+
+function frame(dt: number): SimEvent[] {
+  handlePresses();
+  const events: SimEvent[] = [];
+  const running = !paused && !hud.modalOpen && speed > 0 && state.pendingReport === null;
+  if (running) {
+    acc += dt * speed;
+    let steps = 0;
+    const move = input.move();
+    while (acc >= TIME.step && steps < 12 * Math.max(1, speed)) {
+      acc -= TIME.step;
+      const inp: StepInput = bot ? bot.decide(state) : { move, run: input.running(), actions: steps === 0 ? pending.splice(0) : [], cancel: false };
+      events.push(...step(state, inp));
+      steps++;
+      if (state.pendingReport !== null) break;
+    }
+    if (acc > TIME.step * 4) acc = 0;
+  } else {
+    acc = 0;
+    pending.length = 0;
+  }
+  if (events.length) {
+    hud.pushEvents(events);
+    for (const ev of events) {
+      const near = Math.hypot(ev.x - state.keeper.x, ev.y - state.keeper.y) < 14 || ev.x === 0;
+      sound.event(ev, near);
+      if (ev.text && (ev.severity === 'warn' || ev.severity === 'bad')) sound.chime(ev.severity);
+    }
+  }
+  if (state.pendingReport !== null && !hud.modalOpen) {
+    const r = state.reports[state.pendingReport];
+    if (r) hud.openReport(r);
+    saveSlot(state, 'auto');
+  }
+  hud.render(state, availableActions(state), selected);
+  if (performance.now() > autosaveAt && running) {
+    autosaveAt = performance.now() + 60_000;
+    saveSlot(state, 'auto');
+  }
+  return events;
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && !paused && !hud.introOpen) hud.togglePause();
+  if (document.hidden) {
+    if (!hud.modalOpen && !paused) saveSlot(state, 'auto');
+    if (!hud.modalOpen && !paused) hud.openMenu();
+  }
 });
 
-function frame(dt: number): FrameResult {
-  const before = availableAction(state);
-  for (const press of input.takePresses()) {
-    if (press === 'mute') {
-      hud.toggleMute();
-      continue;
-    }
-    if (press === 'schedule') {
-      hud.toggleSchedule();
-      continue;
-    }
-    // Окно чистки: Space и кнопка действия режут выбранный дефект, Esc — отойти от стола
-    if (state.prep?.open && !hud.introOpen && !paused) {
-      if (press === 'action') {
-        sound.vegCut();
-        pending.push({ type: 'prepCut', spot: hud.prepSelected });
-      } else if (press === 'pause') {
-        pending.push({ type: 'prepClose' });
-      }
-      continue;
-    }
-    if (press === 'pause') {
-      if (hud.menuOpen) hud.closeMenu();
-      else hud.togglePause();
-    } else if (hud.introOpen || paused) {
-      continue;
-    } else if (press === 'inspect') {
-      sound.uiOpen();
-      hud.toggleInspect();
-    } else if (typeof press === 'number') {
-      // Пункт меню: команда уйдёт с номером, симуляция сама найдёт то же меню
-      if (hud.menuOpen && before?.choices?.[press]) {
-        const choiceOpt = before.choices[press];
-        if (!choiceOpt.disabled) sound.actionByLabel(choiceOpt.label);
-        pending.push({ type: 'action', choice: press });
-        hud.closeMenu();
-      }
-    } else if (press === 'action' || press === 'interact') {
-      if (press === 'interact' && state.barrow.pushed) continue;
-      if (hud.menuOpen) {
-        hud.closeMenu();
-      } else if (before?.choices) {
-        sound.uiOpen();
-        hud.openMenu(before);
-      } else {
-        if (before && !before.disabled) sound.actionByLabel(before.label);
-        pending.push({ type: 'action' });
-      }
-    } else {
-      pending.push({ type: press });
-    }
-  }
-  if (hud.introOpen || paused) {
-    hud.render(state, availableAction(state));
-    return { actionReady: false };
-  }
-  // У стола с овощами кипер стоит на месте: стрелки выбирают дефект
-  const move = state.prep?.open ? { x: 0, y: 0 } : input.move();
-  if (move.x || move.y) {
-    hud.closeMenu();
-  }
-  let commands: Command[] = [{ type: 'move', dx: move.x, dy: move.y, sprint: input.sprint() }, ...pending.splice(0)];
-  const lean = input.balance();
-  if (lean) commands.push({ type: 'balance', dir: lean });
-  const inspected = commands.some((c) => c.type === 'inspect') ? inspect(state).join('\n') : undefined;
-  let events = tick(state, dt, commands);
-  if (bot) {
-    // Бот делает несколько кадров по 1/30 с за кадр экрана — так ускорение не ломает его ходьбу
-    const steps = Math.round(dt * 30 * speed);
-    for (let i = 0; i < steps && state.phase !== 'report'; i++) {
-      commands = bot.frame();
-      events = events.concat(tick(state, 1 / 30, commands));
-    }
-  }
-  if (inspected) hud.showInspect(inspected);
-  sound.syncEvents(events);
-  hud.pushEvents(events, inspected);
+// Высокая плотность пикселей: холст в физических пикселях, CSS-масштаб 1/dpr
+const dpr = Math.min(2, window.devicePixelRatio || 1);
 
-  // Автосохранение каждые 30 секунд реального времени во время смены
-  autosaveAccum += dt;
-  if (autosaveAccum >= 30 && state.phase === 'shift') {
-    autosaveAccum = 0;
-    saveToSlot(state, loadCtx(), AUTOSAVE_SLOT);
-  }
-
-  const action = availableAction(state);
-  hud.syncMenu(action);
-  hud.render(state, action);
-  return { actionReady: !!action && !action.disabled };
-}
-
-let game: Phaser.Game | null = null;
-
-// WebGL падает на холсте 0×0 (вкладка открыта в фоне) — ждём, пока у окна появится размер
-function startGame(): void {
-  if (window.innerWidth < 1 || window.innerHeight < 1) {
-    setTimeout(startGame, 100);
+function start(): void {
+  if (window.innerWidth < 2 || window.innerHeight < 2) {
+    setTimeout(start, 100);
     return;
   }
-  worldScene = new WorldScene(() => state, frame);
-  game = new Phaser.Game({
-    type: Phaser.CANVAS,
+  scene = new WorldScene({
+    getState: () => state,
+    frame,
+    onSelect: (id) => (selected = id),
+    selected: () => selected,
+    showNames: () => showNames,
+    dpr,
+  });
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
     parent: 'game',
-    backgroundColor: '#1c1916',
-    scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-    pixelArt: true,
-    scene: [worldScene, new OverlayScene(() => state)],
+    backgroundColor: '#e8e4da',
+    scale: { mode: Phaser.Scale.NONE, width: Math.round(window.innerWidth * dpr), height: Math.round(window.innerHeight * dpr), zoom: 1 / dpr },
+    render: { antialias: true, antialiasGL: true, roundPixels: false, powerPreference: 'high-performance' },
+    scene: [scene],
+    banner: false,
+  });
+  window.addEventListener('resize', () => {
+    game.scale.resize(Math.round(window.innerWidth * dpr), Math.round(window.innerHeight * dpr));
+    game.scale.setZoom(1 / dpr);
+  });
+  Object.assign(window, {
+    keeper: {
+      get state() {
+        return state;
+      },
+      set state(v: State) {
+        state = v;
+      },
+      game,
+    },
   });
 }
-startGame();
+start();
 
-// Для отладки из консоли
-Object.assign(window, {
-  keeper: {
-    get state() {
-      return state;
-    },
-    set state(s: State) {
-      state = s;
-    },
-    get game() {
-      return game;
-    },
-  },
-});
+const auto = slotInfo('auto');
+if (params.get('autostart') === '1' || params.has('bot')) {
+  paused = false;
+  if (params.has('bot')) {
+    void import('./dev/autokeeper').then((m) => {
+      bot = new m.AutoKeeper();
+    });
+  }
+} else {
+  hud.openTitle(auto.ok ? auto.text : null);
+}

@@ -1,215 +1,155 @@
-import { BALANCE } from '../data/balance';
-import { ELEPHANTS } from '../data/elephants';
-import { MAP } from '../data/map';
-import { randomInt } from './rng';
-import { groundOf } from './floor';
-import type { Elephant, Item, State } from './types';
+import { START_STOCK, TIME, KEEPER } from '../data/balance';
+import { BALL_START, BARN_SPOTS, BEDDING, BARROW_HOME, KEEPER_START, W, H, inRect } from '../data/facility';
+import { idleActivity } from './behavior/act';
+import { clampHerdSize, generateHerd, initialBonds, initialLearned } from './herd';
+import { random, range } from './rng';
+import type { DayStats, Elephant, ElephantProfile, State, Traits } from './types';
+import { cellCenter, dropDung, forCells, touchCells } from './world';
 
-export interface ShiftOptions {
-  mess?: boolean; // ночная грязь на подстилке, по умолчанию есть
+export const SAVE_VERSION = 2;
+
+export interface NewGameOptions {
+  seed: number;
+  herdSize?: number;
+  overrides?: Partial<Traits>[];
+  mess?: boolean; // ночная грязь в слоновнике на старте (по умолчанию есть)
 }
 
-export function createShift(seed: number, opts: ShiftOptions = {}): State {
-  const state: State = {
-    seed,
-    rng: seed,
-    phase: 'shift',
-    t: 0,
-    nextItemId: 1,
-    player: { x: MAP.playerStart.x, y: MAP.playerStart.y, held: null, facing: { x: 0, y: -1 }, pocketTreats: BALANCE.player.pocketStart, knockdownTimer: 0 },
-    elephants: ELEPHANTS.map(createElephant),
-    // Сетка пола на весь мир: солома в песочных зонах, трава на лугах, бетон вне загонов
-    cells: Array.from({ length: MAP.floor.rows }, (_, cy) =>
-      Array.from({ length: MAP.floor.cols }, (_, cx) => ({ kind: groundOf(cx, cy), since: 0 })),
-    ),
-    dung: [],
-    litter: [],
-    looseBales: [],
-    items: [],
-    kitchen: {
-      kasha: { status: 'idle', readyAt: 0, portions: 0, meal: null },
-      veg: { portions: 0 },
-    },
-    stock: { ...BALANCE.stockStart },
-    feederHay: BALANCE.food.hayStart,
-    trough: 80,
-    valveOpen: false,
-    feederHay2: BALANCE.food.hayStart,
-    trough2: 80,
-    valve2Open: false,
-    pools: MAP.pools.map(() => ({ dirty: 0, floats: [] })),
-    tires: (['female', 'male'] as const).map((id) => {
-      const { active } = MAP.complexes[id];
-      return {
-        id,
-        paddock: id,
-        x: (active.x0 + active.x1) / 2,
-        y: (active.y0 + active.y1) / 2,
-        vx: 0,
-        vy: 0,
-        flightLeft: 0,
-        flightDuration: 0,
-        cooldown: 0,
-        hit: false,
-      };
-    }),
-    musthEventsRemaining: 0,
-    musthNextAt: Number.POSITIVE_INFINITY,
-    partner: {
-      x: MAP.partnerStart.x,
-      y: MAP.partnerStart.y,
-      facing: { x: 0, y: -1 },
-      bucket: 0,
-      waste: 0,
-      mode: 'idle',
-      babbleAt: BALANCE.partner.babbleEvery,
-      timer: 2,
-      path: [],
-      pathTarget: null,
-      foodBasin: null,
-      supplyPalletId: null,
-      knockdownTimer: 0,
-    },
-    dutyLight: false,
-    lastOverflow: 0,
-    gates: { female: false, male: false },
-    barrow: {
-      x: MAP.barrowStart.x,
-      y: MAP.barrowStart.y,
-      pushed: false,
-      tools: [],
-      sawdust: 0,
-      straw: 0,
-      bales: 0,
-      waste: 0,
-      balance: 0,
-      parkedAt: 0,
-      trail: 0,
-      stuck: false,
-      spoiled: false,
-    },
-    jack: { x: MAP.jackStart.x, y: MAP.jackStart.y, pushed: false, cargo: null },
-    supply: {
-      arrived: false,
-      left: false,
-      missed: false,
-      bays: [],
-      ground: [],
-      driver: { x: MAP.stations.unload.x + 2.2, y: MAP.stations.unload.y, wp: 0, said: false, babbleAt: 0 },
-    },
-    container: { fill: 0, doorClosed: false, ramp: false, truckAt: null, truckLeftAt: null },
-    spareBucket: true,
-    meals: {
-      kasha1: Object.fromEntries(ELEPHANTS.map((p) => [p.id, null])),
-      kasha2: Object.fromEntries(ELEPHANTS.map((p) => [p.id, null])),
-      dinner: Object.fromEntries(ELEPHANTS.map((p) => [p.id, null])),
-    },
-    stats: {
-      drySamples: 0,
-      drySum: 0,
-      lastDryCheck: 0,
-      lastSpread: 0,
-      broken: [],
-      basinsLost: 0,
-      bagsOut: 0,
-      begTreats: 0,
-      hintsShown: [],
-    },
-    log: [],
-    prep: null,
-    report: null,
+export function emptyDayStats(): DayStats {
+  return {
+    minutes: {},
+    distance: 0,
+    signals: 0,
+    answered: 0,
+    ignored: 0,
+    urineDrain: 0,
+    urineOutside: 0,
+    urineBedding: 0,
+    dung: 0,
+    ate: 0,
+    treats: 0,
+    conflicts: 0,
+    refusals: 0,
+    wellbeingSum: 0,
+    wellbeingSamples: 0,
+    lyingMinutes: 0,
   };
-
-  for (const elephant of state.elephants) {
-    if (ELEPHANTS.find((p) => p.id === elephant.id)?.paddock === 'male') {
-      elephant.traits = {
-        appetite: randomInt(state, 80, 140) / 100,
-        messiness: randomInt(state, 80, 140) / 100,
-        aggression: randomInt(state, 80, 140) / 100,
-      };
-    }
-  }
-  state.musthEventsRemaining = randomInt(state, 1, 2);
-  state.musthNextAt = randomInt(state, 150, 360);
-
-  const spots = MAP.rackSpots;
-  addItem(state, 'bucket', spots.bucket.x, spots.bucket.y, { liters: 0, dirty: false });
-  addItem(state, 'scoop', spots.scoop.x, spots.scoop.y, { dirty: false });
-  addItem(state, 'fork', spots.fork.x, spots.fork.y);
-  addItem(state, 'broom', spots.broom.x, spots.broom.y);
-  // Длинный сачок для бассейнов — на стойке в Дежурке
-  addItem(state, 'net', spots.net.x, spots.net.y);
-  // Совковая лопата — в Опилочнике у стены
-  addItem(state, 'shovel', MAP.shovelSpot.x, MAP.shovelSpot.y);
-  // Корзина для овощей — у стеллажа в кормовой
-  addItem(state, 'basket', MAP.basketSpot.x, MAP.basketSpot.y);
-  // Ведро для опилок — пустое, в Дежурке у шкафчиков
-  addItem(state, 'sawdust', MAP.pailSpot.x, MAP.pailSpot.y, { charges: 0 });
-  // Тазы — чистые, на стеллаже в кормовой
-  MAP.basinSpots.slice(0, BALANCE.food.basins).forEach((p) => addItem(state, 'basin', p.x, p.y, { food: null, dirty: false }));
-
-  if (opts.mess !== false) addNightMess(state);
-  return state;
 }
 
-function createElephant(p: (typeof ELEPHANTS)[number]): Elephant {
+function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
+  const spot = BARN_SPOTS[i % BARN_SPOTS.length];
   return {
     id: p.id,
-    x: p.start.x,
-    y: p.start.y,
-    tx: p.start.x,
-    ty: p.start.y,
-    state: 'idle',
-    next: 'idle',
-    timer: 2,
-    hunger: 35,
-    thirst: 25,
-    bladder: 20 + p.signalLead * 3,
-    bowel: 30,
-    boredom: 20,
-    trust: p.trust,
-    footDebt: 0,
-    footDebtStart: 0,
-    limp: false,
-    lyingInWet: false,
-    praiseUntil: -1,
-    begTreats: 0,
-    dirtyFeet: 0,
-    lastCell: '',
-    tally: { inBucket: 0, missed: 0, dung: 0 },
-    wetness: 0,
-    traits: { appetite: 1, messiness: 1, aggression: 1 },
-    musthTimer: 0,
+    profile: p,
+    learned: initialLearned(p),
+    needs: {
+      hunger: range(s, 38, 55),
+      thirst: range(s, 30, 48),
+      bladder: range(s, 25, 60),
+      bowel: range(s, 18, 55),
+      fatigue: range(s, 6, 20),
+      boredom: range(s, 32, 55),
+      social: range(s, 5, 15),
+      heat: 0,
+      stress: range(s, 6, 14),
+    },
+    x: spot.x,
+    y: spot.y,
+    heading: range(s, -Math.PI, Math.PI),
+    speed: 0,
+    act: { ...idleActivity(s.t), dur: range(s, 0.2, 2) },
+    path: [],
+    pathGoal: null,
+    lying: false,
+    wet: 0,
+    dust: range(s, 0, 0.4),
+    signal: null,
+    stuck: 0,
+    bestDist: 1e6,
+    mem: {
+      nextThink: s.t + i * 0.35,
+      cooldown: {},
+      habit: {},
+      call: null,
+      lastGreet: {},
+      lastAte: s.t - 60,
+      spooked: -1000,
+      zone: 'barn',
+      zoneSince: s.t - 600,
+    },
+    day: emptyDayStats(),
   };
 }
 
-export function addItem(state: State, kind: Item['kind'], x: number, y: number, extra: Partial<Item> = {}): Item {
-  const item: Item = { id: state.nextItemId++, kind, x, y, droppedAt: state.t, ...extra };
-  state.items.push(item);
-  return item;
-}
-
-export function newItem(state: State, kind: Item['kind'], extra: Partial<Item> = {}): Item {
-  return { id: state.nextItemId++, kind, x: 0, y: 0, droppedAt: state.t, ...extra };
-}
-
-// Ночная грязь в обоих загонах: мокрые клетки и кучи навоза на песке
-function addNightMess(state: State): void {
-  for (const b of [MAP.bedding, MAP.bedding2]) {
-    const wet = randomInt(state, 3, 5);
-    for (let i = 0; i < wet; i++) {
-      const cx = b.x + randomInt(state, 0, b.cols - 1);
-      const cy = b.y + randomInt(state, 0, b.rows - 1);
-      state.cells[cy][cx] = { kind: 'wet', since: 0 };
-    }
-    const piles = randomInt(state, 1, 3);
-    for (let i = 0; i < piles; i++) {
-      state.dung.push({
-        id: state.nextItemId++,
-        x: b.x + randomInt(state, 0, b.cols - 1) + 0.5,
-        y: b.y + randomInt(state, 0, b.rows - 1) + 0.5,
-        at: 0,
-      });
-    }
+export function createState(opts: NewGameOptions): State {
+  const seed = opts.seed >>> 0 || 1;
+  const herd = generateHerd({ seed, size: clampHerdSize(opts.herdSize ?? 3), overrides: opts.overrides });
+  const cells = W * H;
+  const s: State = {
+    version: SAVE_VERSION,
+    seed,
+    rng: seed,
+    t: TIME.start,
+    simSec: 0,
+    nextId: 1,
+    elephants: [],
+    bonds: initialBonds(herd, seed),
+    keeper: { x: KEEPER_START.x, y: KEEPER_START.y, facing: -Math.PI / 2, held: null, pouch: KEEPER.startTreats, task: null, running: false, moving: false },
+    world: {
+      gateOpen: false,
+      hay: { barnRack: 14, paddockFeeder: 0 },
+      trough: { portions: 0, since: TIME.start },
+      water: {
+        barnWater: { level: 42, valve: false, overflow: 0 },
+        paddockWater: { level: 55, valve: false, overflow: 0 },
+      },
+      pool: { dirt: 0.08, valve: false },
+      drum: 0,
+      ball: { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0 },
+      cells: { wet: new Array(cells).fill(0), soil: new Array(cells).fill(0), bedding: new Array(cells).fill(0) },
+      cellsVersion: 0,
+      dirt: { barn: 0, paddock: 0, minute: -1 },
+      dung: [],
+      food: [],
+      items: [],
+      tools: { fork: true, rake: true, hose: true },
+      barrow: { x: BARROW_HOME.x, y: BARROW_HOME.y, heading: 0, pushed: false, load: 0 },
+      container: 18,
+      stock: { ...START_STOCK },
+    },
+    journal: [],
+    alerts: [],
+    dayStart: TIME.start,
+    dailyKeeper: { treats: 0, interactions: 0, answered: 0, ignored: 0, calls: 0, callsObeyed: 0 },
+    startOfDay: {},
+    reports: [],
+    pendingReport: null,
+  };
+  for (let i = 0; i < cells; i++) {
+    const c = cellCenter(i);
+    if (inRect(BEDDING, c.x, c.y)) s.world.cells.bedding[i] = Math.round((0.82 + random(s) * 0.18) * 1000) / 1000;
   }
+  s.elephants = herd.map((p, i) => createElephant(s, p, i));
+  for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation };
+  if (opts.mess !== false) addNightMess(s);
+  return s;
+}
+
+// После ночи в слоновнике: кучи навоза и мокрые пятна на подстилке
+function addNightMess(s: State): void {
+  const n = s.elephants.length;
+  const piles = 2 + n;
+  for (let i = 0; i < piles; i++) {
+    dropDung(s, range(s, BEDDING.x0 + 1.5, BEDDING.x1 - 1.5), range(s, BEDDING.y0 + 1.2, BEDDING.y1 - 0.8));
+    s.world.dung[s.world.dung.length - 1].t = s.t - range(s, 30, 300);
+  }
+  const wet = 1 + Math.ceil(n / 2);
+  for (let i = 0; i < wet; i++) {
+    const x = range(s, BEDDING.x0 + 1.5, BEDDING.x1 - 1.5);
+    const y = range(s, BEDDING.y0 + 1.2, BEDDING.y1 - 0.8);
+    forCells(x, y, 1.1, (idx) => {
+      s.world.cells.wet[idx] = Math.min(1, s.world.cells.wet[idx] + 0.8);
+    });
+  }
+  touchCells(s);
 }

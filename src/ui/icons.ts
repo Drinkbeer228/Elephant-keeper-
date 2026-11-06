@@ -1,92 +1,34 @@
-import type { Item, Prep } from '../sim';
+// Линейные иконки интерфейса (SVG, 24×24, обводка currentColor)
 
-// Иконки интерфейса: те же пиксельные спрайты, что в мире, плюс пиксельные значки.
-// Ссылки на спрайты подставляет игра (src/game/textures) через setSpriteSources —
-// так UI-слой не зависит от игрового рендера и остаётся переносимым.
-
-type SpriteSources = {
-  itemUrl: (item: Item) => string;
-  portraitUrl: (id: string) => string;
-  vegUrl: (piece: Prep['pieces'][number]) => string;
-  barrowUrl: () => string;
-};
-
-const NO_SOURCE = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
-let sources: SpriteSources | null = null;
-
-export function setSpriteSources(s: SpriteSources): void {
-  sources = s;
-}
-
-// Кэш data URL: toDataURL на каждый кадр рисовал canvas и кодировал base64 —
-// интерфейс подвисал. Генерируем ссылку один раз на вариант спрайта.
-const memo = new Map<string, string>();
-function cached(key: string, make: () => string): string {
-  let v = memo.get(key);
-  if (!v) {
-    v = make();
-    memo.set(key, v);
-  }
-  return v;
-}
-
-export function itemIcon(item: Item): string {
-  if (!sources) return NO_SOURCE;
-  const key = `${item.kind}:${item.liters ?? 0}:${item.dirty ? 1 : 0}:${item.food ?? ''}:${item.nested?.length ?? 0}:${item.load ?? 0}:${item.fill ?? 0}:${item.charges ? 1 : 0}:${item.veg ?? ''}`;
-  return cached(`i:${key}`, () => sources!.itemUrl(item));
-}
-
-export function portraitIcon(id: string): string {
-  if (!sources) return NO_SOURCE;
-  return cached(`p:${id}`, () => sources!.portraitUrl(id));
-}
-
-export function vegIcon(piece: Prep['pieces'][number]): string {
-  if (!sources) return NO_SOURCE;
-  // Рисунок зависит от того, какие пятна уже срезаны
-  const key = `${piece.kind}:${piece.spots.map((s) => (s.cut ? 1 : 0)).join('')}`;
-  return cached(`v:${key}`, () => sources!.vegUrl(piece));
-}
-
-export function barrowIcon(): string {
-  if (!sources) return NO_SOURCE;
-  return cached('b', () => sources!.barrowUrl());
-}
-
-// Значки на сетке 8×8: каждая клетка — один «пиксель»
-function px(rows: string[]): string {
-  const rects = rows
-    .flatMap((r, y) => [...r].map((c, x) => (c === '#' ? `<rect x="${x}" y="${y}" width="1" height="1"/>` : '')))
-    .join('');
-  return `<svg width="14" height="14" viewBox="0 0 ${rows[0].length} ${rows.length}" fill="currentColor" shape-rendering="crispEdges">${rects}</svg>`;
-}
+const wrap = (body: string) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
 export const ICON = {
-  hand: px(['..#.#...', '.##.##..', '.##.##.#', '.######.', '#######.', '.######.', '..####..', '..####..']),
-  eye: px(['........', '..####..', '.#....#.', '#..##..#', '#..##..#', '.#....#.', '..####..', '........']),
-  pause: px(['........', '.##..##.', '.##..##.', '.##..##.', '.##..##.', '.##..##.', '.##..##.', '........']),
-  sun: px(['...#....', '.#...#..', '..###...', '#.###.#.', '..###...', '.#...#..', '...#....', '........']),
-  moon: px(['..###...', '.##.....', '##......', '##......', '##......', '.##...#.', '..####..', '........']),
-  drop: px(['...#....', '...#....', '..###...', '.#####..', '.##.##..', '.#####..', '..###...', '........']),
-  hay: px(['........', '########', '#.#..#.#', '########', '#.#..#.#', '########', '........', '........']),
-  bowl: px(['........', '........', '########', '#......#', '.#....#.', '..####..', '........', '........']),
-  check: px(['........', '.......#', '......##', '#....##.', '##..##..', '.####...', '..##....', '........']),
-  cross: px(['........', '.#....#.', '..#..#..', '...##...', '...##...', '..#..#..', '.#....#.', '........']),
-  star: px(['...#....', '...#....', '#######.', '.#####..', '..###...', '.##.##..', '.#...#..', '........']),
-  info: px(['..###...', '........', '.####...', '..###...', '..###...', '..###...', '.#####..', '........']),
-  good: px(['........', '.......#', '......##', '#....##.', '##..##..', '.####...', '..##....', '........']),
-  bad: px(['...##...', '..####..', '..####..', '.##..##.', '.######.', '##.##.##', '########', '........']),
-  hint: px(['..###...', '.#####..', '.#####..', '.#####..', '..###...', '..###...', '...#....', '..###...']),
-  // Запасы (этап 2)
-  sack: px(['..####..', '..#..#..', '.######.', '.######.', '#.#..#.#', '.######.', '.######.', '..####..']),
-  carrot: px(['.....##.', '....##..', '...####.', '..####..', '.####...', '####....', '###.....', '#.......']),
-  apple: px(['....#...', '...##...', '..#..#..', '.######.', '.######.', '.######.', '..####..', '........']),
-  bale: px(['########', '#.#..#.#', '########', '#.#..#.#', '########', '#.#..#.#', '########', '........']),
-  straw: px(['.#.#.#..', '#.#.#.#.', '.#.#.#..', '#.#.#.#.', '.#.#.#..', '#.#.#.#.', '........', '........']),
-  saw: px(['..#..#..', '.######.', '.######.', '.######.', '.######.', '..####..', '........', '........']),
-  speaker: px(['...##...', '..###.#.', '#####..#', '#####.#.', '#####..#', '..###.#.', '...##...', '........']),
-  mute: px(['...##...', '..###...', '#####.#.', '#####..#', '#####.#.', '..###...', '...##...', '........']),
-  save: px(['#######.', '#.###.##', '#.###..#', '########', '#.####.#', '#.#..#.#', '########', '........']),
-  clipboard: px(['..####..', '.######.', '########', '#.####.#', '#.#..#.#', '#.####.#', '########', '........']),
-  compass: px(['..####..', '.#....#.', '#..##..#', '#.#..#.#', '#..##..#', '.#....#.', '..####..', '........']),
+  logo: wrap('<path d="M5 16c-1.5-1-2-3-1.5-5C4.5 7 8 5 12 5c4.5 0 8 3 8 7 0 2-1 3.5-2.5 4.2"/><path d="M17.5 16.2c-.3 2.1-1.4 3.3-3 3.3"/><path d="M8 14v4M12 14v4"/><circle cx="15.5" cy="9.5" r=".6" fill="currentColor"/>'),
+  sun: wrap('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: wrap('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+  journal: wrap('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/><path d="M9 8h6"/>'),
+  sound: wrap('<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>'),
+  mute: wrap('<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l5 6M22 9l-5 6"/>'),
+  menu: wrap('<path d="M4 7h16M4 12h16M4 17h16"/>'),
+  pause: wrap('<path d="M9 5v14M15 5v14"/>'),
+  play: wrap('<path d="M7 5l12 7-12 7z"/>'),
+  map: wrap('<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>'),
+  target: wrap('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>'),
+  close: wrap('<path d="M6 6l12 12M18 6L6 18"/>'),
+  hand: wrap('<path d="M8 12V6.5a1.5 1.5 0 0 1 3 0V11"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-.5A5.5 5.5 0 0 1 5 14.5V12a1.5 1.5 0 0 1 3 0"/>'),
+  drop: wrap('<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'),
+  hay: wrap('<rect x="3" y="8" width="18" height="9" rx="2"/><path d="M8 8v9M16 8v9"/>'),
+  door: wrap('<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M14 12h.01"/>'),
+  house: wrap('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>'),
+  heart: wrap('<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>'),
+  zzz: wrap('<path d="M5 6h6L5 14h6M14 12h5l-5 6h5"/>'),
+  alert: wrap('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>'),
+  temp: wrap('<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/>'),
+  run: wrap('<circle cx="14" cy="4.5" r="1.6"/><path d="M9 21l2.5-6 3 2.5V22M7 12l3-3.5 4 1 2.5 3 2.5.5"/>'),
+  drop2: wrap('<path d="M6 19h12M8 15l4 4 4-4M12 5v14"/>'),
+  plus: wrap('<path d="M12 5v14M5 12h14"/>'),
+  minus: wrap('<path d="M5 12h14"/>'),
 };
+
+export type IconName = keyof typeof ICON;
