@@ -89,7 +89,7 @@ export interface KeeperContact {
 export function keeperContact(s: State): KeeperContact | null {
   const k = s.keeper;
   let best: KeeperContact | null = null;
-  let bestD = 1.45;
+  let bestD = 1.65;
   for (const l of CONTACT_LINES) {
     const c = closestOnSegment(k.x, k.y, l.x0, l.y0, l.x1, l.y1);
     if (c.d < bestD && (k.y - c.y) * l.keeperSide >= 0) {

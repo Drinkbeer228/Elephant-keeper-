@@ -262,6 +262,7 @@ function astar(field: Float32Array, from: Vec, to: Vec, need: number, cost?: (i:
     anchor = raw[j];
     i = j + 1;
   }
+  if (!out.length) out.push(to);
   return out;
 }
 

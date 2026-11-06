@@ -61,8 +61,6 @@ function blocked(s: State, x: number, y: number, r: number): boolean {
   if (keeperIndex.hits(x, y, r)) return true;
   if (!s.world.gateOpen && circleHitsRect(x, y, r, GATE)) return true;
   for (const d of DOORS) if (!doorUnlocked(s, d) && circleHitsRect(x, y, r, d.rect)) return true;
-  const b = s.world.barrow;
-  if (!b.pushed && Math.hypot(x - b.x, y - b.y) < r + 0.42) return true;
   return false;
 }
 
@@ -95,13 +93,22 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
   if (heavy(k.held)) speed *= KEEPER.heavyFactor;
   if (b.pushed) speed *= KEEPER.barrowFactor * (1 - 0.15 * (b.load / KEEPER.barrowMax));
   const step = speed * dtSec;
+  // Тачка едет впереди; у стены и в дверях она чуть доворачивает, чтобы пройти
+  let barrowHeading = b.heading;
+  const barrowFits = (x: number, y: number, h: number): number | null => {
+    for (const off of [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8]) {
+      const hh = h + off;
+      if (!barrowBlocked(s, x + Math.cos(hh) * 0.95, y + Math.sin(hh) * 0.95)) return hh;
+    }
+    return null;
+  };
   const tryMove = (x: number, y: number): boolean => {
     if (blocked(s, x, y, KEEPER.radius)) return false;
     if (k.held?.kind === 'hose' && Math.hypot(x - HOSE_REEL.x, y - HOSE_REEL.y) > HOSE_LENGTH) return false;
     if (b.pushed) {
-      const bx = x + Math.cos(k.facing) * 0.95;
-      const by = y + Math.sin(k.facing) * 0.95;
-      if (barrowBlocked(s, bx, by)) return false;
+      const h = barrowFits(x, y, Math.atan2(y - k.y, x - k.x));
+      if (h === null) return false;
+      barrowHeading = h;
     }
     k.x = x;
     k.y = y;
@@ -109,16 +116,12 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
   };
   const moved = tryMove(k.x + nx * step, k.y + ny * step) || tryMove(k.x + nx * step, k.y) || tryMove(k.x, k.y + ny * step);
   k.moving = moved;
-  if (b.pushed) {
-    b.x = k.x + Math.cos(k.facing) * 0.95;
-    b.y = k.y + Math.sin(k.facing) * 0.95;
-    b.heading = k.facing;
-    if (barrowBlocked(s, b.x, b.y)) {
-      // Поворот упёрся тачкой в стену — оставляем её там, где можно
-      b.x = k.x + Math.cos(want) * 0.95;
-      b.y = k.y + Math.sin(want) * 0.95;
-    }
+  if (b.pushed && moved) {
+    b.heading = barrowHeading;
+    b.x = k.x + Math.cos(b.heading) * 0.95;
+    b.y = k.y + Math.sin(b.heading) * 0.95;
   }
+  void want;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,10 +224,11 @@ export function availableActions(s: State): ActionOption[] {
   // --- Зов: кипер у решётки или ограды ---------------------------------
   if (contact && !inZone) {
     const atDrain = near(s, 'trainingWall', 1.5);
+    // Звать имеет смысл тех, до кого не дотянуться рукой
     const list = s.elephants
-      .filter((e) => zoneOf(e) === contact.zone || w.gateOpen)
+      .filter((e) => (zoneOf(e) === contact.zone || w.gateOpen) && !keeperCanTouch(s, e))
       .sort((a, b) => dist(a, k) - dist(b, k))
-      .slice(0, 4);
+      .slice(0, 3);
     for (const e of list) {
       const toilet = e.signal?.kind === 'toilet';
       const acc = nameCase(e.profile.name, 'acc');
@@ -324,7 +328,7 @@ export function availableActions(s: State): ActionOption[] {
       if (w.container >= KEEPER.containerMax) out.push(off({ verb: 'dumpBarrow', target: 'container' }, 'Высыпать тачку', 'Контейнер полон — его вывозят утром', 100));
       else out.push(opt({ verb: 'dumpBarrow', target: 'container' }, `Высыпать тачку в контейнер (${b.load}/${KEEPER.barrowMax})`, 100, { timed: true }));
     }
-  } else if (dist(k, b) < 1.4 && (!h || h.kind === 'fork' || h.kind === 'rake')) {
+  } else if (dist(k, b) < 1.7 && (!h || h.kind === 'fork' || h.kind === 'rake')) {
     out.push(opt({ verb: 'pushBarrow', target: 'barrow' }, `Взять тачку (${b.load}/${KEEPER.barrowMax})`, 36));
   }
   if (h && (h.kind === 'fork' || h.kind === 'rake') && h.load > 0) {
@@ -660,6 +664,10 @@ export function applyAction(s: State, ref: ActionRef): void {
       break;
     case 'pushBarrow':
       w.barrow.pushed = true;
+      w.barrow.heading = Math.atan2(w.barrow.y - k.y, w.barrow.x - k.x);
+      k.facing = w.barrow.heading;
+      w.barrow.x = k.x + Math.cos(w.barrow.heading) * 0.95;
+      w.barrow.y = k.y + Math.sin(w.barrow.heading) * 0.95;
       break;
     case 'parkBarrow':
       w.barrow.pushed = false;

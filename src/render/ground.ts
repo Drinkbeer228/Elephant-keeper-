@@ -267,7 +267,7 @@ export function buildGround(scene: Phaser.Scene): void {
   const signs: [string, number, number][] = [
     ['Выгул', 24, 2.0],
     ['Слоновник', 27.6, 29.05],
-    ...ROOMS.map((rm) => [rm.label, (rm.rect.x0 + rm.rect.x1) / 2, rm.rect.y1 - 0.75] as [string, number, number]),
+    ...ROOMS.map((rm) => [rm.label, (rm.rect.x0 + rm.rect.x1) / 2 + (rm.id === 'duty' ? 2.2 : rm.id === 'store' ? -1.6 : 0), rm.rect.y0 + 0.8] as [string, number, number]),
     ['Хоздвор', 6, 30.0],
     ['Двор', 38, 30.0],
   ];

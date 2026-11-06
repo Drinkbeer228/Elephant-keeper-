@@ -235,6 +235,10 @@ export class Hud {
     if (selected !== this.inspectId) {
       this.inspectId = selected;
       this.inspectKey = '';
+      if (selected && this.journalOpen) {
+        this.journalOpen = false;
+        this.refs.journal.hidden = true;
+      }
     }
     this.renderInspect(s);
     if (this.journalOpen) this.renderJournal(s);
@@ -301,7 +305,7 @@ export class Hud {
       return;
     }
     const main = list[0] ?? drop!;
-    const rest = list.slice(1, 6);
+    const rest = list.slice(1, 4);
     b.className = 'banner';
     b.innerHTML = `
       <button class="act main ${main.enabled ? '' : 'off'}" data-action="${main.id}" title="${esc(main.reason)}">
@@ -391,6 +395,8 @@ export class Hud {
     this.journalOpen = !this.journalOpen;
     this.refs.journal.hidden = !this.journalOpen;
     this.journalKey = '';
+    // Журнал и осмотр занимают одно место — открыт только один
+    if (this.journalOpen && this.inspectId) this.h.select(null);
   }
 
   private renderJournal(s: State): void {

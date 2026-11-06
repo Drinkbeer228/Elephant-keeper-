@@ -101,8 +101,8 @@ export interface DoorDef {
 }
 
 export const DOORS: DoorDef[] = [
-  { id: 'barnDoor', rect: { x0: 29.8, y0: 27, x1: 30.2, y1: 28.2 }, zone: 'barn', label: 'Дверь в слоновник' },
-  { id: 'paddockDoor', rect: { x0: 41, y0: 19.85, x1: 42.2, y1: 20.15 }, zone: 'paddock', label: 'Дверь на выгул' },
+  { id: 'barnDoor', rect: { x0: 29.8, y0: 26.8, x1: 30.2, y1: 28.3 }, zone: 'barn', label: 'Дверь в слоновник' },
+  { id: 'paddockDoor', rect: { x0: 40.9, y0: 19.85, x1: 42.4, y1: 20.15 }, zone: 'paddock', label: 'Дверь на выгул' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ export const DOORS: DoorDef[] = [
 
 const barnNorth = hline(10, 30, 20, WALL, [[17.5, 22.5]]);
 const barnWest = vline(10, 20, 30, WALL);
-const barnEast = vline(30, 20, 30, WALL, [[27, 28.2]]);
+const barnEast = vline(30, 20, 30, WALL, [[26.8, 28.3]]);
 const barnSouth = hline(10, 30, 30, FENCE); // решётка: кипер работает через неё
 
 const paddockFence = [
@@ -119,7 +119,7 @@ const paddockFence = [
   ...vline(2, 2, 20, FENCE),
   ...vline(46, 2, 20, FENCE),
   ...hline(2, 10, 20, FENCE),
-  ...hline(30, 46, 20, FENCE, [[41, 42.2]]),
+  ...hline(30, 46, 20, FENCE, [[40.9, 42.4]]),
 ];
 
 // Служебная часть: внешний периметр и ряд помещений
