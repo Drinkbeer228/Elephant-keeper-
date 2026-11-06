@@ -587,6 +587,20 @@ export class WorldView {
     }
   }
 
+  // Новое стадо (новая игра, загрузка другой смены): текстуры тазов и осколков рисуются по слонам
+  // и пересоздаются под теми же ключами. Картинки, которые на них ссылаются, нужно отпустить
+  // до замены — иначе WebGL рисует удалённую текстуру и сцена падает.
+  dropHerdImages(): void {
+    for (const im of this.tubs.values()) im.destroy();
+    this.tubs.clear();
+    for (const [id, im] of this.items) {
+      if (!im.texture.key.startsWith('shard-')) continue;
+      im.destroy();
+      this.items.delete(id);
+    }
+    for (const im of this.barrowCargo) if (im.texture.key.startsWith('tub-')) im.setTexture('__DEFAULT').setVisible(false);
+  }
+
   private syncTubs(s: State): void {
     const g = this.tubFill;
     g.clear();
