@@ -1,6 +1,8 @@
 // Главная сцена: строит мир из текстур и векторной графики и каждый кадр показывает состояние симуляции.
 
 import Phaser from 'phaser';
+import { SIGNS, SIGN_SCALE } from './ground';
+import { labelScale, setLabelZoom } from './labels';
 import { H, W } from '../data/facility';
 import type { SimEvent, State } from '../sim';
 import { ElephantView } from './ElephantView';
@@ -201,5 +203,9 @@ export class WorldScene extends Phaser.Scene {
     const want = this.overview ? this.fitZoom() : this.baseZoom() * this.targetZoom;
     this.zoomLevel += (want - this.zoomLevel) * Math.min(1, dt * 7);
     cam.setZoom(this.zoomLevel);
+    // Подписи — читаемого размера при любом зуме
+    setLabelZoom(this.zoomLevel / this.baseZoom());
+    const ls = SIGN_SCALE * labelScale();
+    for (const sign of SIGNS) if (sign.scaleX !== ls) sign.setScale(ls);
   }
 }

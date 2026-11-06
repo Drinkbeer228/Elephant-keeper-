@@ -222,7 +222,11 @@ export class Input {
     base.addEventListener('pointerdown', (e) => {
       this.onGesture();
       id = e.pointerId;
-      base.setPointerCapture(e.pointerId);
+      try {
+        base.setPointerCapture(e.pointerId);
+      } catch {
+        // указатель уже ушёл (или браузер не умеет захват) — стик работает и без него
+      }
       update(e);
     });
     base.addEventListener('pointermove', (e) => {

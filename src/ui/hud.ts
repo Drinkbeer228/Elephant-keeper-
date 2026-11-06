@@ -495,7 +495,7 @@ export class Hud {
       <ul class="hints">${characterHints(p).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>
       <p class="muted small-p">${esc(signalHabitText(p))}</p>
       <h3>Рацион</h3>
-      <p class="small-p">Сено ${diet.hayKg} кг в сутки, ветки ${diet.branchesKg} кг. Каша в 13:00 и 17:00 — ${esc(diet.porridge.product)}, ${String(diet.porridge.kg).replace('.', ',')} кг (запарить за час). Овощи в 19:00 — свой таз. <span class="muted">По данным SlonVet (рацион «${esc(diet.source)}»).</span></p>
+      <p class="small-p">Сено ${diet.hayKg} кг в сутки, ветки ${diet.branchesKg} кг. Каша в 13:00 и 17:00 — ${esc(diet.porridge.product)}, ${String(diet.porridge.kg).replace('.', ',')} кг (запарить за час). Овощи в 19:00 — свой таз. <span class="muted">Рацион из SlonVet — тот же, что у слонихи ${esc(diet.source)}.</span></p>
       <details><summary>Черты подробно</summary><div class="grid traits">${TRAIT_KEYS.map((k) => `<div class="row"><span>${TRAIT_LABELS[k]}</span><span class="bar neutral"><i style="width:${(p.traits[k] * 100).toFixed(0)}%"></i></span></div>`).join('')}</div></details>
       ${rel ? `<h3>В стаде</h3><ul class="rel">${rel}</ul>` : ''}
       <div class="ins-actions"><button class="btn" data-focus>${ICON.target}<span>Показать на карте</span></button></div>`;
@@ -551,7 +551,7 @@ export class Hud {
         const tub = s.world.tubs.find((t) => t.owner === e.id);
         const vegKg = Math.max(s.world.checks.vegTub[e.id] ?? 0, tub && tub.where !== 'floor' ? tubKg(tub) : 0);
         const tick = (ok: boolean) => (ok ? '<span class="good-t">✓</span>' : '<span class="muted">○</span>');
-        return `<li><b>${esc(e.profile.name)}</b> <span class="muted">· рацион «${esc(d.source)}»</span>
+        return `<li><b>${esc(e.profile.name)}</b> <span class="muted">· рацион SlonVet, как у ${esc(d.source)}</span>
           <div class="ration">
             <span>${tick(porridge.length >= 1)} 13:00 каша: ${esc(d.porridge.product)} ${String(d.porridge.kg).replace('.', ',')} кг</span>
             <span>${tick(porridge.length >= 2)} 17:00 каша</span>

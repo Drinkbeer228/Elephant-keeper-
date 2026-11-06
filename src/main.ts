@@ -316,6 +316,7 @@ function start(): void {
       },
       game,
       perf,
+      sound,
     },
   });
 }

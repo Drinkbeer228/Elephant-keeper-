@@ -2,6 +2,7 @@
 // Поза и анимация читаются из состояния симуляции — сама отрисовка ничего не решает.
 
 import Phaser from 'phaser';
+import { labelScale } from './labels';
 import { headPos, signalClarity, type Elephant, type State } from '../sim';
 import { STATIONS, TIRE, DRUM } from '../data/facility';
 import { bodyGeom, ELEPHANT_INK, rnd } from './art';
@@ -337,7 +338,7 @@ export class ElephantView {
 
     // Подпись и пузырь сигнала
     const top = e.y - 2.35 * e.profile.look.size;
-    this.name.setPosition(e.x * P, top * P).setVisible(showNames || this.selected);
+    this.name.setPosition(e.x * P, top * P).setScale(ART_SCALE * 0.85 * labelScale()).setVisible(showNames || this.selected);
     const sig = e.signal;
     if (sig) {
       const clarity = signalClarity(e);

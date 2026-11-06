@@ -380,11 +380,16 @@ export function buildGround(scene: Phaser.Scene): void {
     ['Хоздвор', 6, 29.2],
     ['Двор', 37, 29.2],
   ];
+  SIGNS.length = 0;
   signs.forEach(([text, x, y], i) => {
     addArt(scene, `sign-${i}`, roomSign(text));
-    placeImage(scene, `sign-${i}`, x, y, D.wall + 2).setScale(0.3);
+    SIGNS.push(placeImage(scene, `sign-${i}`, x, y, D.wall + 2).setScale(SIGN_SCALE));
   });
 }
+
+// Таблички — сцена подстраивает их размер под зум (см. labels.ts)
+export const SIGN_SCALE = 0.3;
+export const SIGNS: Phaser.GameObjects.Image[] = [];
 
 export function isOutdoor(x: number, y: number): boolean {
   return !inRect(BARN, x, y) && !ROOMS.some((r) => inRect(r.rect, x, y));

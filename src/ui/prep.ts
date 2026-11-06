@@ -395,9 +395,8 @@ interface Layout {
   veg: { x: number; y: number; r: number };
 }
 
-function layout(W: number, H: number): Layout {
-  const top = W < 640 ? 118 : 74;
-  const bottom = 70;
+// top и bottom — где кончается шапка и начинаются подсказки рук (меряются по DOM)
+function layout(W: number, H: number, top: number, bottom: number): Layout {
   const ah = Math.max(240, H - top - bottom);
   const portrait = W < H * 0.9;
   let board;
@@ -409,7 +408,7 @@ function layout(W: number, H: number): Layout {
     const cw = Math.min(W * 0.42, ah * 0.3);
     crate = { x: W * 0.04, y: top + ah * 0.02, w: cw, h: cw * 0.64 };
     const tr = Math.min(W * 0.2, ah * 0.15);
-    tub = { x: W * 0.06 + tr, y: top + ah - tr * 1.02, r: tr };
+    tub = { x: W * 0.06 + tr, y: top + ah - tr * 1.06, r: tr };
   } else {
     const bw = Math.min(W * 0.4, ah * 0.85);
     board = { x: W * 0.54, y: top + ah * 0.5, w: bw, h: bw * 0.62 };
@@ -492,6 +491,7 @@ export class PrepView {
   private floaters: Floater[] = [];
   private inFlight: Partial<Record<VegKind, number>> = {};
   private size = { w: 0, h: 0, dpr: 1 };
+  private edges = { top: 80, bottom: 76 };
 
   constructor(parent: HTMLElement, private h: PrepHandlers) {
     this.root = document.createElement('div');
@@ -621,7 +621,8 @@ export class PrepView {
         this.flyers.push({ veg: v, t: 0, x0: L.veg.x, y0: L.veg.y, x1: L.tub.x + Math.cos(ang) * rr, y1: L.tub.y + Math.sin(ang) * rr });
         this.inFlight[v] = (this.inFlight[v] ?? 0) + 1;
         this.flickT = 0;
-        const combo = (this.snap?.combo ?? 0) + 1;
+        // Снимок уже после шага: серия в нём учитывает этот бросок
+        const combo = this.snap?.combo ?? 0;
         if (combo > 0 && combo % 10 === 0) this.floaters.push({ text: `Серия ×${combo}!`, x: L.board.x, y: L.board.y - L.board.h * 0.75, t: 0, color: '#2e5a44', big: true });
         break;
       }
@@ -639,7 +640,7 @@ export class PrepView {
   }
 
   private lay(): Layout {
-    return layout(this.size.w || window.innerWidth, this.size.h || window.innerHeight);
+    return layout(this.size.w || window.innerWidth, this.size.h || window.innerHeight, this.edges.top, this.edges.bottom);
   }
 
   private tick(dt: number): void {
@@ -682,7 +683,7 @@ export class PrepView {
       f.t += dt / 0.42;
       if (f.t >= 1) {
         this.inFlight[f.veg] = Math.max(0, (this.inFlight[f.veg] ?? 0) - 1);
-        this.floaters.push({ text: '+1 кг', x: L.tub.x + L.tub.r * 0.7, y: L.tub.y - L.tub.r * 0.9, t: 0, color: '#2e5a44', big: false });
+        this.floaters.push({ text: '+1 кг', x: L.tub.x + L.tub.r * 1.25, y: L.tub.y - L.tub.r * 0.2, t: 0, color: '#2e5a44', big: false });
         for (let i = 0; i < 6; i++)
           this.particles.push({ x: f.x1, y: f.y1, vx: (Math.random() - 0.5) * L.tub.r * 4, vy: -L.tub.r * (1.5 + Math.random() * 2), rot: 0, vr: 0, life: 0, max: 0.35, size: L.tub.r * 0.05, color: ART[f.veg].cut, veg: null });
       }
@@ -716,6 +717,14 @@ export class PrepView {
     this.refs.R.classList.toggle('want', want === 'R');
   }
 
+  // Сколько места занимают шапка и подсказки рук: стол рисуется между ними
+  private measure(): void {
+    const head = this.root.querySelector('.prep-head')?.getBoundingClientRect();
+    const sides = this.root.querySelector('.prep-sides')?.getBoundingClientRect();
+    if (head && head.height > 0) this.edges.top = head.bottom + 14;
+    if (sides && sides.height > 0) this.edges.bottom = Math.max(40, window.innerHeight - sides.top + 22);
+  }
+
   private resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -734,7 +743,8 @@ export class PrepView {
     if (!sn) return;
     const ctx = this.ctx;
     const { w: W, h: H, dpr } = this.size;
-    const L = layout(W, H);
+    this.measure();
+    const L = layout(W, H, this.edges.top, this.edges.bottom);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.drawTable(ctx, W, H, L);
     this.drawCrate(ctx, L, sn);
@@ -744,7 +754,7 @@ export class PrepView {
 
     // Овощ на доске (во время «взять» — летит из ящика в руке)
     const lr = L.veg.r * 0.95;
-    const rest = { x: L.veg.x - L.board.w * 0.42, y: L.veg.y + L.board.h * 0.52 };
+    const rest = { x: L.board.x - L.board.w * 0.12, y: L.board.y + L.board.h * 0.72 };
     const crateC = { x: L.crate.x + L.crate.w * 0.5, y: L.crate.y + L.crate.h * 0.5 };
     let hand = { x: rest.x, y: rest.y, rot: -0.35, curl: 0 };
     const holdX = L.veg.x - L.veg.r * (sn.hand ? ART[sn.hand].w : 1) * 0.55 - lr * 0.95;
@@ -800,9 +810,10 @@ export class PrepView {
     // Нож: поднят над хвостиком, при нарезке опускается
     const a = sn.hand ? ART[sn.hand] : ART.potato;
     const tailX = L.veg.x + L.veg.r * a.w * 0.92 + shake;
-    const len = L.board.h * 1.05;
-    let ky = L.veg.y - L.board.h * 0.62;
-    let kr = -0.32;
+    const kxWant = sn.hand ? L.veg.x + L.veg.r * (sn.hand ? ART[sn.hand].w : 1) * 0.92 : L.board.x + L.board.w * 0.38;
+    const len = Math.max(L.board.h * 0.5, Math.min(L.board.h * 0.85, (W - 12 - kxWant) / 0.9));
+    let ky = L.veg.y - L.board.h * 0.5;
+    let kr = -0.22;
     if (this.chopT < 1) {
       const t = this.chopT;
       const down = t < 0.35 ? ease(t / 0.35) : t < 0.5 ? 1 : 1 - ease((t - 0.5) / 0.5);
@@ -886,8 +897,10 @@ export class PrepView {
     ctx.font = `700 ${px}px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    const half = (ctx.measureText(text).width + px * 1.1) / 2;
+    x = Math.max(half + 6, Math.min(this.size.w - half - 6, x));
     if (pill) {
-      const w = ctx.measureText(text).width + px * 1.1;
+      const w = half * 2;
       ctx.fillStyle = 'rgba(244, 241, 234, 0.94)';
       ctx.beginPath();
       rrect(ctx, x - w / 2, y - px * 0.85, w, px * 1.7, px * 0.85);
@@ -1026,7 +1039,8 @@ export class PrepView {
     ctx.ellipse(t.x - t.r * 0.45, t.y - t.r * 0.62, t.r * 0.22, t.r * 0.07, -0.6, 0, Math.PI * 2);
     ctx.fill();
     const kg = Object.values(sn.veg).reduce((a, b) => a + b, 0);
-    this.label(ctx, `Таз ${sn.owner}: ${kg}/${sn.planKg} кг`, t.x, t.y + t.r + 18, 13, INK, true);
+    // Подпись над тазом: снизу экрана — подсказки рук
+    this.label(ctx, `Таз ${sn.owner}: ${kg}/${sn.planKg} кг`, t.x, t.y - t.r - 16, 13, INK, true);
   }
 
   private drawBoard(ctx: CanvasRenderingContext2D, L: Layout, shake: number): void {

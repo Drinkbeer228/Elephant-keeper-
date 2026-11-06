@@ -1314,6 +1314,7 @@ details .traits {
 
 .chip {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 5px;
   padding: 3px 9px;
@@ -1412,6 +1413,19 @@ details .traits {
   .prep-head {
     gap: 6px;
     padding: 6px 8px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .prep-chips {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .prep-note {
+    display: none;
   }
   .chip {
     font-size: 11px;
