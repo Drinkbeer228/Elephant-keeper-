@@ -1,21 +1,33 @@
-// Движение кипера: стены, запертые двери и закрытые ворота, тачка впереди,
+// Движение кипера: стены и закрытые ворота, слоны рядом, тачка впереди,
 // шланг на привязи, тяжёлая ноша. С тюка сыплется, особенно бегом; тачка с тюками,
 // налетевшая на угол, рассыпает сено.
 
 import { FLOOR, KEEPER } from '../../data/balance';
-import { DOORS, GATES, hardFloor, zoneAt } from '../../data/facility';
+import { GATES, gateSolid, hardFloor, zoneAt } from '../../data/facility';
+import { bodyCircles } from '../behavior/perceive';
 import { log } from '../events';
 import { circleHitsRect, keeperIndex } from '../geometry';
 import type { State, StepInput } from '../types';
 import { addLitter } from '../world';
-import { areaEmpty } from './access';
 import { heavy } from './common';
 import { hoseFollow } from './hose';
 
+// Стены и закрытые створки (щель кипера в разделительных воротах — проходима). Слон — тоже
+// препятствие: сквозь него не пройти, его просят подвинуться или обходят. Шаг, который не
+// уменьшает и так возникшее перекрытие (слон сам надвинулся), не запрещаем — выйти можно всегда.
 function blocked(s: State, x: number, y: number, r: number): boolean {
   if (keeperIndex.hits(x, y, r)) return true;
-  for (const g of GATES) if (!s.world.gates[g.id] && circleHitsRect(x, y, r, g.rect)) return true;
-  for (const d of DOORS) if (!areaEmpty(s, d.area) && circleHitsRect(x, y, r, d.rect)) return true;
+  for (const g of GATES) if (!s.world.gates[g.id] && gateSolid(g).some((p) => circleHitsRect(x, y, r, p))) return true;
+  const k = s.keeper;
+  for (const e of s.elephants) {
+    if (Math.abs(e.x - x) > 4 || Math.abs(e.y - y) > 4) continue;
+    for (const c of bodyCircles(e)) {
+      const now = Math.hypot(x - c.x, y - c.y) - c.r - r;
+      if (now >= -0.02) continue;
+      const before = Math.hypot(k.x - c.x, k.y - c.y) - c.r - r;
+      if (now < before) return true;
+    }
+  }
   return false;
 }
 
@@ -24,6 +36,11 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
   const len = Math.hypot(input.move.x, input.move.y);
   k.running = input.run && len > 0.1;
   k.moving = false;
+  // Сбили с ног или оттолкнули — пару секунд приходит в себя
+  if (k.stun > 0) {
+    k.stun = Math.max(0, k.stun - dtSec);
+    return;
+  }
   if (len < 0.08) return;
   if (k.prep) {
     k.prep = null;
@@ -43,7 +60,11 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
   const b = s.world.barrow;
   let speed = KEEPER.speed * Math.min(1, len) * (k.running ? KEEPER.runFactor : 1);
   if (heavy(k.held, s)) speed *= k.held?.kind === 'tub' ? KEEPER.tubFactor : KEEPER.heavyFactor;
+  // Ведро с мочой: чем полнее, тем тяжелее идти
+  if (k.held?.kind === 'tank' && k.held.load > 0) speed *= 1 - 0.4 * Math.min(1, k.held.load / KEEPER.tankLiters);
   if (b.pushed) speed *= KEEPER.barrowFactor * (1 - 0.15 * (b.load / KEEPER.barrowMax));
+  // Ведёшь слониху рядом — идёшь её шагом, а не убегаешь вперёд
+  if (s.elephants.some((e) => e.act.kind === 'walkWith')) speed = Math.min(speed, KEEPER.leadSpeed);
   const step = speed * dtSec;
   // Тачка едет впереди; у стены и в дверях она чуть доворачивает, чтобы пройти
   let barrowHeading = b.heading;

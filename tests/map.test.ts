@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AISLE,
+  AREA_IDS,
   BARN_SPOTS,
   BEDDING,
   DOORS,
   DRAIN,
+  KEEPER_GAP,
   KEEPER_START,
   POOL,
   SERVICE_EDGE_Y,
@@ -24,17 +25,20 @@ import { elephantCanStand, elephantRoute, keeperFieldAt, keeperRoute, type Keepe
 import { keeperIndex } from '../src/sim/geometry';
 
 const BIG = 1.09; // радиус самой крупной слонихи
-// mask: 1 — ворота на выгул открыты, 2 — ворота между стойлами открыты
+// mask: 1 — ворота на выгул открыты, 2 — разделительные ворота открыты
 const ALL_OPEN = 3;
-const LOCKED: KeeperNavState = { mask: 2, access: [] };
+// Все ворота закрыты: кипер всё равно ходит всюду — через свои двери и щель в разделительных воротах
+const CLOSED: KeeperNavState = { mask: 0, access: AREA_IDS };
 
 describe('карта слоновника', () => {
-  it('два стойла, проход кипера и выгул на своих местах', () => {
+  it('слоновник — один общий зал из двух половин; выгул и помещения на своих местах', () => {
     expect(areaAt(15, 24)).toBe('stallW');
     expect(areaAt(25, 24)).toBe('stallE');
     expect(areaAt(20, 10)).toBe('paddock');
-    expect(areaAt(20, 31.5)).toBeNull();
-    expect(inRect(AISLE, 20, 31.5)).toBe(true);
+    // Прохода кипера больше нет: у южной стены — бетон зала, там же, где слоны
+    expect(areaAt(17, 31.5)).toBe('stallW');
+    expect(areaAt(23, 31.5)).toBe('stallE');
+    expect(inRect(STALL_W, 15, 32.5)).toBe(true);
     expect(zoneAt(DRAIN.x, DRAIN.y)).toBe('barn');
     expect(zoneAt(POOL.x, POOL.y)).toBe('paddock');
     for (const t of TREES) expect(zoneAt(t.x, t.y)).toBe('paddock');
@@ -58,27 +62,34 @@ describe('карта слоновника', () => {
     expect(TROUGH_IDS).toHaveLength(3);
   });
 
-  it('все станции кипера достижимы пешком от дежурки, даже когда слоны во всех отсеках', () => {
+  it('все станции кипера достижимы пешком от дежурки, даже когда все ворота закрыты', () => {
     for (const st of Object.values(STATIONS)) {
       const p = st.keeper;
       expect(keeperIndex.hits(p.x, p.y, 0.3), `${st.id}: точка кипера в стене`).toBe(false);
-      expect(keeperFieldAt(p.x, p.y, LOCKED), `${st.id}: нет прохода`).toBeGreaterThan(0.3);
-      expect(keeperRoute(KEEPER_START, p, LOCKED), `${st.id}: недостижима`).not.toBeNull();
+      expect(keeperFieldAt(p.x, p.y, CLOSED), `${st.id}: нет прохода`).toBeGreaterThan(0.3);
+      expect(keeperRoute(KEEPER_START, p, CLOSED), `${st.id}: недостижима`).not.toBeNull();
     }
   });
 
-  it('в пустое стойло — через свою дверь из прохода; в занятое — никак', () => {
-    const open: KeeperNavState = { mask: 0, access: ['stallW', 'stallE', 'paddock'] };
-    expect(keeperRoute(KEEPER_START, { x: 15, y: 24 }, open)).not.toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 25, y: 24 }, open)).not.toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 20, y: 10 }, open)).not.toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 15, y: 24 }, LOCKED)).toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 25, y: 24 }, LOCKED)).toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 20, y: 10 }, LOCKED)).toBeNull();
-    // Только западное пусто
-    const west: KeeperNavState = { mask: 0, access: ['stallW'] };
-    expect(keeperRoute(KEEPER_START, { x: 15, y: 24 }, west)).not.toBeNull();
-    expect(keeperRoute(KEEPER_START, { x: 25, y: 24 }, west)).toBeNull();
+  it('кипер ходит всюду, где слоны: в зал, на выгул; через закрытые разделительные ворота — щелью', () => {
+    expect(keeperRoute(KEEPER_START, { x: 15, y: 24 }, CLOSED)).not.toBeNull();
+    expect(keeperRoute(KEEPER_START, { x: 25, y: 24 }, CLOSED)).not.toBeNull();
+    expect(keeperRoute(KEEPER_START, { x: 20, y: 10 }, CLOSED)).not.toBeNull();
+    // Из западной половины в восточную при закрытых воротах — только через щель
+    const r = keeperRoute({ x: 18.4, y: 29.3 }, { x: 21.6, y: 29.3 }, CLOSED)!;
+    expect(r).not.toBeNull();
+    const pts = [{ x: 18.4, y: 29.3 }, ...r];
+    let crossed = false;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      if ((a.x - 20) * (b.x - 20) <= 0) {
+        const t = (20 - a.x) / (b.x - a.x || 1);
+        const y = a.y + (b.y - a.y) * t;
+        if (y >= KEEPER_GAP.y0 && y <= KEEPER_GAP.y1) crossed = true;
+      }
+    }
+    expect(crossed).toBe(true);
   });
 
   it('места слонов у кормушек, поилок и стенки доступны даже самой крупной', () => {
@@ -91,7 +102,7 @@ describe('карта слоновника', () => {
     }
   });
 
-  it('ворота: на выгул и между стойлами — закрыты не пройти, открыты — пройти; в двери кипера слон не влезает', () => {
+  it('ворота: на выгул и разделительные — закрыты не пройти (и в щель не влезть), открыты — пройти; в двери слон не влезает', () => {
     const west = BARN_SPOTS[0];
     const east = { x: 25, y: 24 };
     const out = { x: 24, y: 10 };
@@ -110,7 +121,7 @@ describe('карта слоновника', () => {
 
   it('у каждой станции есть подпись и точка подхода', () => {
     const ids = Object.keys(STATIONS) as StationId[];
-    expect(ids.length).toBeGreaterThan(25);
+    expect(ids.length).toBeGreaterThan(22);
     for (const id of ids) expect(STATIONS[id].label.length).toBeGreaterThan(2);
   });
 });

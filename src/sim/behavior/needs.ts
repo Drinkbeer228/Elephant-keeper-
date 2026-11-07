@@ -54,7 +54,11 @@ export function updateNeeds(s: State, e: Elephant, dt: number): void {
 
   n.hunger += (sleeping ? NEEDS.hungerSleep : NEEDS.hunger) * (0.75 + 0.5 * T.foodDrive) * dt;
   n.thirst += NEEDS.thirst * (1 + Math.max(0, temp - 20) / 22 + n.heat / 160) * (sleeping ? 0.5 : 1) * dt;
-  n.bladder += NEEDS.bladder * (sleeping ? 0.7 : 1) * dt;
+  // Пузырь: свой фон плюс выпитая вода, которая доходит до него постепенно (за час-два)
+  const conv = Math.max(0, e.fluid) * NEEDS.fluidRate * (sleeping ? 0.85 : 1) * dt;
+  e.fluid = Math.max(0, e.fluid - conv);
+  if (e.act.kind !== 'urinate' || e.act.phase !== 'do') n.bladder += NEEDS.bladder * (sleeping ? 0.8 : 1) * dt + conv;
+  else e.fluid += conv; // пока мочится — то, что подходит, подождёт
   n.bowel += NEEDS.bowel * (sleeping ? 0.5 : 1) * dt;
 
   if (sleeping) n.fatigue -= NEEDS.fatigueSleep * dt;

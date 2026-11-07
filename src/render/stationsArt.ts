@@ -64,15 +64,6 @@ export function troughArt(w: number, h: number): Art {
   });
 }
 
-// Тренировочная стенка: стальная рама с окнами для ног и хобота, внизу — люк для бака
-export function trainingWallArt(): Art {
-  return draw(2.0, 0.8, 1.0, 0.4, (ctx) => {
-    box(ctx, -0.85, -0.18, 1.7, 0.36, 0.04, C.railDark);
-    for (const x of [-0.5, 0.0, 0.5]) box(ctx, x - 0.17, -0.11, 0.34, 0.22, 0.05, shade(C.railDark, -0.4), 0.02);
-    box(ctx, -0.84, 0.05, 0.36, 0.12, 0.03, '#6a7076', 0.02);
-  });
-}
-
 export function tubRackArt(): Art {
   return draw(4.2, 0.9, 2.1, 0.45, (ctx) => {
     box(ctx, -2.0, -0.32, 4.0, 0.64, 0.05, C.steel);
@@ -185,25 +176,6 @@ export function drainArt(): Art {
       ctx.beginPath();
       ctx.moveTo(x, -0.26);
       ctx.lineTo(x, 0.26);
-      ctx.stroke();
-    }
-  });
-}
-
-export function panelArt(): Art {
-  return draw(0.9, 1.1, 0.45, 0.55, (ctx) => {
-    box(ctx, -0.25, -0.4, 0.5, 0.8, 0.07, C.paper);
-    box(ctx, -0.16, -0.3, 0.32, 0.22, 0.04, C.ink, 0);
-    for (const [y, col] of [
-      [0.05, C.sageMid],
-      [0.24, C.terracotta],
-    ] as const) {
-      ctx.beginPath();
-      ctx.arc(0, y, 0.07, 0, Math.PI * 2);
-      ctx.fillStyle = col;
-      ctx.fill();
-      ctx.lineWidth = 0.025;
-      ctx.strokeStyle = C.ink;
       ctx.stroke();
     }
   });

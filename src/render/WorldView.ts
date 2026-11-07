@@ -4,7 +4,7 @@
 import Phaser from 'phaser';
 import { DOORS, DRUM, FEEDER_IDS, GATES, H, HOSE_REEL, POOL, STATIONS, TIRE, TOOL_KINDS, TOOL_SLOTS, TREES, TROUGH_IDS, W, BALL_START } from '../data/facility';
 import { VEG_KINDS, type VegKind } from '../data/rations';
-import { cellCenter, darkness, doorUnlocked, fruitStage, isBeddingCell, tubKg, type State, type Tub } from '../sim';
+import { cellCenter, darkness, fruitStage, isBeddingCell, tubKg, type State, type Tub } from '../sim';
 import { rnd } from './art';
 import { bakeScale, D } from './ground';
 import { C, hex, mix } from './palette';
@@ -357,9 +357,8 @@ export class WorldView {
       g.fillStyle(hex(C.dung), 1);
       g.fillRoundedRect((cr.x0 + 0.2) * P, (cr.y0 + 0.2 + (1 - fill) * (cr.y1 - cr.y0 - 0.4)) * P, (cr.x1 - cr.x0 - 0.4) * P, fill * (cr.y1 - cr.y0 - 0.4) * P, 0.06 * P);
     }
-    // Двери кипера: металлическая рама, огонёк — можно войти (зелёный) или нет (терракотовый)
+    // Двери: металлическая рама проёма — человеку пройти, слону не протиснуться
     for (const d of DOORS) {
-      const ok = doorUnlocked(s, d);
       const horizontal = d.rect.x1 - d.rect.x0 > d.rect.y1 - d.rect.y0;
       g.fillStyle(hex(C.railDark), 1);
       if (horizontal) {
@@ -368,17 +367,6 @@ export class WorldView {
       } else {
         g.fillRect((d.rect.x0 - 0.05) * P, (d.rect.y0 - 0.08) * P, (d.rect.x1 - d.rect.x0 + 0.1) * P, 0.12 * P);
         g.fillRect((d.rect.x0 - 0.05) * P, (d.rect.y1 - 0.04) * P, (d.rect.x1 - d.rect.x0 + 0.1) * P, 0.12 * P);
-      }
-      g.fillStyle(hex(ok ? C.sageMid : C.terracotta), 1);
-      g.fillCircle(d.light.x * P, d.light.y * P, 0.11 * P);
-      g.lineStyle(0.025 * P, hex(C.ink), 1);
-      g.strokeCircle(d.light.x * P, d.light.y * P, 0.11 * P);
-      if (!ok) {
-        g.lineStyle(0.08 * P, hex(C.railDark), 1);
-        const cx = (d.rect.x0 + d.rect.x1) / 2;
-        const cy = (d.rect.y0 + d.rect.y1) / 2;
-        if (horizontal) g.lineBetween(d.rect.x0 * P, cy * P, d.rect.x1 * P, cy * P);
-        else g.lineBetween(cx * P, d.rect.y0 * P, cx * P, d.rect.y1 * P);
       }
     }
     // Яблоки на деревьях — поверх кроны
@@ -430,12 +418,14 @@ export class WorldView {
     }
   }
 
-  // Сдвижные ворота: стальная створка уезжает в стену (между стойлами — вдоль решётки)
+  // Ворота на выгул — сдвижная створка уезжает в стену. Разделительные — секции-решётки
+  // складываются к северной и южной стенам; в закрытых между секциями остаётся щель кипера.
   private drawGates(s: State, dt: number): void {
     const g = this.gates;
     g.clear();
     for (const gate of GATES) {
-      const target = s.world.gates[gate.id] ? 1 : 0;
+      const open = s.world.gates[gate.id];
+      const target = open ? 1 : 0;
       const k0 = this.gateK[gate.id] ?? target;
       const k = k0 + Math.sign(target - k0) * Math.min(Math.abs(target - k0), dt * 0.9);
       this.gateK[gate.id] = k;
@@ -450,22 +440,28 @@ export class WorldView {
         g.strokeRect(x0 * P, (r.y0 + 0.05) * P, (x1 - x0) * P, (r.y1 - r.y0 - 0.1) * P);
         g.fillStyle(hex(C.railLight), 1);
         for (let x = x0 + 0.25; x < x1; x += 0.5) g.fillRect((x - 0.05) * P, (r.y0 + 0.1) * P, 0.1 * P, (r.y1 - r.y0 - 0.2) * P);
-        g.fillStyle(hex(s.world.gates[gate.id] ? C.sageMid : C.terracotta), 0.9);
+        g.fillStyle(hex(open ? C.sageMid : C.terracotta), 0.9);
         g.fillRect(r.x0 * P, (r.y1 + 0.12) * P, (r.x1 - r.x0) * P, 0.08 * P);
-      } else {
-        // Створка уезжает вдоль решётки на юг, за неподвижную секцию
-        const shift = k * (r.y1 - r.y0 - 0.3);
-        const y0 = r.y0 + shift;
-        const y1 = r.y1 + shift;
-        g.fillStyle(hex(C.railDark), 1);
-        g.fillRect((r.x0 + 0.02) * P, y0 * P, (r.x1 - r.x0 - 0.04) * P, (y1 - y0) * P);
-        g.lineStyle(0.04 * P, hex(C.ink), 1);
-        g.strokeRect((r.x0 + 0.02) * P, y0 * P, (r.x1 - r.x0 - 0.04) * P, (y1 - y0) * P);
-        g.fillStyle(hex(C.railLight), 1);
-        for (let y = y0 + 0.25; y < y1; y += 0.5) g.fillRect((r.x0 + 0.06) * P, (y - 0.05) * P, (r.x1 - r.x0 - 0.12) * P, 0.1 * P);
-        g.fillStyle(hex(s.world.gates[gate.id] ? C.sageMid : C.terracotta), 0.9);
-        g.fillRect((r.x1 + 0.12) * P, r.y0 * P, 0.08 * P, (r.y1 - r.y0) * P);
+        continue;
       }
+      const parts = gate.parts ?? [r];
+      parts.forEach((p, i) => {
+        // Секция у северной стены складывается к ней, остальные — к южной
+        const len = (p.y1 - p.y0) * (1 - 0.88 * k);
+        const y0 = i === 0 ? p.y0 : r.y1 - (r.y1 - p.y0) * (1 - 0.88 * k);
+        const y1 = i === 0 ? p.y0 + len : y0 + len;
+        g.fillStyle(hex(C.railDark), 1);
+        g.fillRect((p.x0 + 0.02) * P, y0 * P, (p.x1 - p.x0 - 0.04) * P, (y1 - y0) * P);
+        g.lineStyle(0.04 * P, hex(C.ink), 1);
+        g.strokeRect((p.x0 + 0.02) * P, y0 * P, (p.x1 - p.x0 - 0.04) * P, (y1 - y0) * P);
+        g.fillStyle(hex(C.railLight), 1);
+        const step = 0.5 * (1 - 0.8 * k);
+        for (let y = y0 + 0.2; y < y1 - 0.05; y += Math.max(0.1, step)) g.fillRect((p.x0 + 0.06) * P, (y - 0.04) * P, (p.x1 - p.x0 - 0.12) * P, 0.08 * P);
+        if (k < 0.5) {
+          g.fillStyle(hex(open ? C.sageMid : C.terracotta), 0.9);
+          g.fillRect((p.x1 + 0.12) * P, y0 * P, 0.08 * P, (y1 - y0) * P);
+        }
+      });
     }
   }
 

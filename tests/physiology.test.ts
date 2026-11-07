@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { runMinutes, step } from '../src/sim';
-import { BEDDING, STATIONS, DRAIN } from '../src/data/facility';
+import { BEDDING, DRAIN, TOILET_STANCE } from '../src/data/facility';
 import { cellOf } from '../src/sim/world';
 import { rearPos } from '../src/sim/behavior/perceive';
+import { forceElimination } from '../src/sim/behavior/act';
 import { game, park } from './helpers';
 
 describe('физиология', () => {
@@ -45,20 +46,45 @@ describe('физиология', () => {
     expect(e.needs.bladder + e.day.urineBedding + e.day.urineOutside + e.day.urineDrain).toBeGreaterThan(5);
   });
 
-  it('полный пузырь опустошается где угодно: на подстилке остаётся мокрое пятно', () => {
+  it('полный пузырь опустошается где угодно: струя течёт секунды, на подстилке остаётся мокрое пятно', () => {
     const s = game(4, 1);
     const e = s.elephants[0];
     park(e, 16, 23.5);
     e.heading = 0;
     e.act.forced = false;
     e.needs.bladder = 100;
-    const p = rearPos(e);
+    const p = rearPos(e, 1.2);
     const before = s.world.cells.wet[cellOf(p.x, p.y)];
     step(s);
     expect(e.act.kind).toBe('urinate');
-    expect(e.needs.bladder).toBe(0);
+    // Не мгновенно: пузырь пустеет постепенно, пока течёт струя
+    expect(e.needs.bladder).toBeGreaterThan(80);
+    const sec = e.act.dur * 60;
+    expect(sec).toBeGreaterThanOrEqual(8);
+    expect(sec).toBeLessThanOrEqual(32);
+    let guard = 0;
+    while (e.act.kind === 'urinate' && guard++ < 200000) step(s);
+    expect(e.needs.bladder).toBeLessThan(3);
     expect(s.world.cells.wet[cellOf(p.x, p.y)]).toBeGreaterThan(before + 0.3);
     expect(e.day.urineBedding).toBe(1);
+  });
+
+  it('сколько мочи — зависит от выпитого: напилась — дольше и больше литров', () => {
+    const run = (drunk: number) => {
+      const s = game(4, 1);
+      const e = s.elephants[0];
+      park(e, 16, 23.5);
+      e.needs.bladder = 10;
+      e.fluid = drunk;
+      // Выпитое доходит до пузыря за час-два
+      runMinutes(s, 120);
+      forceElimination(s, e, 'urinate');
+      return { litres: e.mem.stream!.litres, sec: e.act.dur * 60 };
+    };
+    const dry = run(0);
+    const wet = run(70);
+    expect(wet.litres).toBeGreaterThan(dry.litres * 2);
+    expect(wet.sec).toBeGreaterThan(dry.sec + 8);
   });
 
   it('физиология не зависит от доверия: недоверчивый слон всё равно мочится и испражняется', () => {
@@ -92,17 +118,18 @@ describe('физиология', () => {
   it('моча над стоком уходит в канализацию — подстилка остаётся сухой', () => {
     const s = game(7, 1);
     const e = s.elephants[0];
-    // Туалетная стойка у стенки: слониха стоит боком, зад — над стоком
-    const slot = STATIONS.trainingWall.slots![1];
-    park(e, slot.x, slot.y);
-    e.heading = slot.face;
+    // Место у стока: слониха стоит так, что зад — над решёткой стока
+    park(e, TOILET_STANCE.x, TOILET_STANCE.y);
+    e.heading = TOILET_STANCE.face;
     e.act.forced = false;
     e.needs.bladder = 100;
     const wetBefore = s.world.cells.wet.reduce((a, b) => a + b, 0);
     step(s);
+    let guard = 0;
+    while (e.act.kind === 'urinate' && guard++ < 200000) step(s);
     expect(e.day.urineDrain).toBe(1);
     expect(s.world.cells.wet.reduce((a, b) => a + b, 0)).toBeCloseTo(wetBefore, 3);
-    expect(Math.hypot(rearPos(e).x - DRAIN.x, rearPos(e).y - DRAIN.y)).toBeLessThan(DRAIN.r);
+    expect(Math.hypot(rearPos(e, 1.2).x - DRAIN.x, rearPos(e, 1.2).y - DRAIN.y)).toBeLessThan(DRAIN.r);
   });
 
   it('залежавшийся навоз растаптывается в грязь', () => {

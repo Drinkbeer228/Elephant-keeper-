@@ -9,6 +9,7 @@ import { ElephantView } from './ElephantView';
 import { Fx } from './Fx';
 import { buildGround } from './ground';
 import { KeeperView } from './KeeperView';
+import { KittenView } from './KittenView';
 import { loadElephantArt, loadStaticArt, PPM } from './textures';
 import { WorldView } from './WorldView';
 
@@ -18,6 +19,7 @@ export interface SceneHooks {
   getState: () => State;
   frame: (dt: number) => SimEvent[];
   onSelect: (elephantId: string | null) => void;
+  onKitten: () => void;
   selected: () => string | null;
   showNames: () => boolean;
   marker: () => { x: number; y: number } | null;
@@ -27,6 +29,7 @@ export interface SceneHooks {
 export class WorldScene extends Phaser.Scene {
   private elephants = new Map<string, ElephantView>();
   private keeper!: KeeperView;
+  private kitten!: KittenView;
   private world!: WorldView;
   private fx!: Fx;
   private zoomLevel = 1; // относительно базового
@@ -47,6 +50,7 @@ export class WorldScene extends Phaser.Scene {
     buildGround(this);
     this.world = new WorldView(this);
     this.keeper = new KeeperView(this, s);
+    this.kitten = new KittenView(this, s);
     this.fx = new Fx(this);
     this.markerG = this.add.graphics().setDepth(72);
     this.rebuildHerd(s);
@@ -131,6 +135,11 @@ export class WorldScene extends Phaser.Scene {
     const wx = p.worldX / P;
     const wy = p.worldY / P;
     const s = this.hooks.getState();
+    // Котёнок маленький: попасть по нему — значит спросить, чем он занят
+    if (Math.hypot(s.kitten.x - wx, s.kitten.y - wy) < 0.6) {
+      this.hooks.onKitten();
+      return;
+    }
     let best: string | null = null;
     let bestD = 2.6;
     for (const e of s.elephants) {
@@ -191,6 +200,7 @@ export class WorldScene extends Phaser.Scene {
       v.update(e, s, t, dt, names);
     }
     this.keeper.update(s, dt);
+    this.kitten.update(s, t, dt);
     const cam = this.cameras.main;
     this.world.update(s, t, dt);
     this.fx.update(dt);

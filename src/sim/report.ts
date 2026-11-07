@@ -4,6 +4,7 @@
 import { DELIVERY } from '../data/balance';
 import { FEEDER_IDS, STATIONS, TANK_HOME, TOOL_KINDS, TROUGH_IDS, type ToolKind } from '../data/facility';
 import { DIETS, DIET_IDS, MEALS, PORRIDGE_SACK_KG, VEG_KINDS, vegPlan } from '../data/rations';
+import { contactDailyDrift } from './behavior/contact';
 import { dailyDrift } from './behavior/learning';
 import { bodyDirt, wellbeing } from './behavior/needs';
 import { log } from './events';
@@ -44,7 +45,7 @@ export function buildReport(s: State): DayReport {
       .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
     for (const [k, v] of mins.slice(0, 2)) if ((v ?? 0) >= 20) highlights.push(`${ACT_NAMES[k]} ${Math.round(v ?? 0)} мин`);
     if (d.lyingMinutes < 60) highlights.push('почти не спала лёжа');
-    if (d.urineTank > 0) highlights.push(`в бак: ${d.urineTank}`);
+    if (d.urineTank > 0) highlights.push(`в ведро: ${d.urineTank} (${Math.round(d.caughtLitres)} л)`);
     if (d.urineBedding > 0) highlights.push(`мимо, на подстилку: ${d.urineBedding}`);
     if (d.urineDrain > 0) highlights.push(`над стоком: ${d.urineDrain}`);
     if (d.robbed > 1) highlights.push(`у неё отнимали корм: ${d.robbed}`);
@@ -53,6 +54,9 @@ export function buildReport(s: State): DayReport {
     if (d.fermented > 0) highlights.push(`забродивших яблок: ${d.fermented}`);
     if (d.dirtyLying > 60) highlights.push(`лежала в мокром ${Math.round(d.dirtyLying)} мин`);
     if (d.signals === 0) highlights.push('ни разу не позвала — следи за ней внимательнее');
+    if (d.contactMinutes >= 60) highlights.push(`рядом с тобой ${Math.round(d.contactMinutes / 6) / 10} ч`);
+    if (d.shoves > 0) highlights.push(`оттолкнула тебя: ${d.shoves}`);
+    if (d.kicks > 0) highlights.push(`лягнула: ${d.kicks}`);
     return {
       id: e.id,
       name: e.profile.name,
@@ -65,6 +69,10 @@ export function buildReport(s: State): DayReport {
       urineTank: d.urineTank,
       trustDelta: Math.round((e.learned.trust - start.trust) * 100),
       cooperationDelta: Math.round((e.learned.cooperation - start.cooperation) * 100),
+      familiarityDelta: Math.round((e.learned.familiarity - (start.familiarity ?? e.learned.familiarity)) * 100),
+      contactMinutes: Math.round(d.contactMinutes),
+      shoves: d.shoves,
+      kicks: d.kicks,
       highlights,
     };
   });
@@ -108,8 +116,8 @@ export function buildReport(s: State): DayReport {
   const loose = w.tubs.filter((t) => t.where === 'floor' && t.emptySince >= 0);
   if (loose.length) notes.push(`Не собраны пустые тазы: ${loose.map((t) => nameCase(s.elephants.find((e) => e.id === t.owner)?.profile.name ?? '', 'gen')).join(', ')}.`);
   const tank = w.items.find((it) => it.kind === 'tank');
-  if (!tank && s.keeper.held?.kind !== 'tank') notes.push('Бака для мочи нет на месте.');
-  else if (tank && (tank.load > 0 || tank.aux || dist(tank, TANK_HOME) > 1.5)) notes.push('Бак для мочи не вымыт или не на месте.');
+  if (!tank && s.keeper.held?.kind !== 'tank') notes.push('Ведра для мочи нет на месте.');
+  else if (tank && (tank.load > 0 || tank.aux || dist(tank, TANK_HOME) > 1.5)) notes.push('Ведро для мочи не вымыто или не на месте.');
   // Слоны
   let skin = 0;
   for (const e of s.elephants) {
@@ -123,6 +131,10 @@ export function buildReport(s: State): DayReport {
     if (x.trustDelta >= 5) notes.push(`${x.name} заметно больше доверяет тебе (+${x.trustDelta}).`);
     if (x.trustDelta <= -5) notes.push(`${x.name} доверяет тебе меньше (${x.trustDelta}).`);
     if (x.sleepHours < 1) notes.push(`${x.name} почти не ложилась — проверь подстилку.`);
+    if ((x.kicks ?? 0) > 0) notes.push(`${x.name} лягнула тебя (${x.kicks}): подходи так, чтобы она видела, спящую сначала окликни.`);
+    if ((x.shoves ?? 0) >= 2) notes.push(`${x.name} толкала тебя (${x.shoves}): ей было тесно. Не стой вплотную без приглашения, отступай, когда предупреждает.`);
+    if ((x.familiarityDelta ?? 0) >= 8) notes.push(`${x.name} привыкает к тебе — ты для неё всё больше «свой» (+${x.familiarityDelta}).`);
+    if ((x.contactMinutes ?? 0) < 30) notes.push(`С ${nameCase(x.name, 'ins')} за смену почти не виделись — привычка к тебе слабеет.`);
   }
   const supplies =
     (FEEDER_IDS.some((f) => f !== 'paddockFeeder' && w.feeders[f].hay > 15) ? 0.5 : 0) + (TROUGH_IDS.filter((id) => w.troughs[id].level > 25 && w.troughs[id].chem < 0.05).length / TROUGH_IDS.length) * 0.5;
@@ -177,9 +189,10 @@ export function rollDay(s: State): void {
   log(s, 'info', 'Утро: привезли сено, солому, ветки, бамбук, опилки и овощи, контейнер с навозом вывезли.', { silent: true });
   for (const e of s.elephants) {
     dailyDrift(e);
+    contactDailyDrift(e);
     e.day = emptyDayStats();
     for (const k of Object.keys(e.mem.habit)) e.mem.habit[k] = Math.round(e.mem.habit[k] * 0.35 * 1000) / 1000;
-    s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation };
+    s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation, familiarity: e.learned.familiarity };
   }
   s.dailyKeeper = { treats: 0, interactions: 0, answered: 0, ignored: 0, calls: 0, callsObeyed: 0 };
   s.dayStart += 1440;

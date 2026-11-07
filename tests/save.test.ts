@@ -1,7 +1,11 @@
 import v2save from './fixtures/save-v2.json?raw';
+import v3save from './fixtures/save-v3.json?raw';
+import v4save from './fixtures/save-v4.json?raw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { deserialize, serialize, runMinutes, step, saveSlot, loadSlot, slotInfo, legacyKeys, clearLegacy, validateState, SAVE_VERSION, type State } from '../src/sim';
-import { AREA_IDS, areaAt } from '../src/data/facility';
+import { AREA_IDS, HOSE_REEL, STATIONS, TANK_HOME, areaAt, inRect } from '../src/data/facility';
+import { elephantCanStand } from '../src/sim/nav';
+import { keeperIndex } from '../src/sim/geometry';
 import { game, walk } from './helpers';
 
 class MemoryStorage {
@@ -114,9 +118,10 @@ describe('сохранение и загрузка', () => {
     s.elephants.forEach((e, i) => {
       expect(e.profile.traits.confidence).toBe(old.state.elephants[i].profile.traits.confidence);
       expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
-      // Новые черты и привычки — постоянные, из seed: проказливость, манера звать, свисток
+      // Новые черты и привычки — постоянные, из seed: проказливость, манера звать; знание просьб
       expect(e.profile.traits.mischief).toBeGreaterThanOrEqual(0);
-      expect(e.profile.habits.whistle.f0).toBeGreaterThan(0);
+      expect(e.profile.habits).not.toHaveProperty('whistle');
+      expect(e.learned.cues.come).toBeGreaterThan(0);
       expect(AREA_IDS).toContain(areaAt(e.x, e.y) ?? 'paddock');
     });
     expect(s.world.gates.outer).toBe(old.state.world.gateOpen);
@@ -130,6 +135,76 @@ describe('сохранение и загрузка', () => {
     expect(validateState(s)).toBeNull();
     const round = deserialize(serialize(s));
     expect(round.ok).toBe(true);
+  });
+
+  it('сейв v3 (защищённый контакт, записан прежней сборкой) переносится в общий зал: доверие то же, свисток снят, бак и шланг на местах', () => {
+    const old = JSON.parse(v3save) as { version: number; state: { t: number; elephants: { profile: { name: string; habits: Record<string, unknown> }; learned: { trust: number; cooperation: number } }[]; keeper: { x: number; y: number } } };
+    expect(old.version).toBe(3);
+    expect(old.state.elephants[0].profile.habits).toHaveProperty('whistle');
+    const res = deserialize(v3save);
+    if (!res.ok) throw new Error(res.detail);
+    expect(res.migrated).toBe(true);
+    const s = res.state;
+    expect(s.version).toBe(SAVE_VERSION);
+    expect(s.t).toBe(old.state.t);
+    s.elephants.forEach((e, i) => {
+      expect(e.profile.name).toBe(old.state.elephants[i].profile.name);
+      expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
+      expect(e.learned.cooperation).toBe(old.state.elephants[i].learned.cooperation);
+      expect(e.profile.habits).not.toHaveProperty('whistle');
+      expect(e.learned.familiarity).toBeGreaterThan(0);
+      expect(Object.keys(e.learned.cues).sort()).toEqual(['back', 'come', 'follow', 'foot', 'go', 'lie', 'move', 'no', 'stay']);
+      expect(e.mem.tension).toBe(0);
+      if (e.mem.call) expect(e.mem.call.why).not.toBe('call');
+      const r = 0.95 * e.profile.look.size;
+      expect(elephantCanStand(e.x, e.y, r, (s.world.gates.outer ? 1 : 0) | (s.world.gates.shift ? 2 : 0)), e.profile.name).toBe(true);
+    });
+    // Бак стоял в проходе (там теперь поилка) — перенесён домой; шланг смотан; кипер не в стене
+    const tank = s.world.items.find((it) => it.kind === 'tank')!;
+    expect(tank.x).toBe(TANK_HOME.x);
+    expect(tank.y).toBe(TANK_HOME.y);
+    expect(inRect(STATIONS.barnWaterE.rect!, tank.x, tank.y)).toBe(false);
+    expect(s.world.hose.state).toBe('reel');
+    expect(s.world.hose.end).toEqual({ x: HOSE_REEL.x, y: HOSE_REEL.y });
+    expect(keeperIndex.hits(s.keeper.x, s.keeper.y, 0.3)).toBe(false);
+    expect(s.keeper.stun).toBe(0);
+    expect(validateState(s)).toBeNull();
+    // Перенос детерминирован, смена идёт дальше
+    const again = deserialize(v3save);
+    expect(again.ok && serialize(again.state, 1)).toBe(serialize(s, 1));
+    runMinutes(s, 120);
+    expect(validateState(s)).toBeNull();
+    expect(deserialize(serialize(s)).ok).toBe(true);
+  });
+
+  it('сейв v4 (записан прежней сборкой, ночь, кипер с баком) переносится: новые просьбы, вода, ночная память; бак стал ведром', () => {
+    const old = JSON.parse(v4save) as { version: number; state: { t: number; elephants: { learned: { cues: Record<string, number>; trust: number } }[]; keeper: { held: { load: number } } } };
+    expect(old.version).toBe(4);
+    const res = deserialize(v4save);
+    if (!res.ok) throw new Error(res.detail);
+    expect(res.migrated).toBe(true);
+    const s = res.state;
+    expect(s.version).toBe(SAVE_VERSION);
+    expect(s.t).toBe(old.state.t);
+    s.elephants.forEach((e, i) => {
+      // Выученное раньше — как было, новые просьбы — из врождённого
+      for (const [k, v] of Object.entries(old.state.elephants[i].learned.cues)) expect(e.learned.cues[k as keyof typeof e.learned.cues]).toBe(v);
+      for (const k of ['back', 'go', 'foot'] as const) expect(e.learned.cues[k]).toBeGreaterThan(0.1);
+      expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
+      expect(e.fluid).toBeGreaterThanOrEqual(0);
+      expect(e.mem.woke.plan).toBe('none');
+      expect(e.mem.seen).toEqual({ signal: 0, wakePee: 0, cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } });
+    });
+    expect(s.keeper.held?.kind).toBe('tank');
+    expect(s.keeper.held!.load).toBeLessThanOrEqual(20);
+    expect(s.world.checks.feet).toEqual({});
+    expect(validateState(s)).toBeNull();
+    const again = deserialize(v4save);
+    expect(again.ok && serialize(again.state, 1)).toBe(serialize(s, 1));
+    // Ночь идёт дальше: спят, просыпаются, ходят в туалет
+    runMinutes(s, 240);
+    expect(validateState(s)).toBeNull();
+    expect(deserialize(serialize(s)).ok).toBe(true);
   });
 
   it('слоты localStorage: сохранить, прочитать сводку, загрузить', () => {

@@ -2,16 +2,21 @@
 // В состоянии нет undefined, Infinity и ссылок — сохранение и загрузка дают побитово то же состояние,
 // а значит, и продолжение смены после загрузки идёт так же, как шло бы без неё.
 // Профили слонов лежат в сейве целиком: загрузка никогда не генерирует характер заново.
-// Сейв прошлой версии (v2) переводится миграцией: недостающие черты и привычки досчитываются
-// один раз из того же seed — так же, как их получило бы новое стадо, — и дальше хранятся в сейве.
+// Сейвы прошлых версий переводятся миграциями по шагам (v2 → v3 → v4): недостающие черты и
+// привычки досчитываются один раз из того же seed — так же, как их получило бы новое стадо, — и
+// дальше хранятся в сейве. v4 — полный контакт: общий зал без прохода кипера, голос вместо свистка.
+// v5 — команды En arrière, Partez и «ногу», моча струёй по выпитому, ведро в руках, ночной сон приступами.
 
-import { HOSE_LENGTH, HOSE_REEL, H, TANK_HOME, TREES, W, areaAt } from '../data/facility';
+import { KEEPER } from '../data/balance';
+import { BARROW_HOME, HOSE_LENGTH, HOSE_REEL, H, KEEPER_START, STATIONS, TANK_HOME, TREES, W, areaAt } from '../data/facility';
+import { keeperIndex } from './geometry';
 import { DIET_IDS, PORRIDGE_SACK_KG, emptyVeg } from '../data/rations';
 import { initialLearned, assignDiets, extraProfile, makeHabits } from './herd';
 import { elephantCanStand, nearestStandable } from './nav';
 import { SAVE_VERSION, cleanBody, emptyChecks, emptyDayStats, freshTrough, rackSpot, vegStockFor } from './state';
 import { clockText, shiftDay } from './time';
-import { ACTIVITY_KINDS, TRAIT_KEYS, type ActivityKind, type ElephantProfile, type State } from './types';
+import { ACTIVITY_KINDS, KITTEN_ACTS, TRAIT_KEYS, type ActivityKind, type ElephantProfile, type KittenActKind, type State } from './types';
+import { createKitten } from './kitten';
 
 export const SAVE_FORMAT = 'elephant-keeper';
 
@@ -99,7 +104,7 @@ function migrate2to3(doc: Doc): Doc {
   const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
   const extras = els.map((e, i) => ({ extra: extraProfile(st.seed ?? 1, i, { age: e.profile?.age ?? 20, traits: e.profile?.traits ?? {} }) }));
   const diets = assignDiets(els.map((e) => ({ age: e.profile?.age ?? 20, look: e.profile?.look ?? { size: 1 } })));
-  const habits = makeHabits(extras, st.seed ?? 1, diets);
+  const habits = makeHabits(extras, diets);
   els.forEach((e, i) => {
     const p = e.profile as ElephantProfile;
     if (p?.traits && typeof p.traits.mischief !== 'number') p.traits.mischief = extras[i].extra.mischief;
@@ -119,7 +124,7 @@ function migrate2to3(doc: Doc): Doc {
     e.pathGoal = null;
     e.lying = false;
     e.signal = null;
-    // Новая решётка между стойлами и станции у бетонной полосы: сдвинуть, если стоит в них
+    // Новые ворота между стойлами и станции у бетонной полосы: сдвинуть, если стоит в них
     const r = 0.95 * (p?.look?.size ?? 1);
     const mask = (w.gates.outer ? 1 : 0) | 2;
     if (!elephantCanStand(e.x, e.y, r, mask)) {
@@ -133,9 +138,143 @@ function migrate2to3(doc: Doc): Doc {
   w.tubs = els.map((e, i) => ({ id: nextId(), owner: e.id, ...rackSpot(i), heading: 0, where: 'rack', veg: emptyVeg(), emptySince: -1, damage: 0, broken: false, dirty: false }));
   return { ...doc, version: 3 };
 }
+
+// v3 → v4: полный контакт. Проход кипера и решётка вдоль него убраны, станции переехали к южной
+// стене общего зала, свисток заменён голосом, у слоних появились «свой ли ты» и знание просьб.
+function migrate3to4(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object' || !st.world) return doc;
+  const w = st.world;
+  const mask = (w.gates?.outer ? 1 : 0) | (w.gates?.shift ? 2 : 0);
+  const idle = () => ({ kind: 'idle', target: null, phase: 'do', start: st.t, doStart: st.t, dur: 0, score: 0.1, forced: false, signal: null, note: 'стоит', key: 'idle', aux: null, flag: 0 });
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  for (const e of els) {
+    const p = e.profile as ElephantProfile;
+    if (p?.habits) delete (p.habits as any).whistle;
+    if (e.learned && p?.traits && p.look) {
+      const base = initialLearned(p);
+      if (typeof e.learned.familiarity !== 'number') e.learned.familiarity = base.familiarity;
+      if (!e.learned.cues || typeof e.learned.cues !== 'object') e.learned.cues = base.cues;
+    }
+    if (e.mem) {
+      e.mem.aware = -100;
+      e.mem.tension = 0;
+      e.mem.accepted = -100;
+      e.mem.lastWarn = -100;
+      e.mem.nag = { cue: '', t: -100, n: 0 };
+      if (e.mem.call) e.mem.call.why = e.mem.call.why === 'call' ? 'come' : e.mem.call.why;
+    }
+    e.day = { ...emptyDayStats(), ...(e.day ?? {}) };
+    // Станции у южной стены и новые стены: сдвинуть слониху, если она теперь стоит в них
+    const r = 0.95 * (p?.look?.size ?? 1);
+    let reset = false;
+    if (!elephantCanStand(e.x, e.y, r, mask)) {
+      const q = nearestStandable({ x: e.x, y: e.y }, r + 0.05, mask);
+      if (q && areaAt(q.x, q.y)) {
+        e.x = q.x;
+        e.y = q.y;
+      }
+      reset = true;
+    }
+    // Занятия, привязанные к киперу или к переехавшим местам, начинаем заново
+    const a = e.act ?? {};
+    const tg = a.target;
+    if (['follow', 'seekKeeper', 'signal'].includes(a.kind)) reset = true;
+    if (tg?.t === 'slot' && (!(tg.station in STATIONS) || String(tg.station).startsWith('barn'))) reset = true;
+    if (tg?.t === 'point' && !elephantCanStand(tg.x, tg.y, r, mask)) reset = true;
+    if (reset) {
+      e.act = idle();
+      e.path = [];
+      e.pathGoal = null;
+      e.lying = false;
+      e.signal = null;
+    }
+  }
+  // Бак стоял в проходе (там теперь поилка) или под старой тренировочной стенкой — домой;
+  // вещи, оказавшиеся внутри новых станций, — рядом с ними
+  w.items = (Array.isArray(w.items) ? w.items : []).map((it: any) => {
+    if (it?.kind === 'tank') return { ...it, x: TANK_HOME.x, y: TANK_HOME.y };
+    if (it && typeof it.x === 'number' && typeof it.y === 'number' && keeperIndex.hits(it.x, it.y, 0.05)) return { ...it, ...(freeSpotNear(it.x, it.y, 0.15) ?? TANK_HOME) };
+    return it;
+  });
+  // Шланг мог лежать через старые двери — смотан на катушку
+  w.hose = { ...(w.hose ?? {}), state: 'reel', path: [{ x: HOSE_REEL.x, y: HOSE_REEL.y }], end: { x: HOSE_REEL.x, y: HOSE_REEL.y } };
+  if (w.barrow && typeof w.barrow.x === 'number' && keeperIndex.hits(w.barrow.x, w.barrow.y, 0.4)) {
+    w.barrow = { ...w.barrow, x: BARROW_HOME.x, y: BARROW_HOME.y, heading: 0, pushed: false };
+  }
+  const k = st.keeper ?? {};
+  k.stun = 0;
+  if (typeof k.x === 'number' && typeof k.y === 'number' && keeperIndex.hits(k.x, k.y, KEEPER.radius)) {
+    const spot = freeSpotNear(k.x, k.y, KEEPER.radius) ?? KEEPER_START;
+    k.x = spot.x;
+    k.y = spot.y;
+  }
+  if (w.barrow?.pushed) w.barrow.pushed = false;
+  st.keeper = k;
+  return { ...doc, version: 4 };
+}
+
+function freeSpotNear(x: number, y: number, r: number): { x: number; y: number } | null {
+  for (let d = 0.25; d <= 4; d += 0.25) {
+    for (let i = 0; i < 16; i++) {
+      const px = x + Math.cos((i * Math.PI) / 8) * d;
+      const py = y + Math.sin((i * Math.PI) / 8) * d;
+      if (px > 0.5 && py > 0.5 && px < W - 0.5 && py < H - 0.5 && !keeperIndex.hits(px, py, r + 0.02)) return { x: Math.round(px * 100) / 100, y: Math.round(py * 100) / 100 };
+    }
+  }
+  return null;
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3 };
+// v4 → v5: новые просьбы (знание — из врождённого), выпитая вода, память о ночи и о том, что кипер
+// видел сам; ведро на 20 литров (бак был на 65 — лишнее считается вылитым)
+function migrate4to5(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object' || !st.world) return doc;
+  const w = st.world;
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  for (const e of els) {
+    const p = e.profile as ElephantProfile;
+    if (e.learned && p?.traits && p.look) {
+      const base = initialLearned(p);
+      e.learned.cues = { ...base.cues, ...(e.learned.cues ?? {}) };
+    }
+    if (typeof e.fluid !== 'number') e.fluid = 10;
+    if (e.mem) {
+      e.mem.woke = e.mem.woke ?? { t: -1000, slept: 0, plan: 'none' };
+      e.mem.stream = null;
+      e.mem.lastPee = e.mem.lastPee ?? { t: -1000, where: 'none' };
+      e.mem.seen = e.mem.seen ?? { signal: 0, wakePee: 0 };
+    }
+    e.day = { ...emptyDayStats(), ...(e.day ?? {}) };
+  }
+  if (w.checks && typeof w.checks === 'object') w.checks.feet = w.checks.feet ?? {};
+  const cap = (x: any) => {
+    if (x && x.kind === 'tank' && typeof x.load === 'number') x.load = Math.min(x.load, KEEPER.tankLiters);
+  };
+  for (const it of Array.isArray(w.items) ? w.items : []) cap(it);
+  cap(st.keeper?.held);
+  return { ...doc, version: 5 };
+}
+
+// v5 → v6: котёнок со станции и привычка слонов к нему
+function migrate5to6(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object') return doc;
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  for (const e of els) {
+    const p = e.profile as ElephantProfile;
+    if (e.learned && p?.traits && p.look && typeof e.learned.cat !== 'number') e.learned.cat = initialLearned(p).cat;
+    if (e.mem) {
+      e.mem.seen = { signal: 0, wakePee: 0, ...(e.mem.seen ?? {}), cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } };
+      e.mem.cat = { saw: -100, next: 0, react: -100 };
+    }
+  }
+  if (!st.kitten) st.kitten = createKitten(typeof st.seed === 'number' ? st.seed : 1);
+  return { ...doc, version: 6 };
+}
+
+const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3, 3: migrate3to4, 4: migrate4to5, 5: migrate5to6 };
 
 export function serialize(state: State, savedAt = Date.now()): string {
   const file: SaveFile = {
@@ -176,14 +315,17 @@ export function validateState(s: unknown): string | null {
       if (!num(v) || v < 0 || v > 1) return `слон ${e.id}: черта ${k}`;
     }
     const L = e.learned;
-    if (!isObj(L) || !num(L.trust) || !num(L.cooperation) || !num(L.expectation) || !num(L.toilet)) return `слон ${e.id}: выученное`;
+    if (!isObj(L) || !num(L.trust) || !num(L.cooperation) || !num(L.expectation) || !num(L.toilet) || !num(L.familiarity) || !isObj(L.cues)) return `слон ${e.id}: выученное`;
     if (!isObj(e.needs)) return `слон ${e.id}: потребности`;
     for (const k of NEED_KEYS) if (!num((e.needs as Record<string, unknown>)[k])) return `слон ${e.id}: потребность ${k}`;
     if (!isObj(e.act) || !ACTIVITY_KINDS.includes(e.act.kind as ActivityKind)) return `слон ${e.id}: занятие`;
     if (!isObj(e.mem) || !isObj(e.day) || !isObj(e.body) || !isObj(e.trunk)) return `слон ${e.id}: память`;
+    if (!num(e.mem.tension) || !num(e.mem.aware) || !isObj(e.mem.nag)) return `слон ${e.id}: память о кипере`;
+    if (!num(e.fluid) || !isObj(e.mem.woke) || !isObj(e.mem.seen) || !isObj(e.mem.lastPee)) return `слон ${e.id}: ночь и вода`;
+    if (!num(L.cat) || !isObj(e.mem.cat) || !num(e.mem.cat.next) || !isObj(e.mem.seen.cat)) return `слон ${e.id}: котёнок`;
   }
   const k = s.keeper;
-  if (!isObj(k) || !num(k.x) || !num(k.y) || !num(k.pouch)) return 'нет кипера';
+  if (!isObj(k) || !num(k.x) || !num(k.y) || !num(k.pouch) || !num(k.stun)) return 'нет кипера';
   const w = s.world;
   if (!isObj(w)) return 'нет мира';
   if (!isObj(w.cells)) return 'нет пола';
@@ -195,6 +337,10 @@ export function validateState(s: unknown): string | null {
   if (!isObj(w.gates) || !isObj(w.feeders) || !isObj(w.troughs) || !isObj(w.stock) || !isObj(w.barrow) || !isObj(w.hose) || !isObj(w.checks)) return 'нет станций';
   if (!Array.isArray(s.journal) || !Array.isArray(s.alerts) || !Array.isArray(s.reports)) return 'нет журнала';
   if (!isObj(s.bonds)) return 'нет отношений';
+  const c = s.kitten;
+  if (!isObj(c) || !num(c.x) || !num(c.y) || !num(c.heading) || !num(c.fear) || !num(c.energy) || !num(c.rng) || !Array.isArray(c.path) || !isObj(c.wary)) return 'нет котёнка';
+  if (!isObj(c.act) || !KITTEN_ACTS.includes(c.act.kind as KittenActKind) || !num(c.act.until)) return 'котёнок: занятие';
+  if (!(c.path as unknown[]).every((p) => isObj(p) && num(p.x) && num(p.y))) return 'котёнок: путь';
   return null;
 }
 

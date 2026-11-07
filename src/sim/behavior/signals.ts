@@ -1,9 +1,9 @@
 // Сигналы: слон сообщает о потребности, которую не может закрыть сам.
 // Подавать ли сигнал и как ясно — зависит от характера (выразительность, упрямство)
 // и от опыта (ожидает ли слон, что ему ответят). Как именно — личная привычка:
-// одна топает определённой ногой, другая урчит, третья молча смотрит у решётки.
+// одна топает определённой ногой, другая урчит, третья подходит и молча смотрит на кипера.
 
-import { FEEDER_IDS, STATIONS, TROUGH_IDS } from '../../data/facility';
+import { FEEDER_IDS, ROOMS, STATIONS, TROUGH_IDS, inRect } from '../../data/facility';
 import { log } from '../events';
 import { dist } from '../geometry';
 import { footText } from '../herd';
@@ -61,7 +61,7 @@ function gesture(e: Elephant, kind: SignalKind, clear: boolean): string {
     case 'rumble':
       return 'урчит и встряхивает хоботом';
     case 'stare':
-      return 'стоит у решётки и пристально смотрит на тебя';
+      return 'встала перед тобой и пристально смотрит';
     case 'gate':
       return 'стоит у ворот и не уходит';
     case 'beg':
@@ -78,6 +78,9 @@ export function beginSignal(s: State, e: Elephant, kind: SignalKind): void {
   if (e.signal) return;
   e.signal = { kind, start: s.t, until: s.t + signalPatience(e), answered: false };
   e.day.signals++;
+  // Кипер рядом и видит — запоминает её манеру просить
+  const k = s.keeper;
+  if (Math.hypot(k.x - e.x, k.y - e.y) < 16 && !ROOMS.some((r) => inRect(r.rect, k.x, k.y))) e.mem.seen.signal++;
   e.mem.lastSignalFx = s.t - 10;
   const clear = signalClarity(e) >= 0.5;
   log(s, clear ? 'warn' : 'info', `${signalText(e, kind)}.`, {

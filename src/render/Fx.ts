@@ -202,8 +202,18 @@ export class Fx {
       case 'spar':
         this.spawn('fx-heart', x, y - 0.8, { vy: -0.5, max: 1.1, scale: 0.7 });
         break;
-      case 'call':
-        this.ring(x, y, C.sage, 0.3, 2.4, 0.9, 0.05);
+      case 'voice':
+        // Голос кипера: мягкие круги от него
+        this.ring(x, y, C.sage, 0.3, 2.0, 0.8, 0.04);
+        this.ring(x, y, C.sage, 0.2, 1.3, 0.6, 0.03);
+        break;
+      case 'warn':
+        // Предупреждает: уши в стороны — короткий тревожный круг
+        this.ring(x, y, C.terracotta, 0.8, 2.2, 0.5, 0.05);
+        break;
+      case 'shove':
+        this.burst(x, y, 6, hex('#cdb88f'), 1.0, 1.0, 0.5, 0.6);
+        this.ring(x, y, C.terracotta, 0.4, 1.6, 0.5, 0.06);
         break;
       case 'refuse':
         this.ring(x, y, C.inkSoft, 0.6, 1.4, 0.6, 0.04);

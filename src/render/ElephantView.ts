@@ -58,6 +58,7 @@ export class ElephantView {
   private tuft: Phaser.GameObjects.Image;
   private stompFoot = -1;
   private stompT = 0;
+  private liftFoot = -1; // «Ногу!» — держит ногу поднятой
   private skinKey = '';
   readonly name: Phaser.GameObjects.Image;
   private bubble: Phaser.GameObjects.Image;
@@ -214,6 +215,60 @@ export class ElephantView {
           ears = 0.45;
           break;
         }
+        case 'drowsy': {
+          // Только что проснулась: голова опущена, хобот висит, уши прижаты — смотрит в одну точку
+          want = { reach: 0.75, side: 0, curl: 0.1, raise: 0 };
+          ears = 0.06;
+          headTurn = 0;
+          tailSwing *= 0.15;
+          break;
+        }
+        case 'foot': {
+          // Держит ногу: стоит смирно, хобот свёрнут, слушает кипера
+          const l = local(s.keeper);
+          want = { reach: 0.7, side: Math.max(-1, Math.min(1, l.ang)) * 0.4, curl: 0.6, raise: 0 };
+          ears = 0.3;
+          headTurn = Math.max(-0.3, Math.min(0.3, l.ang * 0.35));
+          break;
+        }
+        case 'warn': {
+          // Предупреждает: уши растопырены, голова к киперу, мотает ею, хобот свёрнут
+          const l = local(s.keeper);
+          want = { reach: 0.6, side: Math.max(-1, Math.min(1, l.ang)) * 0.5, curl: 0.85, raise: 0.25 };
+          ears = 1;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5)) + Math.sin(t * 7) * 0.22;
+          tailSwing = Math.sin(t * 5) * 0.6;
+          tailRaise = 0.4;
+          break;
+        }
+        case 'shoo': {
+          // Прогоняет котёнка: уши растопырены, голова к нему, хобот взмахивает
+          const l = local(s.kitten);
+          want = { reach: 0.9 + Math.abs(Math.sin(t * 9)) * 0.5, side: Math.max(-1, Math.min(1, l.ang)) * 0.7 + Math.sin(t * 9) * 0.35, curl: 0.35, raise: 0.35 };
+          ears = 1;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5)) + Math.sin(t * 8) * 0.18;
+          tailSwing = Math.sin(t * 6) * 0.7;
+          tailRaise = 0.5;
+          break;
+        }
+        case 'sniffCat': {
+          // Тянется хоботом к котёнку — медленно, кончиком вниз
+          const l = local(s.kitten);
+          want = { reach: Math.min(1.8, Math.max(0.8, l.d)), side: Math.max(-1, Math.min(1, l.ang)), curl: 0.1 + Math.sin(t * 2.2) * 0.1, raise: 0 };
+          ears = 0.55;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5));
+          tailSwing *= 0.5;
+          break;
+        }
+        case 'stay':
+        case 'walkWith': {
+          // Стоит или идёт рядом по просьбе: внимание на кипере, спокойна
+          const l = local(s.keeper);
+          want = { reach: 0.85, side: Math.max(-1, Math.min(1, l.ang)) * 0.6, curl: 0.4, raise: 0 };
+          ears = 0.35;
+          headTurn = Math.max(-0.3, Math.min(0.3, l.ang * 0.4));
+          break;
+        }
         case 'socialize':
         case 'follow':
         case 'seekKeeper': {
@@ -325,6 +380,8 @@ export class ElephantView {
     this.drawSkin(e, lying, t);
     this.tuft.setVisible(!!e.trunk.kind && !lying);
 
+    const f = a.kind === 'foot' ? a.key.split(':')[1] : '';
+    this.liftFoot = f === 'FR' ? 0 : f === 'FL' ? 1 : f === 'HR' ? 2 : f === 'HL' ? 3 : -1;
     this.drawFeet(e, walking);
     this.drawTail(tailSwing, tailRaise, lying);
     this.drawTrunk(lying);
@@ -380,7 +437,11 @@ export class ElephantView {
     feet.forEach((f, i) => {
       let off = Math.sin(this.walkPhase + f.ph) * stride;
       let lift = 1;
-      if (i === this.stompFoot && this.stompT > 0) {
+      if (i === this.liftFoot) {
+        // Поднятая нога: чуть вынесена (передняя — вперёд, задняя — назад) и ближе к зрителю
+        lift = 1.3;
+        off += (i < 2 ? 0.2 : -0.16) * s;
+      } else if (i === this.stompFoot && this.stompT > 0) {
         // Подняла и с силой опустила
         const k = this.stompT / 0.6;
         lift = 1 + 0.35 * Math.sin(k * Math.PI);

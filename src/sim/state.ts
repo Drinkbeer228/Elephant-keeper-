@@ -7,8 +7,9 @@ import { random, range } from './rng';
 import type { BodyState, DayStats, Elephant, ElephantProfile, ShiftChecks, State, TroughState, Traits, Tub } from './types';
 import { addLitter, cellCenter, dropDung, forCells, touchCells } from './world';
 import { log } from './events';
+import { createKitten } from './kitten';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 6;
 
 export interface NewGameOptions {
   seed: number;
@@ -28,6 +29,7 @@ export function emptyDayStats(): DayStats {
     urineOutside: 0,
     urineBedding: 0,
     urineTank: 0,
+    caughtLitres: 0,
     dung: 0,
     ate: 0,
     tubKg: 0,
@@ -42,13 +44,16 @@ export function emptyDayStats(): DayStats {
     wellbeingSamples: 0,
     lyingMinutes: 0,
     dirtyLying: 0,
+    shoves: 0,
+    kicks: 0,
+    contactMinutes: 0,
   };
 }
 
 export function emptyChecks(): ShiftChecks {
   const troughChanged = {} as Record<TroughId, boolean>;
   for (const id of TROUGH_IDS) troughChanged[id] = false;
-  return { troughChanged, hoseIncidents: 0, tubsBroken: 0, porridge: {}, vegTub: {} };
+  return { troughChanged, hoseIncidents: 0, tubsBroken: 0, porridge: {}, vegTub: {}, feet: {} };
 }
 
 export function cleanBody(): BodyState {
@@ -106,6 +111,7 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
     wet: 0,
     dust: range(s, 0, 0.4),
     body: { ...cleanBody(), side: Math.round(range(s, 0, 0.15) * 1000) / 1000, legs: Math.round(range(s, 0.05, 0.2) * 1000) / 1000, hay: Math.round(range(s, 0, 0.3) * 1000) / 1000 },
+    fluid: Math.round(range(s, 8, 22) * 10) / 10,
     tipsy: 0,
     trunk: { kind: null, amount: 0 },
     signal: null,
@@ -122,6 +128,16 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
       zone: 'barn',
       zoneSince: s.t - 600,
       lastSignalFx: -100,
+      aware: -100,
+      tension: 0,
+      accepted: -100,
+      lastWarn: -100,
+      nag: { cue: '', t: -100, n: 0 },
+      woke: { t: -1000, slept: 0, plan: 'none' },
+      stream: null,
+      lastPee: { t: -1000, where: 'none' },
+      seen: { signal: 0, wakePee: 0, cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } },
+      cat: { saw: -100, next: 0, react: -100 },
     },
     day: emptyDayStats(),
   };
@@ -146,7 +162,7 @@ export function createState(opts: NewGameOptions): State {
     nextId: 1,
     elephants: [],
     bonds: initialBonds(herd, seed),
-    keeper: { x: KEEPER_START.x, y: KEEPER_START.y, facing: -Math.PI / 2, held: null, pouch: KEEPER.startTreats, task: null, prep: null, running: false, moving: false, carried: 0 },
+    keeper: { x: KEEPER_START.x, y: KEEPER_START.y, facing: -Math.PI / 2, held: null, pouch: KEEPER.startTreats, task: null, prep: null, running: false, moving: false, carried: 0, stun: 0 },
     world: {
       gates: { outer: false, shift: true },
       feeders,
@@ -183,6 +199,7 @@ export function createState(opts: NewGameOptions): State {
     startOfDay: {},
     reports: [],
     pendingReport: null,
+    kitten: createKitten(seed),
   };
   for (let i = 0; i < cells; i++) {
     const c = cellCenter(i);
@@ -191,9 +208,9 @@ export function createState(opts: NewGameOptions): State {
   s.elephants = herd.map((p, i) => createElephant(s, p, i));
   s.world.tubs = s.elephants.map((e, i) => newTub(s, e.id, i));
   s.world.items.push({ id: s.nextId++, kind: 'tank', x: TANK_HOME.x, y: TANK_HOME.y, load: 0, aux: 0, owner: null });
-  for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation };
+  for (const e of s.elephants) s.startOfDay[e.id] = { trust: e.learned.trust, cooperation: e.learned.cooperation, familiarity: e.learned.familiarity };
   if (opts.mess !== false) addNightMess(s);
-  log(s, 'info', 'Утро. Слоны ночевали в слоновнике. Проверь поилки, положи сено на выгул и открой ворота на выгул — пульт в проходе у решётки, между стойлами.', { kind: 'welcome' });
+  log(s, 'info', 'Утро. Слоны ночевали в слоновнике — ты работаешь рядом с ними, в одном зале. Окликни каждую по имени, проверь поилки, положи сено на выгул и открой ворота на выгул (они у северной стены зала).', { kind: 'welcome' });
   return s;
 }
 

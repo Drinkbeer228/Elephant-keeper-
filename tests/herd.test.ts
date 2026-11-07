@@ -91,12 +91,19 @@ describe('генерация стада', () => {
     expect(nameCase('Бинду', 'acc')).toBe('Бинду');
   });
 
-  it('у каждой своя манера звать, своя нога для топота и свой свисток кипера — различимый в стаде', () => {
+  it('у каждой своя манера звать, своя нога для топота и своё знание просьб кипера', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const s = createState({ seed, herdSize: 6 });
-      const f0 = s.elephants.map((e) => e.profile.habits.whistle.f0);
-      for (let i = 0; i < f0.length; i++) for (let j = i + 1; j < f0.length; j++) expect(Math.abs(f0[i] - f0[j])).toBeGreaterThan(60);
+      // Просьбы каждая знает по-своему: у разных слоних разный набор, а не одно число на всех
+      const profiles = s.elephants.map((e) => JSON.stringify(e.learned.cues));
+      expect(new Set(profiles).size).toBe(profiles.length);
       for (const e of s.elephants) {
+        for (const v of Object.values(e.learned.cues)) {
+          expect(v).toBeGreaterThanOrEqual(0.12);
+          expect(v).toBeLessThanOrEqual(0.95);
+        }
+        expect(e.learned.familiarity).toBeGreaterThan(0.1);
+        expect(e.learned.familiarity).toBeLessThan(0.6);
         expect(['stomp', 'rumble', 'stare', 'gate', 'beg']).toContain(e.profile.habits.signal);
         expect(['FL', 'FR', 'HL', 'HR']).toContain(e.profile.habits.foot);
         expect(e.profile.traits.mischief).toBeGreaterThanOrEqual(0);

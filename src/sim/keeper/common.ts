@@ -11,8 +11,8 @@ export interface KCtx {
   k: Keeper;
   w: World;
   h: Held | null;
-  area: AreaId | null; // кипер внутри отсека (он пуст — иначе дверь бы не открылась)
-  contact: KeeperContact | null; // кипер у решётки или ограды
+  area: AreaId | null; // кипер среди слонов: в зале или на выгуле
+  contact: KeeperContact | null; // кипер снаружи у ограды выгула
   barrow: Barrow;
   pushing: boolean;
   barrowNear: boolean; // тачка стоит рядом
@@ -72,7 +72,7 @@ export const THING_NOM: Record<ThingKind, string> = {
   browse: 'охапка веток',
   bamboo: 'связка бамбука',
   sawdust: 'мешок опилок',
-  tank: 'бак для мочи',
+  tank: 'ведро для мочи',
   washKit: 'ведро для мытья слонов',
   chem: 'средство для поилок',
   ration: 'ведро с овощами',
@@ -94,7 +94,7 @@ export const THING_ACC: Record<ThingKind, string> = {
   browse: 'охапку веток',
   bamboo: 'связку бамбука',
   sawdust: 'мешок опилок',
-  tank: 'бак',
+  tank: 'ведро',
   washKit: 'ведро для мытья',
   chem: 'средство для поилок',
   ration: 'ведро с овощами',
@@ -109,7 +109,6 @@ export function heavy(h: Held | null, s?: State): boolean {
   if (!h) return false;
   if (h.kind === 'hay' || h.kind === 'straw' || h.kind === 'sawdust' || h.kind === 'bamboo') return true;
   if (h.kind === 'ration' && h.load > 0) return true;
-  if (h.kind === 'tank' && h.load > 30) return true;
   if (h.kind === 'tub' && s) {
     const t = s.world.tubs.find((x) => x.id === h.aux);
     if (t && Object.values(t.veg).reduce((a, b) => a + b, 0) > 10) return true;

@@ -1,9 +1,10 @@
 // Корм и кормокухня: сено и солома в кормушки (в руках или из тачки), овощи — разбросать,
-// ветки и бамбук — за решётку, кормовой барабан, тазы со стеллажа, нарезка овощей в таз
+// ветки и бамбук — рядом со слонами или через ограду выгула, кормовой барабан, тазы со стеллажа,
+// нарезка овощей в таз
 // (мини-игра), каша по рациону SlonVet (замешать → запарить 60 мин → покормить), мойки, журнал.
 
 import { FOOD, KEEPER } from '../../data/balance';
-import { DRUM, FEEDER_IDS, STATIONS, type FeederId } from '../../data/facility';
+import { DRUM, FEEDER_IDS, STATIONS, areaAt, type FeederId } from '../../data/facility';
 import { DIETS, PORRIDGE_SOAK_MIN, VEG_KINDS, VEG_LABEL, vegPlan, type VegKind } from '../../data/rations';
 import { contactSpotNear, keeperContact } from '../behavior/perceive';
 import { fx, log } from '../events';
@@ -39,12 +40,13 @@ export function feedingOptions(c: KCtx, out: ActionOption[]): void {
     }
   }
   const contact = c.contact ?? keeperContact(s);
-  // Разбросать овощи, бросить ветки и бамбук за решётку или ограду
-  if (contact && !c.area && h?.kind === 'ration' && h.load > 0) {
-    out.push(opt({ verb: 'scatter', target: contact.area }, 'Разбросать овощи по вольеру', 62, { group: 'Корм', timed: true }));
+  // Разбросать овощи, положить ветки и бамбук: среди слонов — вокруг себя, с дорожки — через ограду
+  if ((c.area || contact) && h?.kind === 'ration' && h.load > 0) {
+    out.push(opt({ verb: 'scatter', target: c.area ?? contact!.area }, c.area ? 'Разбросать овощи вокруг себя' : 'Разбросать овощи по выгулу через ограду', 62, { group: 'Корм', timed: true }));
   }
-  if (contact && !c.area && (h?.kind === 'browse' || h?.kind === 'bamboo')) {
-    out.push(opt({ verb: 'tossBrowse', target: contact.area }, h.kind === 'bamboo' ? 'Бросить бамбук за решётку' : `Бросить ветки за ${contact.area === 'paddock' ? 'ограду' : 'решётку'}`, 92, { group: 'Корм', timed: true }));
+  if ((c.area || contact) && (h?.kind === 'browse' || h?.kind === 'bamboo')) {
+    const what = h.kind === 'bamboo' ? 'бамбук' : 'ветки';
+    out.push(opt({ verb: 'tossBrowse', target: c.area ?? contact!.area }, c.area ? `Положить ${what} здесь` : `Бросить ${what} через ограду`, 92, { group: 'Корм', timed: true }));
   }
   if (c.area === 'paddock' && dist(k, DRUM) < 2.2 && h?.kind === 'ration' && h.load > 0) {
     out.push(opt({ verb: 'fillDrum', target: 'drum' }, `Заправить кормовой барабан (${Math.round(w.drum * 10) / 10}/${FOOD.drumMax})`, 96, { group: 'Барабан', timed: true }));
@@ -124,9 +126,9 @@ function kitchenOptions(c: KCtx, out: ActionOption[]): void {
     const group = STATIONS[sink].label;
     if (h.kind === 'tank') {
       if (h.load > 0) {
-        if (sink === 'washSink') out.push(opt({ verb: 'wash', target: 'emptyTank' }, `Вылить бак в слив (${Math.round(h.load)} л)`, 96, { group, timed: true }));
-        else out.push(off({ verb: 'wash', target: 'emptyTank' }, 'Вылить бак', 'Мочу выливают в слив в инвентарной, не на кухне', 40, { group }));
-      } else if (h.aux) out.push(opt({ verb: 'wash', target: 'tank' }, 'Помыть бак', 90, { group, timed: true }));
+        if (sink === 'washSink') out.push(opt({ verb: 'wash', target: 'emptyTank' }, `Вылить ведро в слив (${Math.round(h.load)} л)`, 96, { group, timed: true }));
+        else out.push(off({ verb: 'wash', target: 'emptyTank' }, 'Вылить ведро', 'Мочу выливают в сток в зале или в слив в инвентарной, не на кухне', 40, { group }));
+      } else if (h.aux) out.push(opt({ verb: 'wash', target: 'tank' }, 'Помыть ведро', 90, { group, timed: true }));
     }
     if (h.kind === 'tub') {
       const tub = tubById(s, h.aux);
@@ -197,27 +199,45 @@ export function applyFeeding(s: State, ref: ActionRef): boolean {
     }
     case 'scatter': {
       if (h?.kind !== 'ration' || h.load <= 0) return true;
-      const contact = keeperContact(s);
-      if (!contact) return true;
-      const spot = contactSpotNear(contact.area, k.x, k.y);
-      if (!spot) return true;
       const pieces = h.load * FOOD.scatterPieces;
-      const placed = scatterPieces(s, spot.spot.x, spot.spot.y - (contact.area === 'paddock' ? 1.5 : 0.5), contact.area, pieces, 'produce', FOOD.portionHunger / FOOD.scatterPieces);
+      const per = FOOD.portionHunger / FOOD.scatterPieces;
+      const here = areaAt(k.x, k.y);
+      let placed: number;
+      if (here) {
+        // Среди слонов: горстями вокруг себя
+        placed = scatterPieces(s, k.x, k.y, here, pieces, 'produce', per);
+        fx('scatter', k.x, k.y);
+      } else {
+        const contact = keeperContact(s);
+        if (!contact) return true;
+        const spot = contactSpotNear(contact.area, k.x, k.y);
+        if (!spot) return true;
+        placed = scatterPieces(s, spot.spot.x, spot.spot.y - (contact.area === 'paddock' ? 1.5 : 0.5), contact.area, pieces, 'produce', per);
+        fx('scatter', spot.line.x, spot.line.y);
+      }
       k.held = null;
-      fx('scatter', spot.line.x, spot.line.y);
       log(s, 'info', `Овощи разбросаны (${placed} кусков) — слонам есть что поискать.`, { silent: true });
       return true;
     }
     case 'tossBrowse': {
       if (h?.kind !== 'browse' && h?.kind !== 'bamboo') return true;
-      const contact = keeperContact(s);
-      if (!contact) return true;
-      const spot = contactSpotNear(contact.area, k.x, k.y);
-      if (!spot) return true;
-      const zone = contact.area === 'paddock' ? 'paddock' : 'barn';
-      addFood(s, h.kind, spot.spot.x + (random(s) - 0.5) * 2, spot.spot.y - 0.6, 1, zone);
+      const here = areaAt(k.x, k.y);
+      const kind = h.kind;
+      if (here) {
+        const x = k.x + Math.cos(k.facing) * 0.9;
+        const y = k.y + Math.sin(k.facing) * 0.9;
+        addFood(s, kind, x, y, 1, here === 'paddock' ? 'paddock' : 'barn');
+        fx(kind === 'bamboo' ? 'bamboo' : 'browse', x, y);
+      } else {
+        const contact = keeperContact(s);
+        if (!contact) return true;
+        const spot = contactSpotNear(contact.area, k.x, k.y);
+        if (!spot) return true;
+        const zone = contact.area === 'paddock' ? 'paddock' : 'barn';
+        addFood(s, kind, spot.spot.x + (random(s) - 0.5) * 2, spot.spot.y - 0.6, 1, zone);
+        fx(kind === 'bamboo' ? 'bamboo' : 'browse', spot.line.x, spot.line.y);
+      }
       k.held = null;
-      fx(h.kind === 'bamboo' ? 'bamboo' : 'browse', spot.line.x, spot.line.y);
       return true;
     }
     case 'fillDrum':

@@ -67,21 +67,17 @@ export type FoodKind = 'hay' | 'produce' | 'browse';
 export type SignalStyle = 'stomp' | 'rumble' | 'stare' | 'gate' | 'beg';
 export type Foot = 'FL' | 'FR' | 'HL' | 'HR';
 
-// Свисток кипера для этой слонихи: своя высота, интервал и ритм
-export interface Whistle {
-  f0: number;
-  f1: number;
-  notes: number;
-  gap: number;
-  wave: 'sine' | 'triangle';
-}
-
 export interface Habits {
   signal: SignalStyle;
   foot: Foot;
-  whistle: Whistle;
   diet: DietId;
 }
+
+// Голосовые просьбы кипера. Каждая слониха знает их по-своему: что-то с прежними киперами
+// выучено крепко, что-то — едва. Знание растёт, если за выполненное хвалят, и тает без похвалы
+// Просьбы кипера. Back — «En arrière!» (назад), go — «Partez!» (вперёд, пошла), foot — «Ногу!»
+export type Cue = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'no' | 'back' | 'go' | 'foot';
+export const CUES: Cue[] = ['come', 'stay', 'move', 'lie', 'follow', 'no', 'back', 'go', 'foot'];
 
 export interface ElephantProfile {
   id: string;
@@ -96,10 +92,13 @@ export interface ElephantProfile {
 
 // Выученное: меняется от опыта и сохраняется между сменами
 export interface Learned {
-  trust: number; // доверие к киперу
+  trust: number; // доверие к киперу: спокойна ли рядом с ним
+  familiarity: number; // насколько он для неё «свой»: растёт от времени рядом и каждодневной заботы
   cooperation: number; // готовность выполнять просьбы кипера
   expectation: number; // ожидание, что на сигнал ответят
-  toilet: number; // связь «попросилась — подставили бак — наградили»
+  toilet: number; // связь «попросилась — подставили ведро — похвалили»
+  cues: Record<Cue, number>; // как знает каждую голосовую просьбу
+  cat: number; // насколько привыкла к котёнку: растёт от спокойного соседства
 }
 
 export interface Needs {
@@ -155,7 +154,17 @@ export type ActivityKind =
   | 'toss'
   | 'shake'
   | 'manipulate'
-  | 'lie';
+  | 'lie'
+  | 'stay' // стоит на месте по просьбе
+  | 'giveWay' // отступает от кипера по просьбе «подвинься»
+  | 'walkWith' // идёт рядом с кипером
+  | 'warn' // предупреждает: уши в стороны, мотает головой — кипер слишком близко
+  | 'drowsy' // только что проснулась: стоит сонная, смотрит в одну точку
+  | 'backUp' // пятится назад по «En arrière!»
+  | 'forward' // идёт вперёд по «Partez!»
+  | 'foot' // держит ногу поднятой по «Ногу!»
+  | 'shoo' // прогоняет котёнка: резкий выпад в его сторону
+  | 'sniffCat'; // тянется хоботом к котёнку
 
 export const ACTIVITY_KINDS: ActivityKind[] = [
   'idle',
@@ -181,6 +190,16 @@ export const ACTIVITY_KINDS: ActivityKind[] = [
   'shake',
   'manipulate',
   'lie',
+  'stay',
+  'giveWay',
+  'walkWith',
+  'warn',
+  'drowsy',
+  'backUp',
+  'forward',
+  'foot',
+  'shoo',
+  'sniffCat',
 ];
 
 export type SignalKind = 'toilet' | 'out' | 'in' | 'food' | 'water' | 'attention';
@@ -220,6 +239,8 @@ export interface SignalState {
   answered: boolean;
 }
 
+export type Request = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'toilet' | 'back' | 'go' | 'foot';
+
 export interface DayStats {
   minutes: Partial<Record<ActivityKind, number>>;
   distance: number;
@@ -244,19 +265,56 @@ export interface DayStats {
   wellbeingSamples: number;
   lyingMinutes: number;
   dirtyLying: number; // минут лёжа на мокром и грязном
+  caughtLitres: number; // сколько мочи кипер поймал в ведро
+  shoves: number; // оттолкнула кипера
+  kicks: number; // лягнула (подошли сзади без оклика)
+  contactMinutes: number; // минут рядом с кипером
 }
 
 export interface ElephantMemory {
   nextThink: number;
   cooldown: Record<string, number>; // ключ поведения → игровое время, раньше которого его не выбирают
   habit: Record<string, number>; // привыкание к видам обогащения 0..1
-  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean; why: 'call' | 'toilet' | 'lie' } | null;
+  // Последняя выполненная (или выполняемая) просьба кипера — в окне награды её хвалят
+  call: { until: number; x: number; y: number; arrivedAt: number; rewarded: boolean; why: Request } | null;
+  aware: number; // когда последний раз видела или слышала кипера
+  tension: number; // 0..1 — насколько ей сейчас тесно рядом с кипером
+  accepted: number; // когда последний раз сама приняла контакт (дала погладить, взяла угощение, выполнила просьбу)
+  lastWarn: number; // когда предупреждала
+  nag: { cue: string; t: number; n: number }; // одну и ту же просьбу повторяют, а она не хочет
   lastGreet: Record<string, number>;
   lastAte: number;
   spooked: number; // когда кипер в последний раз напугал
   zone: ZoneId;
   zoneSince: number; // когда вошла в текущую зону
   lastSignalFx: number; // когда последний раз топнула/заурчала (для ритма сигнала)
+  // Ночь: когда проснулась, сколько спала и куда её потянет после (у каждой — по-своему)
+  woke: { t: number; slept: number; plan: WakePlan };
+  stream: UrineStream | null; // мочится сейчас: сколько всего и куда ушло
+  lastPee: { t: number; where: UrineWhere }; // где и когда в последний раз
+  seen: { signal: number; wakePee: number; cat: CatSeen }; // что кипер видел сам: её манеру просить, туалет после сна, как она с котёнком
+  cat: { saw: number; next: number; react: number }; // котёнок: когда видела, когда снова присмотреться, когда реагировала
+}
+
+// Как слониха вела себя с котёнком у кипера на глазах
+export interface CatSeen {
+  startle: number; // вздрогнула, когда выскочил внезапно
+  shoo: number; // прогоняла
+  sniff: number; // тянулась хоботом
+  calm: number; // не обратила внимания
+}
+
+// После пробуждения: попросится, сначала поест, побродит, снова ляжет или сразу пойдёт в туалет
+export type WakePlan = 'none' | 'signal' | 'eat' | 'wander' | 'sleep' | 'go';
+export type UrineWhere = 'bucket' | 'drain' | 'bedding' | 'concrete' | 'outside' | 'pool' | 'none';
+
+export interface UrineStream {
+  litres: number; // сколько всего: зависит от того, сколько выпила
+  bladder: number; // наполненность пузыря в начале
+  caught: number; // поймано в ведро
+  drain: number; // ушло в сток
+  floor: number; // на пол
+  bedding: boolean; // попало на подстилку
 }
 
 // Что слон держит хоботом
@@ -281,6 +339,7 @@ export interface Elephant {
   wet: number; // мокрая кожа 0..1
   dust: number; // пыль на спине 0..1
   body: BodyState;
+  fluid: number; // выпитая вода, которая ещё станет мочой (в долях пузыря, 0..)
   tipsy: number; // опьянение от забродивших яблок 0..1
   trunk: Trunk;
   signal: SignalState | null;
@@ -334,7 +393,7 @@ export type ThingKind =
   | 'shard';
 
 // load: лопата — мусор на полотне (0/1), швабра — сырость 0..1, мешок опилок — горстей,
-// бак — литров, набор для мытья — воды 0..1, средство — порций, ведро овощей — порций,
+// ведро для мочи — литров, набор для мытья — воды 0..1, средство — порций, ведро овощей — порций,
 // каша — кг, куча — объём; aux: таз — его id, каша — когда залили водой; owner — чей таз/каша
 export interface Held {
   kind: ThingKind;
@@ -413,6 +472,7 @@ export interface ShiftChecks {
   tubsBroken: number;
   porridge: Record<string, number[]>; // слон → когда кормили кашей
   vegTub: Record<string, number>; // слон → сколько кг овощей поставили в таз
+  feet: Record<string, boolean>; // слон → осмотрели и почистили стопу
 }
 
 export interface World {
@@ -473,6 +533,7 @@ export interface Keeper {
   running: boolean;
   moving: boolean;
   carried: number; // метров пронесено с тюком (для рассыпания)
+  stun: number; // секунд приходит в себя после толчка
 }
 
 // Действие кипера — данные, а не замыкание: его можно сохранить, повторить и проверить
@@ -514,17 +575,16 @@ export type Verb =
   | 'scratch'
   | 'pet'
   | 'hand'
-  | 'call'
-  | 'lieDown'
-  | 'standUp'
+  | 'voice'
   | 'groom'
   | 'soap'
   | 'scrub'
   | 'rinse'
   | 'shower'
   | 'hoseWash'
-  | 'tankPlace'
-  | 'toiletCmd'
+  | 'pourDrain'
+  | 'footCare'
+  | 'petKitten'
   | 'tankTake'
   | 'emptyTank'
   | 'feedPorridge'
@@ -595,6 +655,10 @@ export interface ElephantDayReport {
   urineTank: number;
   trustDelta: number;
   cooperationDelta: number;
+  familiarityDelta?: number; // насколько стала «своей» за смену (в отчётах до полного контакта нет)
+  contactMinutes?: number; // сколько была рядом с кипером
+  shoves?: number;
+  kicks?: number;
   highlights: string[];
 }
 
@@ -635,9 +699,61 @@ export interface State {
   alerts: Alert[];
   dayStart: number;
   dailyKeeper: DailyKeeper;
-  startOfDay: Record<string, { trust: number; cooperation: number }>;
+  startOfDay: Record<string, { trust: number; cooperation: number; familiarity?: number }>;
   reports: DayReport[];
   pendingReport: number | null; // индекс отчёта, который ещё не показали
+  kitten: Kitten; // котёнок со станции: живёт сам по себе
+}
+
+// ---------------------------------------------------------------------------
+// Котёнок со станции (тот же чёрный котёнок-«смокинг», что живёт на Research Station).
+// Не питомец и не задача: бродит сам, спит где удобно, иногда идёт рядом с кипером;
+// испугавшись, убегает туда, куда слону не добраться, и, успокоившись, возвращается.
+// ---------------------------------------------------------------------------
+
+export type KittenActKind = 'wander' | 'sniff' | 'sit' | 'groom' | 'watch' | 'play' | 'nap' | 'follow' | 'flee' | 'hide';
+
+export const KITTEN_ACTS: KittenActKind[] = ['wander', 'sniff', 'sit', 'groom', 'watch', 'play', 'nap', 'follow', 'flee', 'hide'];
+
+export interface KittenAct {
+  kind: KittenActKind;
+  start: number; // игровые минуты
+  until: number; // до какого времени (для «делать»; в пути — запас)
+  target: Vec | null; // куда идёт
+  arrived: boolean; // дошёл — теперь «делает»
+  look: string | null; // id слонихи, на которую смотрит или от которой убежал
+  spot: string; // где (для подписи): «на тюках сена», «на ограде»
+}
+
+// Взобрался на что-то: ограду, стену, дерево, стол, сено — слону туда не дотянуться
+export interface KittenPerch {
+  x: number;
+  y: number;
+  down: Vec; // куда спрыгнуть
+  tree: boolean; // на дереве — рисуется в кроне
+}
+
+export interface Kitten {
+  x: number;
+  y: number;
+  heading: number;
+  speed: number; // м/с
+  act: KittenAct;
+  path: Vec[];
+  perch: KittenPerch | null;
+  up: KittenPerch | null; // запрыгивает сюда (в прыжке)
+  pending: KittenPerch | null; // добежит — запрыгнет сюда
+  hop: boolean; // в прыжке: вверх или вниз
+  fear: number; // испуг 0..1
+  energy: number; // бодрость 0..1: падает, пока не спит
+  bold: number; // врождённая смелость 0..1
+  friendly: number; // как относится к киперу 0..1
+  wary: Record<string, number>; // насторожённость к каждой слонихе 0..1 — по тому, как она с ним
+  rng: number; // свой генератор: котёнок не сдвигает случайности слонов
+  next: number; // когда снова решить, чем заняться
+  blocked: number; // секунд без продвижения
+  timer: number; // секунд в текущем движении (охота на соломинки, переплан пути)
+  lastNap: string; // где спал в прошлый раз — любит разные места
 }
 
 // Ввод на один шаг симуляции

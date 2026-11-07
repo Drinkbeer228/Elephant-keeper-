@@ -108,12 +108,11 @@ function traitDistance(a: Traits, b: Traits): number {
   return Math.sqrt(d);
 }
 
-// Дополнительный поток для каждой слонихи: шкодливость, манера сигналить, форма свистка
+// Дополнительный поток для каждой слонихи: шкодливость и манера просить
 export interface ProfileExtra {
   mischief: number;
   signal: SignalStyle;
   foot: Foot;
-  whistle: { up: boolean; step: number; notes: number; gap: number; wave: 'sine' | 'triangle' };
 }
 
 export function extraProfile(seed: number, index: number, p: { age: number; traits: Traits }): ProfileExtra {
@@ -141,28 +140,11 @@ export function extraProfile(seed: number, index: number, p: { age: number; trai
   }
   const feet: Foot[] = ['FL', 'FR', 'HL', 'HR'];
   const foot = feet[Math.floor(next() * 4)];
-  const notes = 1 + Math.floor(next() * 3);
-  const up = next() < 0.55;
-  const step = round3(0.18 + next() * 0.3);
-  const wave: 'sine' | 'triangle' = next() < 0.5 ? 'sine' : 'triangle';
-  const gap = round3(0.08 + next() * 0.1);
-  return { mischief, signal, foot, whistle: { up, step, notes, gap, wave } };
+  return { mischief, signal, foot };
 }
 
-// Свистки в одном стаде не должны путаться: высоты разносим по «лестнице»
-export function makeHabits(herd: { extra: ProfileExtra }[], seed: number, diets: DietId[]): Habits[] {
-  const next = mulberry((seed ^ 0x3c6ef372) >>> 0);
-  const ladder = [980, 1120, 1260, 1400, 1540, 1680];
-  for (let i = ladder.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    [ladder[i], ladder[j]] = [ladder[j], ladder[i]];
-  }
-  return herd.map(({ extra }, i) => {
-    const f0 = ladder[i % ladder.length] + Math.round((next() - 0.5) * 40);
-    const w = extra.whistle;
-    const f1 = Math.round(f0 * (w.up ? 1 + w.step : 1 - w.step * 0.6));
-    return { signal: extra.signal, foot: extra.foot, whistle: { f0, f1, notes: w.notes, gap: w.gap, wave: w.wave }, diet: diets[i] };
-  });
+export function makeHabits(herd: { extra: ProfileExtra }[], diets: DietId[]): Habits[] {
+  return herd.map(({ extra }, i) => ({ signal: extra.signal, foot: extra.foot, diet: diets[i] }));
 }
 
 // Рацион из SlonVet: самой молодой — смесь «Юниор», самой крупной — ФормаМакс, остальным — Mono Grass
@@ -234,21 +216,37 @@ export function generateHerd(opts: HerdOptions): ElephantProfile[] {
       look,
       favoriteFood,
       color: colors[i % colors.length],
-      habits: { signal: extra.signal, foot: extra.foot, whistle: { f0: 1200, f1: 1500, notes: 1, gap: 0.1, wave: 'sine' }, diet: 'monograss' },
+      habits: { signal: extra.signal, foot: extra.foot, diet: 'monograss' },
     });
   }
-  const habits = makeHabits(extras, opts.seed, assignDiets(herd));
+  const habits = makeHabits(extras, assignDiets(herd));
   herd.forEach((p, i) => (p.habits = habits[i]));
   return herd;
 }
 
+// Детерминированный разброс по слонихе: у каждой что-то выучено лучше, что-то хуже
+export function jitter(seed: number, k: number): number {
+  const v = Math.sin((seed + k * 97.13) * 12.9898) * 43758.5453;
+  return v - Math.floor(v) - 0.5;
+}
+
+// С чем она приходит к новому киперу: доверие — от характера, привычки к нему пока немного,
+// голосовые просьбы знает от прежних киперов — старшие и покладистые лучше
 export function initialLearned(p: ElephantProfile): Learned {
   const t = p.traits;
+  const trained = clamp(0.35 + 0.4 * t.cooperation + 0.12 * clamp((p.age - 10) / 25, 0, 1), 0.2, 0.9);
+  const seed = p.look.seed;
+  const cue = (shift: number, k: number) => round3(clamp(trained + shift + 0.3 * jitter(seed, k), 0.12, 0.95));
   return {
     trust: round3(clamp(0.25 + 0.35 * (1 - t.nervousness) + 0.15 * t.sociability, 0.1, 0.85)),
+    familiarity: round3(clamp(0.22 + 0.18 * t.sociability + 0.1 * (1 - t.nervousness), 0.15, 0.55)),
     cooperation: round3(clamp(0.15 + 0.6 * t.cooperation, 0.1, 0.85)),
     expectation: round3(clamp(0.3 + 0.4 * t.expressiveness, 0.15, 0.85)),
     toilet: round3(clamp(0.15 + 0.3 * t.cooperation + 0.1 * t.expressiveness, 0.1, 0.6)),
+    // «En arrière» и «Partez» — привычные команды из её прошлого; «ногу» — для осмотра стоп
+    cues: { come: cue(0.1, 1), stay: cue(-0.05, 2), move: cue(0.05, 3), lie: cue(-0.15, 4), follow: cue(0, 5), no: cue(0.05, 6), back: cue(0.05, 7), go: cue(0.08, 8), foot: cue(-0.08, 9) },
+    // Кошки в слоновниках не редкость: старшие и спокойные чаще к ним привыкли
+    cat: round3(clamp(0.08 + 0.25 * clamp((p.age - 6) / 30, 0, 1) + 0.15 * (1 - t.nervousness) + 0.3 * (jitter(seed, 13) + 0.5), 0.05, 0.75)),
   };
 }
 
@@ -342,9 +340,8 @@ export function characterHints(p: ElephantProfile): string[] {
   if (t.cooperation > 0.64) out.push('Охотно откликается на зов, если за это хвалят.');
   if (t.activity < 0.36) out.push('Много отдыхает, двигается неспешно.');
   if (t.activity > 0.64) out.push('Почти не стоит на месте.');
-  if (t.mischief > 0.62) out.push('Тянет и грызёт всё, до чего дотянется; пустой таз или шланг у решётки может испортить.');
+  if (t.mischief > 0.62) out.push('Тянет и грызёт всё, до чего дотянется; пустой таз или брошенный шланг может испортить.');
   if (t.mischief < 0.36) out.push('Бережно обращается с вещами.');
-  out.push(signalHabitText(p));
   const food = p.favoriteFood === 'produce' ? 'овощи и фрукты' : p.favoriteFood === 'browse' ? 'свежие ветки' : 'сено';
   out.push(`Любимая еда — ${food}.`);
   return out;
@@ -369,7 +366,7 @@ export function signalHabitText(p: ElephantProfile): string {
     case 'rumble':
       return 'Просится голосом: урчит и встряхивает хоботом.';
     case 'stare':
-      return 'Просится молча: встаёт у решётки и пристально смотрит на кипера.';
+      return 'Просится молча: подходит к киперу и пристально смотрит на него.';
     case 'gate':
       return 'Просится, подолгу стоя у ворот.';
     case 'beg':

@@ -14,6 +14,7 @@ import {
   POOL,
   STATIONS,
   TIRE,
+  TOILET_STANCE,
   TREES,
   TROUGH_IDS,
   areaAt,
@@ -38,7 +39,7 @@ import {
   canReachArea,
   freeSlot,
   gateMask,
-  keeperContact,
+  keeperMeet,
   radiusOf,
   rankOf,
   reachableAreas,
@@ -47,6 +48,7 @@ import {
   zoneOf,
 } from './perceive';
 import { signalWillingness } from './signals';
+import { wakeBladder } from './night';
 import { nameCase } from '../herd';
 
 export interface Candidate {
@@ -380,25 +382,36 @@ function gateTarget(c: Ctx, to: AreaId): TargetRef | null {
 function toiletSignalTarget(c: Ctx): TargetRef {
   const { s, e } = c;
   const h = e.profile.habits;
-  // Приученная к баку идёт к тренировочной стенке сама
-  if (e.learned.toilet > 0.5 && reach(c, 'stallE')) return { t: 'slot', station: 'trainingWall', slot: 0 };
+  // Приученная идёт к стоку сама и ждёт там кипера с баком
+  if (e.learned.toilet > 0.5 && reach(c, areaAt(TOILET_STANCE.x, TOILET_STANCE.y))) return { t: 'point', x: TOILET_STANCE.x, y: TOILET_STANCE.y, face: TOILET_STANCE.face };
   if (h.signal === 'gate') return gateTarget(c, 'paddock') ?? { t: 'point', x: e.x, y: e.y, face: null };
   if (h.signal === 'stare') {
-    const k = s.keeper;
-    const near = keeperContact(s);
-    if (near && reach(c, near.area)) return { t: 'point', x: near.spot.x, y: near.spot.y, face: near.face };
-    const line = c.area === 'stallW' ? { x: Math.max(11.5, Math.min(18.5, k.x)), y: 27.6 } : c.area === 'stallE' ? { x: Math.max(21.5, Math.min(28.5, k.x)), y: 27.6 } : { x: e.x, y: e.y };
-    return { t: 'point', x: line.x, y: line.y, face: Math.PI / 2 };
+    // Встаёт перед кипером и смотрит на него
+    const m = keeperMeet(s, e);
+    if (m && reach(c, m.area)) return { t: 'point', x: m.spot.x, y: m.spot.y, face: m.face };
   }
   return { t: 'point', x: e.x, y: e.y, face: null };
+}
+
+// Только что проснулась после долгого сна — тянет в туалет раньше обычного (если так её потянуло)
+function postWakeUrge(s: State, e: Elephant): number {
+  const w = e.mem.woke;
+  if (s.t - w.t > 40 || w.slept < 60) return ELEPHANT.urgeBladder;
+  // Встала после долгого сна — обычно хотя бы в туалет, даже если пузырь полон наполовину
+  if (w.plan === 'go' || w.plan === 'signal') return w.slept >= 90 ? 32 : 45;
+  if (w.plan === 'wander' && s.t - w.t > 8) return w.slept >= 90 ? 36 : 50;
+  // Сначала поела — а потом в туалет
+  if (w.plan === 'eat' && s.t - w.t > 12) return w.slept >= 90 ? 36 : 55;
+  return ELEPHANT.urgeBladder;
 }
 
 function addElimination(c: Ctx, out: Candidate[]): void {
   const { s, e } = c;
   const n = e.needs;
   const T = e.profile.traits;
-  if (n.bladder >= ELEPHANT.urgeBladder) {
-    const u = urg(n.bladder, ELEPHANT.urgeBladder, 100);
+  const urge = postWakeUrge(s, e);
+  if (n.bladder >= urge) {
+    const u = urg(n.bladder, urge, 100);
     if (c.zone === 'paddock') {
       out.push(cand('urinate', { t: 'point', x: e.x, y: e.y, face: null }, 0.75 + 0.5 * u, 1.2, 'urinate', 'мочится'));
     } else if (reach(c, 'paddock')) {
@@ -408,6 +421,15 @@ function addElimination(c: Ctx, out: Candidate[]): void {
     } else {
       const will = signalWillingness(e) * (0.7 + 0.6 * e.learned.toilet);
       out.push(cand('signal', toiletSignalTarget(c), (0.55 + 0.5 * u) * (0.35 + 0.75 * will), 0, 'signal:toilet', 'просится в туалет', 'toilet'));
+      // Не из тех, кто подолгу просится, или только что проснулась и пошла — справится сама:
+      // приученная — над стоком, остальные — где стоит
+      const w = e.mem.woke;
+      const goes = s.t - w.t < 40 && w.slept >= 60 && (w.plan === 'go' || (w.plan === 'wander' && s.t - w.t > 8) || (w.plan === 'eat' && s.t - w.t > 12));
+      if (goes || n.bladder >= 85 + 10 * e.learned.toilet) {
+        const drain = e.learned.toilet > 0.5 && reach(c, areaAt(TOILET_STANCE.x, TOILET_STANCE.y));
+        const t: TargetRef = drain ? { t: 'point', x: TOILET_STANCE.x, y: TOILET_STANCE.y, face: TOILET_STANCE.face } : { t: 'point', x: e.x, y: e.y, face: null };
+        out.push(cand('urinate', t, (goes ? 0.9 + 0.5 * u : (0.4 + 0.6 * u) * (1.2 - will)), 0.3, 'urinate', drain ? 'идёт к стоку в туалет' : 'мочится где стоит'));
+      }
     }
   }
   if (n.bowel >= ELEPHANT.urgeBowel && T.sensitivity > 0.45) {
@@ -456,7 +478,11 @@ function addRest(c: Ctx, out: Candidate[]): void {
     if (spot) {
       const need = 0.3 + 0.45 * T.sensitivity; // чувствительная не ляжет на мокрое и грязное
       const ok = spot.comfort >= need ? 1 : 0.12;
-      const score = (0.15 + 0.8 * Math.min(1, press)) * phys(n.fatigue, 25, 90) * ok * (1 - 0.35 * urg(n.stress, 40, 90));
+      // Хочет пить — сначала напьётся, потом ляжет; полный пузырь — не уснёт
+      const thirsty = n.thirst > 40 ? 0.45 : 1;
+      // Не ложится с полным пузырём — и с только что выпитым: сначала сходит в туалет
+      const full = n.bladder + e.fluid >= wakeBladder(e) - 8 ? 0 : 1;
+      const score = (0.15 + 0.8 * Math.min(1, press)) * phys(n.fatigue, 25, 90) * ok * (1 - 0.35 * urg(n.stress, 40, 90)) * thirsty * full;
       out.push(cand('sleep', { t: 'point', x: spot.x, y: spot.y, face: null }, score, 70 + 0.9 * n.fatigue, 'sleep', spot.comfort >= need ? 'ложится спать' : 'хотела лечь, но подстилка плохая'));
     }
   }
@@ -588,10 +614,8 @@ function poolInnerPoint(s: State): Vec {
 // Исследование и шалости
 // ---------------------------------------------------------------------------
 
-// Вещь кипера лежит так близко к решётке, что слон дотянется хоботом
+// Вещь кипера лежит так близко к ограде выгула, что слон дотянется хоботом
 export function grabbableFromArea(x: number, y: number, areas: AreaId[]): boolean {
-  if (areas.includes('stallW') && x > 10.5 && x < 19.7 && y > 30 && y < 31.1) return true;
-  if (areas.includes('stallE') && x > 20.3 && x < 29.5 && y > 30 && y < 31.1) return true;
   if (areas.includes('paddock') && y > 20 && y < 21.1 && ((x > 2.5 && x < 9.5) || (x > 30.5 && x < 45.5))) return true;
   return false;
 }
@@ -627,7 +651,7 @@ function addExplore(c: Ctx, out: Candidate[]): void {
   const n = e.needs;
   const T = e.profile.traits;
   const drive = T.curiosity * (0.3 + 0.7 * urg(n.boredom, 10, 70));
-  // Вещи кипера: свои в отсеке или забытые у самой решётки
+  // Вещи кипера: рядом с ней или забытые у самой ограды
   for (const it of s.world.items) {
     const a = areaAt(it.x, it.y);
     const inside = reach(c, a);
@@ -636,7 +660,7 @@ function addExplore(c: Ctx, out: Candidate[]): void {
     const d = dist(e, it);
     if (d > 25) continue;
     const pull = drive * 1.15 + 0.35 * T.mischief * urg(n.boredom, 10, 70);
-    out.push(cand('explore', { t: 'item', id: it.id }, pull * distMul(d), 3 + 6 * T.curiosity, `explore:item:${it.id}`, reachable ? 'тянется к вещи за решёткой' : 'изучает забытую вещь'));
+    out.push(cand('explore', { t: 'item', id: it.id }, pull * distMul(d), 3 + 6 * T.curiosity, `explore:item:${it.id}`, reachable ? 'тянется к вещи за оградой' : 'изучает забытую вещь'));
   }
   // Шланг в зоне хобота — почти верная добыча для шкодливой
   const hp = hoseReachPoint(s, e, c.areas);
@@ -654,11 +678,14 @@ function addExplore(c: Ctx, out: Candidate[]): void {
     out.push(cand('manipulate', { t: 'tub', id: tub.id }, score * distMul(dist(e, tub)), 2 + 5 * T.mischief, `manip:tub:${tub.id}`, 'катает пустой таз'));
   }
   if (drive < 0.05) return;
-  // Кипер работает рядом — любопытные подходят посмотреть
-  const k = keeperContact(s);
-  if (k && reach(c, k.area) && (s.keeper.task || s.keeper.held)) {
-    const trustK = 0.4 + 0.6 * e.learned.trust;
-    out.push(cand('explore', { t: 'point', x: k.spot.x, y: k.spot.y, face: k.face }, drive * 0.75 * trustK * distMul(dist(e, k.spot)), 3 + 4 * T.curiosity, 'explore:keeper', 'наблюдает за кипером'));
+  // Кипер работает рядом — любопытные и привыкшие к нему подходят посмотреть и обнюхать
+  const k = keeperMeet(s, e);
+  if (k && reach(c, k.area)) {
+    const L = e.learned;
+    const near = dist(e, s.keeper) < 12;
+    const busy = s.keeper.task || s.keeper.held ? 1 : 0.55;
+    const social = 0.35 + 0.65 * L.trust * (0.4 + L.familiarity) * (0.5 + T.sociability);
+    if (near && L.trust > 0.35) out.push(cand('explore', { t: 'point', x: k.spot.x, y: k.spot.y, face: k.face }, drive * 0.8 * social * busy * distMul(dist(e, k.spot)), 1.5 + 3 * T.curiosity, 'explore:keeper', 'подходит к киперу — обнюхать'));
   }
   // Природа: деревья, камни, бревно — почесаться, обнюхать
   if (reach(c, 'paddock')) {
@@ -691,11 +718,11 @@ function addSocial(c: Ctx, out: Candidate[]): void {
         const score = urg(n.social, 15, 75) * (0.25 + 0.9 * T.sociability) * (0.4 + b) * distMul(d);
         out.push(cand('socialize', { t: 'el', id: o.id }, score, 3 + 7 * T.sociability, `socialize:${o.id}`, `идёт к ${nameCase(o.profile.name, 'dat')}`));
       } else if (AREA_ZONE[areaOf(o)] === 'barn' && c.zone === 'barn') {
-        // Подруга за решёткой соседнего стойла: подойти к решётке и тянуться хоботом
+        // Подруга за закрытыми разделительными воротами: подойти к створке и тянуться хоботом
         const x = c.area === 'stallW' ? 18.4 : 21.6;
-        const y = Math.max(21.6, Math.min(28.2, o.y));
+        const y = Math.max(21.6, Math.min(31.2, o.y));
         const score = urg(n.social, 20, 80) * (0.2 + 0.8 * T.sociability) * (0.4 + b) * 0.8 * distMul(dist(e, { x, y }));
-        out.push(cand('socialize', { t: 'el', id: o.id }, score, 3 + 6 * T.sociability, `socialize:${o.id}`, `тянется хоботом к ${nameCase(o.profile.name, 'dat')} через решётку`));
+        out.push(cand('socialize', { t: 'el', id: o.id }, score, 3 + 6 * T.sociability, `socialize:${o.id}`, `тянется хоботом к ${nameCase(o.profile.name, 'dat')} через ворота`));
       }
     }
   }
@@ -750,7 +777,7 @@ function addKeeper(c: Ctx, out: Candidate[]): void {
   const n = e.needs;
   const T = e.profile.traits;
   const L = e.learned;
-  const k = keeperContact(s);
+  const k = keeperMeet(s, e);
   if (!k || !reach(c, k.area)) {
     // Нужда без выхода: пустая кормушка или поилка — позвать кипера
     addNeedSignals(c, out);
@@ -758,12 +785,12 @@ function addKeeper(c: Ctx, out: Candidate[]): void {
   }
   const d = dist(e, k.spot);
   if (d > 26) return;
-  // Кипер несёт еду — прожорливые идут следом вдоль решётки
+  // Кипер несёт еду — прожорливые идут следом
   const held = s.keeper.held;
   if (held && ['ration', 'hay', 'browse', 'bamboo', 'porridge', 'tub'].includes(held.kind)) {
     const mine = (held.kind === 'porridge' || held.kind === 'tub') && held.owner === e.id;
     const score = (0.3 + 0.7 * urg(n.hunger, 10, 70)) * (mine ? 1.2 : T.foodDrive) * (0.45 + 0.55 * L.trust) * 0.95;
-    out.push(cand('seekKeeper', { t: 'point', x: k.spot.x, y: k.spot.y, face: k.face }, score * distMul(d), 6, 'seekKeeper', mine ? 'ждёт свою порцию у решётки' : 'ждёт угощения у решётки'));
+    out.push(cand('seekKeeper', { t: 'point', x: k.spot.x, y: k.spot.y, face: k.face }, score * distMul(d), 6, 'seekKeeper', mine ? 'ждёт свою порцию' : 'идёт за тобой — у тебя еда'));
   }
   // Просит внимания: общительные и доверчивые; «торгующиеся» выпрашивают лакомство
   const social = Math.max(urg(n.social, 10, 70), urg(n.boredom, 25, 85));
@@ -877,10 +904,9 @@ function paceLine(c: Ctx): Vec | null {
   return null;
 }
 
-// Шланг за решёткой: слону встать вплотную к линии напротив и тянуться хоботом (слоны всегда к северу от линий)
+// Шланг за оградой выгула: встать вплотную к ограде напротив и тянуться хоботом (слоны к северу от ограды)
 export function hoseApproach(p: Vec): Vec {
   for (const line of [
-    { y: 30, x0: 10.3, x1: 29.7 },
     { y: 20, x0: 2.3, x1: 9.7 },
     { y: 20, x0: 30.3, x1: 45.7 },
   ]) {
@@ -922,6 +948,17 @@ export function candidates(s: State, e: Elephant): Candidate[] {
   const filtered = out.filter((x) => x.score > 0.005 && (e.mem.cooldown[x.key] ?? -1) <= s.t && (e.mem.cooldown[x.key.split(':')[0]] ?? -1) <= s.t);
   // Небольшой разброс: одинаковые условия не дают одинакового поведения у разных слонов
   for (const x of filtered) x.score *= 1 + (random(s) - 0.5) * 0.18;
+  // Проснулась: куда её потянет — по её привычке и по случаю (план выбран при пробуждении)
+  const w = e.mem.woke;
+  if (s.t - w.t < 40 && w.plan !== 'none') {
+    for (const x of filtered) {
+      if (w.plan === 'signal' && x.kind === 'signal' && x.signal === 'toilet') x.score *= 1.5;
+      else if (w.plan === 'go' && x.kind === 'urinate') x.score *= 1.4;
+      else if (w.plan === 'eat' && x.kind === 'eat' && s.t - w.t < 12) x.score *= 1.6;
+      else if (w.plan === 'wander' && (x.kind === 'wander' || x.kind === 'explore')) x.score *= 1.8;
+      else if (w.plan === 'sleep' && x.kind === 'sleep') x.score *= 1.7;
+    }
+  }
   // Грязная зона давит на чувствительных: им хочется уйти в другую
   if (e.profile.traits.sensitivity > 0.55 && c.zones.length > 1) {
     const other = zone === 'barn' ? 'paddock' : 'barn';

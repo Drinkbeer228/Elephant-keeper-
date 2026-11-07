@@ -32,7 +32,7 @@ export function heldLabel(h: Held | null, s?: State): string {
     case 'sawdust':
       return `мешок опилок (${h.load})`;
     case 'tank':
-      return h.load > 0 ? `бак: ${Math.round(h.load)} л` : h.aux ? 'грязный бак' : 'бак для мочи';
+      return h.load > 0 ? `ведро: ${Math.round(h.load)} л` : h.aux ? 'грязное ведро' : 'ведро для мочи';
     case 'washKit':
       return h.load > 0.05 ? 'ведро для мытья с шампунем' : 'пустое ведро для мытья';
     case 'chem':
@@ -99,11 +99,11 @@ export function thingOptions(c: KCtx, out: ActionOption[]): void {
     else out.push(opt(kit, 'Взять набор для мытья слонов (шампунь, щётка, ведро тёплой воды)', 52, { group }));
     if (h && (h.kind === 'chem' || h.kind === 'washKit')) out.push(opt({ verb: 'putBack', target: h.kind }, `Убрать ${THING_ACC[h.kind]} в шкаф`, 48, { group }));
   }
-  // Бак для мочи — на своё место в проходе
+  // Ведро для мочи — на своё место в инвентарной
   if (h?.kind === 'tank' && dist(k, TANK_HOME) < 1.4) {
     const ref: ActionRef = { verb: 'putBack', target: 'tank' };
-    if (h.load > 0 || h.aux) out.push(off(ref, 'Поставить бак на место', 'Сначала вылей и помой его в мойке', 40, { group: 'Бак' }));
-    else out.push(opt(ref, 'Поставить бак на место', 40, { group: 'Бак' }));
+    if (h.load > 0 || h.aux) out.push(off(ref, 'Поставить ведро на место', 'Сначала вылей и помой его в мойке', 40, { group: 'Ведро' }));
+    else out.push(opt(ref, 'Поставить ведро на место', 40, { group: 'Ведро' }));
   }
   // Вещи на полу
   if (!c.pushing) {
@@ -291,7 +291,7 @@ export function applyThing(s: State, ref: ActionRef): boolean {
   return false;
 }
 
-// Поставить таз на пол (в вольере, проходе или на кухне)
+// Поставить таз на пол (в зале, на выгуле или на кухне)
 export function placeTubAt(s: State, tubId: number, x: number, y: number): void {
   const tub = tubById(s, tubId);
   if (!tub) return;

@@ -45,19 +45,14 @@ describe('поведение и характер', () => {
     expect(hi).toBeGreaterThan(lo + 15);
   });
 
-  it('общительная держится ближе к другим, чем самостоятельная', () => {
-    const near = [0, 0];
+  it('общительная ищет общества: больше здоровается и стоит рядом с подругами, чем самостоятельная', () => {
+    const social = [0, 0];
     for (const seed of [7, 8]) {
       const s = game(seed, 3, [{ sociability: 0.95 }, { sociability: 0.05 }, { sociability: 0.6 }]);
-      cared(s, 720, () => {
-        for (const i of [0, 1]) {
-          const e = s.elephants[i];
-          const d = Math.min(...s.elephants.filter((o) => o !== e).map((o) => Math.hypot(o.x - e.x, o.y - e.y)));
-          if (d < 6) near[i]++;
-        }
-      });
+      cared(s, 720);
+      for (const i of [0, 1]) social[i] += s.elephants[i].day.minutes.socialize ?? 0;
     }
-    expect(near[0]).toBeGreaterThan(near[1]);
+    expect(social[0]).toBeGreaterThan(social[1] * 2);
   });
 
   it('любопытная исследует больше равнодушной', () => {

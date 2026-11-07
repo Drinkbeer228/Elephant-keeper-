@@ -7,6 +7,7 @@ import { Input } from './input';
 import { WorldScene } from './render/WorldScene';
 import {
   actionTarget,
+  kittenDoing,
   availableActions,
   clearLegacy,
   createState,
@@ -134,8 +135,8 @@ setSpeed(speed);
 const stick = hud.stickElements();
 input.bindStick(stick.base, stick.knob);
 
-function whistleOf(id: string) {
-  return state.elephants.find((e) => e.id === id)?.profile.habits.whistle ?? null;
+function nameOf(id: string): string | null {
+  return state.elephants.find((e) => e.id === id)?.profile.name ?? null;
 }
 
 function nearestElephant(): string | null {
@@ -244,7 +245,7 @@ function frame(dt: number): SimEvent[] {
     hud.pushEvents(events);
     for (const ev of events) {
       const near = Math.hypot(ev.x - state.keeper.x, ev.y - state.keeper.y) < 14 || ev.x === 0;
-      sound.event(ev, near, whistleOf);
+      sound.event(ev, near, nameOf);
       if (ev.text && (ev.severity === 'warn' || ev.severity === 'bad')) sound.chime(ev.severity);
     }
   }
@@ -284,6 +285,7 @@ function start(): void {
     getState: () => state,
     frame,
     onSelect: (id) => (selected = id),
+    onKitten: () => hud.toast(`Котёнок со станции ${kittenDoing(state)}. Живёт сам по себе — заботиться о нём не нужно.`, 'info'),
     selected: () => selected,
     showNames: () => showNames,
     marker: () => {
