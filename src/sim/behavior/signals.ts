@@ -3,7 +3,7 @@
 // и от опыта (ожидает ли слон, что ему ответят). Как именно — личная привычка:
 // одна топает определённой ногой, другая урчит, третья подходит и молча смотрит на кипера.
 
-import { FEEDER_IDS, STATIONS, TROUGH_IDS } from '../../data/facility';
+import { FEEDER_IDS, ROOMS, STATIONS, TROUGH_IDS, inRect } from '../../data/facility';
 import { log } from '../events';
 import { dist } from '../geometry';
 import { footText } from '../herd';
@@ -78,6 +78,9 @@ export function beginSignal(s: State, e: Elephant, kind: SignalKind): void {
   if (e.signal) return;
   e.signal = { kind, start: s.t, until: s.t + signalPatience(e), answered: false };
   e.day.signals++;
+  // Кипер рядом и видит — запоминает её манеру просить
+  const k = s.keeper;
+  if (Math.hypot(k.x - e.x, k.y - e.y) < 16 && !ROOMS.some((r) => inRect(r.rect, k.x, k.y))) e.mem.seen.signal++;
   e.mem.lastSignalFx = s.t - 10;
   const clear = signalClarity(e) >= 0.5;
   log(s, clear ? 'warn' : 'info', `${signalText(e, kind)}.`, {

@@ -6,25 +6,65 @@
 //
 //  «Зоя!» — окликнуть: заметит тебя (так не напугаешь, подходя сзади), может подойти поздороваться
 //  «Иди сюда» · «Стоять» · «Подвинься» · «Пошли» (рядом с тобой) · «Ложись» / «Вставай»
-//  «Давай» — в туалет · «Нельзя!» — прекратить · «Молодец» — похвала · поговорить спокойно
+//  «En arrière!» — назад (пятится) · «Partez!» — вперёд, пошла (в открытые ворота — проходит)
+//  «Ногу!» — подаёт ближнюю к тебе ногу для осмотра стопы
+//  «Давай» — в туалет (с ведром у задних ног — в ведро) · «Нельзя!» · «Молодец» · поговорить спокойно
+// Команды не жёсткие: каждая знает их по-своему, и многое решают ваши отношения.
 
 import { CONTACT, LEARN } from '../../data/balance';
-import { ROOMS, TOILET_STANCE, areaAt, hardFloor, inRect } from '../../data/facility';
+import { GATE_BY_ID, ROOMS, TOILET_STANCE, areaAt, hardFloor, inRect } from '../../data/facility';
 import { finishActivity, giveWay, lieOnCommand, respondToCall, startActivity } from '../behavior/act';
 import { acceptContact, comfortGap, noticeKeeper } from '../behavior/contact';
 import { cueCompliance, lieCompliance, toiletCompliance } from '../behavior/engine';
 import { onNag, onPraise, onScoldWrong, onTalk } from '../behavior/learning';
-import { connectedAreas, gapToBody, keeperBearing, keeperMeet, rearPos } from '../behavior/perceive';
+import { connectedAreas, gapToBody, gateMask, keeperBearing, keeperMeet, nearestFoot, radiusOf } from '../behavior/perceive';
+import { keeperCatching } from '../behavior/urine';
+import { elephantCanStand } from '../nav';
 import { answerSignal } from '../behavior/signals';
 import { fx, log } from '../events';
 import { dist } from '../geometry';
 import { nameCase } from '../herd';
 import { random } from '../rng';
-import type { ActionOption, ActionRef, Cue, Elephant, State } from '../types';
-import { lyingComfort, tankUnder } from '../world';
+import type { ActionOption, ActionRef, Cue, Elephant, Foot, State, Vec } from '../types';
+import { lyingComfort } from '../world';
 import { off, opt, type KCtx } from './common';
 
-export type VoiceCue = 'name' | 'come' | 'stay' | 'move' | 'follow' | 'lie' | 'up' | 'toilet' | 'no' | 'praise' | 'talk';
+export type VoiceCue = 'name' | 'come' | 'stay' | 'move' | 'follow' | 'lie' | 'up' | 'toilet' | 'no' | 'praise' | 'talk' | 'back' | 'go' | 'foot';
+
+const FOOT_GEN: Record<Foot, string> = { FL: 'левую переднюю', FR: 'правую переднюю', HL: 'левую заднюю', HR: 'правую заднюю' };
+
+// Куда она пятится: прямо назад, сколько есть места
+function behindPoint(s: State, e: Elephant): Vec | null {
+  const mask = gateMask(s);
+  const r = radiusOf(e);
+  for (const m of [2.0, 1.4, 0.8]) {
+    const p = { x: e.x - Math.cos(e.heading) * m, y: e.y - Math.sin(e.heading) * m };
+    if (elephantCanStand(p.x, p.y, r, mask)) return p;
+  }
+  return null;
+}
+
+// Куда идёт по «Partez!»: у открытых ворот на выгул — проходит их; иначе — вперёд, сколько есть места
+function forwardPoint(s: State, e: Elephant): { p: Vec; through: boolean } | null {
+  const g = GATE_BY_ID.outer;
+  const here = areaAt(e.x, e.y);
+  if (s.world.gates.outer && (here === g.a || here === g.b)) {
+    const near = g.approach[here];
+    if (near && Math.hypot(e.x - near.x, e.y - near.y) < 7) {
+      const other = here === g.a ? g.b : g.a;
+      const far = g.approach[other];
+      const dir = Math.sign(far.y - near.y) || 1;
+      return { p: { x: far.x, y: far.y + dir * 2.2 }, through: true };
+    }
+  }
+  const mask = gateMask(s);
+  const r = radiusOf(e);
+  for (const m of [3.5, 2.5, 1.5]) {
+    const p = { x: e.x + Math.cos(e.heading) * m, y: e.y + Math.sin(e.heading) * m };
+    if (elephantCanStand(p.x, p.y, r, mask)) return { p, through: false };
+  }
+  return null;
+}
 
 // Что она делает такого, за что говорят «нельзя»
 function misbehaving(s: State, e: Elephant): string | null {
@@ -85,9 +125,22 @@ export function voiceOptions(c: KCtx, out: ActionOption[]): void {
       out.push(opt(ref('lie'), `«${name}, ложись»`, 24 + (dirtyBack && tools ? 35 : 0), x));
     }
     if (e.lying && e.act.kind === 'lie') out.push(opt(ref('up'), `«${name}, вставай»`, 26, x));
+    if (d <= 7 && !e.lying && e.act.kind !== 'backUp') {
+      const inWay = gap < 1.0 || (s.world.gates.outer && Math.hypot(e.x - 15.5, e.y - 20) < 3);
+      out.push(opt(ref('back'), `«${name}, en arrière!» — назад`, 24 + (inWay ? 24 : 0), x));
+    }
+    if (d <= 8 && !e.lying && e.act.kind !== 'forward') {
+      const gate = s.world.gates.outer && Math.hypot(e.x - 15.5, e.y - 20) < 7 && (sig === 'out' || sig === 'in' || e.act.kind === 'idle' || e.act.kind === 'signal');
+      out.push(opt(ref('go'), gate ? `«${name}, partez!» — в ворота` : `«${name}, partez!» — вперёд`, 23 + (gate ? 34 : 0), x));
+    }
+    if (d <= 4.5 && !e.lying && e.act.kind !== 'foot') {
+      const due = !s.world.checks.feet[e.id];
+      out.push(opt(ref('foot'), `«${name}, ногу!» — осмотреть стопу`, 20 + (e.body.legs > 0.3 ? 18 : 0) + (due ? 8 : 0), x));
+    }
     if (d <= 5 && !e.lying) {
-      const label = `«${name}, давай» — в туалет`;
-      const ready = tankUnder(s, rearPos(e).x, rearPos(e).y) || dist(e, TOILET_STANCE) < 4;
+      const catching = h?.kind === 'tank' && keeperCatching(s, e);
+      const label = catching ? `«${name}, давай» — в ведро` : `«${name}, давай» — в туалет`;
+      const ready = catching || dist(e, TOILET_STANCE) < 4;
       if (e.needs.bladder < 20) out.push(off(ref('toilet'), label, 'Ей сейчас не нужно', 8, x));
       else out.push(opt(ref('toilet'), label, (ready ? 120 : 30) + (sig === 'toilet' ? 50 : 0), x));
     }
@@ -239,16 +292,66 @@ export function applyVoice(s: State, ref: ActionRef): boolean {
       }
       s.dailyKeeper.callsObeyed++;
       const hadSignal = e.signal?.kind === 'toilet';
-      const r = rearPos(e);
-      const tank = tankUnder(s, r.x, r.y);
-      // Приученная у стока сама встаёт над решёткой; бак под ней — справляется прямо в него
-      if (!tank && dist(e, TOILET_STANCE) < 4 && hardFloor(e.x, e.y) && areaAt(e.x, e.y) === areaAt(TOILET_STANCE.x, TOILET_STANCE.y)) {
+      const catching = keeperCatching(s, e);
+      // Ведро у её задних ног — справляется прямо в него, где бы ни стояла; приученная у стока
+      // сама встаёт над решёткой
+      if (!catching && dist(e, TOILET_STANCE) < 4 && hardFloor(e.x, e.y) && areaAt(e.x, e.y) === areaAt(TOILET_STANCE.x, TOILET_STANCE.y)) {
         respondToCall(s, e, TOILET_STANCE, TOILET_STANCE.face, 'встаёт над стоком', 'toilet');
       } else {
-        startActivity(s, e, { kind: 'urinate', target: null, score: 2, dur: 1.2, key: 'urinate', signal: null, note: tank ? 'мочится в бак' : 'мочится', aux: null }, true);
-        e.mem.call = { until: s.t + 10, x: e.x, y: e.y, arrivedAt: s.t, rewarded: false, why: 'toilet' };
+        startActivity(s, e, { kind: 'urinate', target: null, score: 2, dur: 0.3, key: 'urinate', signal: null, note: catching ? 'мочится в ведро' : 'мочится', aux: null }, true);
+        // Окно похвалы откроется, когда закончит (если в ведро)
+        e.mem.call = { until: s.t + 10, x: e.x, y: e.y, arrivedAt: -1, rewarded: false, why: 'toilet' };
       }
-      if (hadSignal) answerSignal(s, e, 'сходила по просьбе');
+      if (hadSignal) answerSignal(s, e, 'кипер пришёл с ведром');
+      return true;
+    }
+    case 'back': {
+      const p = behindPoint(s, e);
+      if (!p) {
+        refuse(s, e, 'не пятится', 'сзади нет места');
+        return true;
+      }
+      if (tryCue(s, e, 'back')) {
+        s.dailyKeeper.callsObeyed++;
+        startActivity(s, e, { kind: 'backUp', target: null, score: 1.2, dur: 6, key: 'backUp', signal: null, note: 'пятится назад, как просили', aux: p }, true);
+        e.mem.call = { until: s.t + 8, x: p.x, y: p.y, arrivedAt: -1, rewarded: false, why: 'back' };
+        acceptContact(s, e);
+      } else {
+        refuse(s, e, 'не пятится', cueCompliance(s, e, 'back', hasTreats).why);
+        nag(s, e, cue);
+      }
+      return true;
+    }
+    case 'go': {
+      const f = forwardPoint(s, e);
+      if (!f) {
+        refuse(s, e, 'не идёт', 'впереди нет места');
+        return true;
+      }
+      if (tryCue(s, e, 'go')) {
+        s.dailyKeeper.callsObeyed++;
+        const walk = Math.hypot(f.p.x - e.x, f.p.y - e.y) * 1.3;
+        startActivity(s, e, { kind: 'forward', target: { t: 'point', x: f.p.x, y: f.p.y, face: null }, score: 1.2, dur: 0.3, key: 'forward', signal: null, note: f.through ? 'идёт в ворота, как просили' : 'идёт вперёд, как просили', aux: null }, true);
+        e.mem.call = { until: s.t + 10 + walk, x: f.p.x, y: f.p.y, arrivedAt: -1, rewarded: false, why: 'go' };
+        acceptContact(s, e);
+        if (f.through && (e.signal?.kind === 'out' || e.signal?.kind === 'in')) answerSignal(s, e, 'кипер пропустил её в ворота');
+      } else {
+        refuse(s, e, 'стоит на месте', cueCompliance(s, e, 'go', hasTreats).why);
+        nag(s, e, cue);
+      }
+      return true;
+    }
+    case 'foot': {
+      if (tryCue(s, e, 'foot')) {
+        s.dailyKeeper.callsObeyed++;
+        const foot = nearestFoot(e, k);
+        startActivity(s, e, { kind: 'foot', target: null, score: 1.2, dur: 1.5 + 3.5 * e.learned.cues.foot, key: `foot:${foot}`, signal: null, note: `держит ${FOOT_GEN[foot]} ногу поднятой`, aux: null }, true);
+        e.mem.call = { until: s.t + 10, x: e.x, y: e.y, arrivedAt: s.t, rewarded: false, why: 'foot' };
+        acceptContact(s, e);
+      } else {
+        refuse(s, e, 'не даёт ногу', cueCompliance(s, e, 'foot', hasTreats).why);
+        nag(s, e, cue);
+      }
       return true;
     }
     case 'no': {

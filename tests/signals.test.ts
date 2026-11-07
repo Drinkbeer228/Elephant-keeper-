@@ -1,20 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { availableActions, runMinutes, step, NO_INPUT } from '../src/sim';
-import { STATIONS, TANK_HOME, TOILET_STANCE, hardFloor } from '../src/data/facility';
-import { rearPos } from '../src/sim/behavior/perceive';
-import { act, at, atStation, game } from './helpers';
+import { runMinutes, step } from '../src/sim';
+import { DRAIN, STATIONS, TANK_HOME, TOILET_STANCE } from '../src/data/facility';
+import { bucketSpots, keeperCatching } from '../src/sim/behavior/urine';
+import { act, at, atStation, game, walk } from './helpers';
 import type { Elephant, State } from '../src/sim';
-
-// Дойти до точки шагом (как игрок с клавиатуры)
-function goTo(s: State, x: number, y: number, maxSec = 30): void {
-  for (let i = 0; i < maxSec * 30; i++) {
-    const dx = x - s.keeper.x;
-    const dy = y - s.keeper.y;
-    const d = Math.hypot(dx, dy);
-    if (d < 0.25) return;
-    step(s, { ...NO_INPUT, move: { x: dx / d, y: dy / d } });
-  }
-}
 
 // Встать перед ней на расстоянии (в зале, к югу — к бетону) и повернуться к ней; она смотрит на кипера
 function faceHer(s: State, e: Elephant, metres: number): void {
@@ -43,10 +32,6 @@ function toiletScene(seed: number, expressiveness: number, expectation: number):
 // Занятие читаем через функцию: сужение типов TypeScript не знает, что act() его меняет
 function kindOf(e: Elephant): string {
   return e.act.kind;
-}
-
-function actionsFor(s: State, id: string) {
-  return availableActions(s).find((a) => a.id === id);
 }
 
 function runUntil(s: State, minutes: number, cond: () => boolean): boolean {
@@ -122,73 +107,94 @@ describe('сигналы и научение', () => {
     expect(e.day.signals).toBeLessThanOrEqual(first);
   });
 
-  it('туалет с баком: подойти, заговорить, «пошли» — на бетон рядом с кипером, «стоять», бак под неё, «давай» — моча в баке, награда учит', () => {
+  it('туалет с ведром: подойти, заговорить, ведро — к задним ногам, «давай» — струя в ведро прямо на соломе, время идёт как в жизни; похвалить — учится; вылить в сток', () => {
     const s = toiletScene(8, 0.9, 0.7);
     const e = s.elephants[0];
     e.learned.cooperation = 0.8;
     e.learned.trust = 0.75;
-    for (const c of ['follow', 'stay'] as const) e.learned.cues[c] = 0.9;
+    e.learned.cues.stay = 0.9;
+    e.needs.bladder = 82;
     expect(runUntil(s, 40, () => e.signal?.kind === 'toilet')).toBe(true);
-    // Бак — в инвентарной у двери в зал
+    // Ведро — в инвентарной у двери в зал
     at(s, TANK_HOME.x, TANK_HOME.y);
     expect(act(s, 'pickUp:')).toBe(true);
     expect(s.keeper.held?.kind).toBe('tank');
-    // Подойти так, чтобы видела, окликнуть и заговорить — тогда подпустит
+    // Она стоит там, где стоит: никуда вести не надо — подойти, окликнуть, заговорить
     faceHer(s, e, 3.2);
-    act(s, `voice:${e.id}:name`); // окликнуть, если ещё не смотрит на тебя
+    act(s, `voice:${e.id}:name`);
     expect(act(s, `voice:${e.id}:talk`)).toBe(true);
-    for (let i = 0; i < 4 && kindOf(e) !== 'walkWith'; i++) {
-      act(s, `voice:${e.id}:follow`);
-      if (kindOf(e) !== 'walkWith') runMinutes(s, 1.7);
-    }
-    expect(e.act.kind).toBe('walkWith');
-    // Довести рядом с собой до бетона у южной стены
-    goTo(s, 15.6, 31.6);
-    runMinutes(s, 1);
-    expect(hardFloor(rearPos(e).x, rearPos(e).y)).toBe(true);
-    expect(act(s, `voice:${e.id}:stay`)).toBe(true);
-    expect(e.act.kind).toBe('stay');
-    // К её боку, ближе к задним ногам
-    const c = Math.cos(e.heading);
-    const sn = Math.sin(e.heading);
-    const g = 0.95 * e.profile.look.size * e.profile.look.girth + 0.5;
-    at(s, e.x - c * 0.4 - sn * g, e.y - sn * 0.4 + c * g);
-    expect(act(s, `tankPlace:${e.id}`)).toBe(true);
+    act(s, `voice:${e.id}:stay`);
+    const p = bucketSpots(e)[0];
+    at(s, p.x, p.y);
+    step(s);
+    expect(keeperCatching(s, e)).toBe(true);
     expect(act(s, `voice:${e.id}:toilet`)).toBe(true);
-    expect(runUntil(s, 10, () => e.day.urineTank > 0)).toBe(true);
+    expect(e.act.kind).toBe('urinate');
+    // Пока она мочится рядом, время идёт как в жизни: секунда — секунда
+    const t0 = s.t;
+    const sim0 = s.simSec;
+    step(s);
+    expect((s.t - t0) / (s.simSec - sim0)).toBeCloseTo(1 / 60, 5);
+    let guard = 0;
+    while (e.act.kind === 'urinate' && guard++ < 200000) step(s);
+    expect(e.day.urineTank).toBe(1);
     expect(e.day.urineBedding).toBe(0);
-    const tank = s.world.items.find((it) => it.kind === 'tank')!;
-    expect(tank.load).toBeGreaterThan(0);
+    const caught = s.keeper.held!.load;
+    expect(caught).toBeGreaterThan(4);
+    expect(e.day.caughtLitres).toBeCloseTo(caught, 1);
+    // Полное ведро тяжелее пустого: идёшь медленнее
+    const x0 = s.keeper.x;
+    walk(s, 1, 0, 0.5);
+    const heavyStep = Math.abs(s.keeper.x - x0);
     const learned = e.learned.toilet;
-    expect(act(s, `treat:${e.id}`)).toBe(true);
+    faceHer(s, e, 2.4);
+    expect(act(s, `treat:${e.id}`) || act(s, `voice:${e.id}:praise`)).toBe(true);
     expect(e.learned.toilet).toBeGreaterThan(learned);
-    // Забрать бак, вылить в слив и помыть, поставить на место
-    runMinutes(s, 3);
-    at(s, tank.x + 0.8, tank.y);
-    expect(act(s, 'tankTake:')).toBe(true);
-    expect(s.keeper.held?.kind).toBe('tank');
-    atStation(s, 'washSink');
-    expect(act(s, 'wash:emptyTank')).toBe(true);
+    // Вылить в сток посреди зала
+    at(s, DRAIN.x + DRAIN.r + 0.5, DRAIN.y);
+    expect(act(s, 'pourDrain:drain')).toBe(true);
     expect(s.keeper.held?.load).toBe(0);
+    const x1 = s.keeper.x;
+    walk(s, -1, 0, 0.5);
+    expect(Math.abs(s.keeper.x - x1)).toBeGreaterThan(heavyStep);
+    // Помыть ведро в инвентарной и поставить на место
+    atStation(s, 'washSink');
     expect(act(s, 'wash:tank')).toBe(true);
     at(s, TANK_HOME.x, TANK_HOME.y + 0.6);
     expect(act(s, 'putBack:tank')).toBe(true);
     expect(s.keeper.held).toBeNull();
   });
 
-  it('на соломе бак не подставить — сначала отвести на бетон', () => {
-    const s = toiletScene(12, 0.9, 0.7);
-    const e = s.elephants[0];
-    e.x = 15;
-    e.y = 23.5;
-    e.heading = 0;
-    e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 1e6, doStart: s.t, forced: true, target: null, key: 'idle' };
-    s.keeper.held = { kind: 'tank', load: 0, aux: 0, owner: null };
-    at(s, 15, 23.5 + 0.95 * e.profile.look.size * e.profile.look.girth + 0.5);
-    act(s, `voice:${e.id}:name`);
-    const o = actionsFor(s, `tankPlace:${e.id}`);
-    expect(o?.enabled).toBe(false);
-    expect(o?.reason).toMatch(/соломе/);
+  it('похвала сразу после лужи на подстилке учит, что так можно; после ведра — что так надо', () => {
+    const pee = (bucket: boolean) => {
+      const s = toiletScene(13, 0.5, 0.5);
+      const e = s.elephants[0];
+      e.learned.trust = 0.8;
+      e.learned.toilet = 0.5;
+      e.x = 15;
+      e.y = 23.5;
+      e.heading = 0;
+      e.act = { ...e.act, kind: 'idle', phase: 'do', dur: 1e6, doStart: s.t, forced: true, target: null, key: 'idle' };
+      faceHer(s, e, 2.6);
+      // Окликнуть, прежде чем зайти ей за бок: иначе вздрогнет, а то и лягнёт
+      act(s, `voice:${e.id}:name`);
+      e.mem.aware = s.t;
+      if (bucket) {
+        s.keeper.held = { kind: 'tank', load: 0, aux: 0, owner: null };
+        const p = bucketSpots(e)[1];
+        at(s, p.x, p.y);
+      }
+      e.needs.bladder = 100;
+      let guard = 0;
+      do step(s);
+      while ((e.act.kind === 'urinate' || e.needs.bladder > 50) && guard++ < 200000);
+      faceHer(s, e, 2.6);
+      const before = e.learned.toilet;
+      act(s, `voice:${e.id}:praise`);
+      return e.learned.toilet - before;
+    };
+    expect(pee(false)).toBeLessThan(0);
+    expect(pee(true)).toBeGreaterThan(0);
   });
 
   it('у стока: «давай» — встаёт над решёткой стока сама, моча уходит в сток, а не на подстилку', () => {

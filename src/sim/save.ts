@@ -5,6 +5,7 @@
 // Сейвы прошлых версий переводятся миграциями по шагам (v2 → v3 → v4): недостающие черты и
 // привычки досчитываются один раз из того же seed — так же, как их получило бы новое стадо, — и
 // дальше хранятся в сейве. v4 — полный контакт: общий зал без прохода кипера, голос вместо свистка.
+// v5 — команды En arrière, Partez и «ногу», моча струёй по выпитому, ведро в руках, ночной сон приступами.
 
 import { KEEPER } from '../data/balance';
 import { BARROW_HOME, HOSE_LENGTH, HOSE_REEL, H, KEEPER_START, STATIONS, TANK_HOME, TREES, W, areaAt } from '../data/facility';
@@ -224,7 +225,38 @@ function freeSpotNear(x: number, y: number, r: number): { x: number; y: number }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3, 3: migrate3to4 };
+// v4 → v5: новые просьбы (знание — из врождённого), выпитая вода, память о ночи и о том, что кипер
+// видел сам; ведро на 20 литров (бак был на 65 — лишнее считается вылитым)
+function migrate4to5(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object' || !st.world) return doc;
+  const w = st.world;
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  for (const e of els) {
+    const p = e.profile as ElephantProfile;
+    if (e.learned && p?.traits && p.look) {
+      const base = initialLearned(p);
+      e.learned.cues = { ...base.cues, ...(e.learned.cues ?? {}) };
+    }
+    if (typeof e.fluid !== 'number') e.fluid = 10;
+    if (e.mem) {
+      e.mem.woke = e.mem.woke ?? { t: -1000, slept: 0, plan: 'none' };
+      e.mem.stream = null;
+      e.mem.lastPee = e.mem.lastPee ?? { t: -1000, where: 'none' };
+      e.mem.seen = e.mem.seen ?? { signal: 0, wakePee: 0 };
+    }
+    e.day = { ...emptyDayStats(), ...(e.day ?? {}) };
+  }
+  if (w.checks && typeof w.checks === 'object') w.checks.feet = w.checks.feet ?? {};
+  const cap = (x: any) => {
+    if (x && x.kind === 'tank' && typeof x.load === 'number') x.load = Math.min(x.load, KEEPER.tankLiters);
+  };
+  for (const it of Array.isArray(w.items) ? w.items : []) cap(it);
+  cap(st.keeper?.held);
+  return { ...doc, version: 5 };
+}
+
+const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3, 3: migrate3to4, 4: migrate4to5 };
 
 export function serialize(state: State, savedAt = Date.now()): string {
   const file: SaveFile = {
@@ -271,6 +303,7 @@ export function validateState(s: unknown): string | null {
     if (!isObj(e.act) || !ACTIVITY_KINDS.includes(e.act.kind as ActivityKind)) return `слон ${e.id}: занятие`;
     if (!isObj(e.mem) || !isObj(e.day) || !isObj(e.body) || !isObj(e.trunk)) return `слон ${e.id}: память`;
     if (!num(e.mem.tension) || !num(e.mem.aware) || !isObj(e.mem.nag)) return `слон ${e.id}: память о кипере`;
+    if (!num(e.fluid) || !isObj(e.mem.woke) || !isObj(e.mem.seen) || !isObj(e.mem.lastPee)) return `слон ${e.id}: ночь и вода`;
   }
   const k = s.keeper;
   if (!isObj(k) || !num(k.x) || !num(k.y) || !num(k.pouch) || !num(k.stun)) return 'нет кипера';

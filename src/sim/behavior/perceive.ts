@@ -4,7 +4,7 @@ import { ELEPHANT, KEEPER } from '../../data/balance';
 import { AREA_ZONE, CONTACT_LINES, GATES, STATIONS, areaAt, zoneAt, type AreaId, type GateId, type StationId, type ZoneId } from '../../data/facility';
 import { angleDiff, closestOnSegment, dist } from '../geometry';
 import { bondKey, rankScore } from '../herd';
-import type { Elephant, State, Vec } from '../types';
+import type { Elephant, Foot, State, Vec } from '../types';
 
 export function zoneOf(e: { x: number; y: number }): ZoneId {
   return zoneAt(e.x, e.y) ?? (e.y < 20 ? 'paddock' : 'barn');
@@ -216,6 +216,31 @@ export function bodyCircles(e: Elephant): { x: number; y: number; r: number }[] 
     { x: e.x + c * o, y: e.y + sn * o, r },
     { x: e.x - c * o, y: e.y - sn * o, r },
   ];
+}
+
+// Где стоит нога: передние — впереди корпуса, задние — позади; правая — справа по ходу
+export function footPos(e: Elephant, foot: Foot): Vec {
+  const L = e.profile.look;
+  const along = (foot[0] === 'F' ? 0.62 : -0.62) * L.size * L.length;
+  const side = (foot[1] === 'R' ? 1 : -1) * 0.55 * L.size * L.girth;
+  const c = Math.cos(e.heading);
+  const sn = Math.sin(e.heading);
+  return { x: e.x + c * along - sn * side, y: e.y + sn * along + c * side };
+}
+
+// Какая нога ближе к точке (к киперу)
+export function nearestFoot(e: Elephant, p: Vec): Foot {
+  let best: Foot = 'FR';
+  let bestD = Infinity;
+  for (const f of ['FL', 'FR', 'HL', 'HR'] as Foot[]) {
+    const q = footPos(e, f);
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < bestD) {
+      bestD = d;
+      best = f;
+    }
+  }
+  return best;
 }
 
 // Зазор между точкой и корпусом слона (отрицательный — точка внутри)

@@ -1,6 +1,6 @@
 // Физическое состояние вольеров: подстилка, моча, навоз, сор, опилки, корм, вода, яблоки, тазы, мяч.
 
-import { FLOOR, FOOD, KEEPER, WATER } from '../data/balance';
+import { FLOOR, FOOD, WATER } from '../data/balance';
 import {
   BALL_START,
   BEDDING,
@@ -68,11 +68,11 @@ export function touchCells(s: State): void {
 
 export type UrineSpot = 'tank' | 'drain' | 'outside' | 'bedding' | 'concrete' | 'pool';
 
-// Бак под слонихой: стоит на полу в радиусе метра от струи
+// Ведро, поставленное на пол под струю
 export function tankUnder(s: State, x: number, y: number): LooseItem | null {
   let best: LooseItem | null = null;
-  // Бак широкий (65 л), струя — не точка: стоящей боком у стенки он под ней
-  let bestD = 1.35;
+  // Ведро, поставленное под неё на пол: струя — не точка, попадает, если стоит у задних ног
+  let bestD = 1.1;
   for (const it of s.world.items) {
     if (it.kind !== 'tank') continue;
     const d = Math.hypot(it.x - x, it.y - y);
@@ -84,38 +84,22 @@ export function tankUnder(s: State, x: number, y: number): LooseItem | null {
   return best;
 }
 
-export function urinateAt(s: State, x: number, y: number): UrineSpot {
-  const zone = zoneAt(x, y);
-  const tank = tankUnder(s, x, y);
-  if (tank && tank.load + FLOOR.urineLiters <= KEEPER.tankLiters) {
-    tank.load += FLOOR.urineLiters;
-    fx('tank', tank.x, tank.y);
-    return 'tank';
-  }
-  if (inPool(x, y)) {
-    s.world.pool.dirt = clamp(s.world.pool.dirt + 0.02);
-    return 'pool';
-  }
-  if (zone === 'barn' && Math.hypot(x - DRAIN.x, y - DRAIN.y) <= DRAIN.r) {
-    fx('drain', x, y);
-    return 'drain';
-  }
+// Мокрое пятно от мочи: amount — доля обычной лужи (1 ≈ 12 л). true — попало на подстилку
+export function wetPatch(s: State, x: number, y: number, amount: number): boolean {
   const c = s.world.cells;
   let onBedding = false;
   forCells(x, y, FLOOR.urineRadius, (i, cx, cy) => {
     const z = zoneAt(cx, cy);
     if (!z) return;
     const k = 1 - Math.hypot(cx - x, cy - y) / (FLOOR.urineRadius + 0.6);
-    let add = FLOOR.urineWet * k;
+    let add = FLOOR.urineWet * k * amount;
     // Опилки впитывают часть сразу
     if (c.sawdust[i] > 0.1) add *= 1 - FLOOR.sawdustAbsorb * c.sawdust[i];
     c.wet[i] = clamp(c.wet[i] + add);
     if (isBeddingCell(i) && c.bedding[i] > 0.05) onBedding = true;
   });
   touchCells(s);
-  if (tank) log(s, 'warn', 'Бак полон — моча пошла мимо. Полный бак выливают в слив, потом подставляют снова.', { key: 'tankFull', cooldown: 30 });
-  if (zone === 'paddock') return 'outside';
-  return onBedding ? 'bedding' : 'concrete';
+  return onBedding;
 }
 
 export function dropDung(s: State, x: number, y: number): 'pool' | 'ground' {

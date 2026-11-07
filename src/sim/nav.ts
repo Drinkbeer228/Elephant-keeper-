@@ -199,7 +199,7 @@ function lineClear(field: Float32Array, a: Vec, b: Vec, need: number): boolean {
   return true;
 }
 
-function astar(field: Float32Array, from: Vec, to: Vec, need: number, cost?: (i: number) => number): Vec[] | null {
+function astar(field: Float32Array, from: Vec, to: Vec, need: number, cost?: (i: number) => number, smooth = need): Vec[] | null {
   const start = nearestOpen(field, cellIndex(from.x, from.y), need);
   const goal = nearestOpen(field, cellIndex(to.x, to.y), need);
   if (start < 0 || goal < 0) return null;
@@ -262,7 +262,7 @@ function astar(field: Float32Array, from: Vec, to: Vec, need: number, cost?: (i:
   let i = 1;
   while (i < raw.length) {
     let j = raw.length - 1;
-    while (j > i && !lineClear(field, anchor, raw[j], need)) j--;
+    while (j > i && !lineClear(field, anchor, raw[j], smooth)) j--;
     out.push(raw[j]);
     anchor = raw[j];
     i = j + 1;
@@ -297,11 +297,15 @@ export function elephantRoute(from: Vec, to: Vec, radius: number, mask: number):
   return pts;
 }
 
+// Поле проверяется по центрам клеток, поэтому прямой отрезок мимо угла (косяк двери) может
+// задеть его на сантиметры: сглаженный путь кипера держится от стен с запасом
+const KEEPER_NEED = 0.34;
+const KEEPER_SMOOTH = 0.5;
+
 export function keeperRoute(from: Vec, to: Vec, s: KeeperNavState): Vec[] | null {
   const field = keeperField(s);
-  const need = 0.34;
-  if (lineClear(field, from, to, need)) return [to];
-  return astar(field, from, to, need);
+  if (lineClear(field, from, to, KEEPER_SMOOTH)) return [to];
+  return astar(field, from, to, KEEPER_NEED, undefined, KEEPER_SMOOTH);
 }
 
 // Маршрут кипера в обход слонов: корпус непроходим, её личное место вокруг (soft) — дороже,
@@ -317,7 +321,7 @@ export interface Obstacle {
 export function keeperRouteAround(from: Vec, to: Vec, s: KeeperNavState, bodies: Obstacle[]): Vec[] | null {
   if (!bodies.length) return keeperRoute(from, to, s);
   const base = keeperField(s);
-  const need = 0.34;
+  const need = KEEPER_NEED;
   const field = new Float32Array(base);
   const extra = new Float32Array(GW * GH);
   for (const b of bodies) {
@@ -341,14 +345,14 @@ export function keeperRouteAround(from: Vec, to: Vec, s: KeeperNavState, bodies:
     field[i] = base[i];
   }
   const clear = (a: Vec, b: Vec) => {
-    if (!lineClear(field, a, b, need)) return false;
+    if (!lineClear(field, a, b, KEEPER_SMOOTH)) return false;
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const n = Math.max(1, Math.ceil(len / 0.25));
     for (let k = 1; k < n; k++) if (extra[cellIndex(a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n)] > 0) return false;
     return true;
   };
   if (clear(from, to)) return [to];
-  return astar(field, from, to, need, (i) => 1 + extra[i]);
+  return astar(field, from, to, need, (i) => 1 + extra[i], KEEPER_SMOOTH);
 }
 
 export function keeperFieldAt(x: number, y: number, s: KeeperNavState): number {

@@ -13,6 +13,7 @@ import {
   pressingNeed,
   shiftDay,
   signalClarity,
+  signalHabitText,
   slotInfo,
   temperature,
   TRAIT_KEYS,
@@ -21,6 +22,8 @@ import {
   wellbeing,
   bond,
   comfortGap,
+  keeperCatching,
+  urinatingNearKeeper,
   invited,
   type ActionOption,
   type ActivityKind,
@@ -158,10 +161,23 @@ const CUE_LABELS: [keyof Elephant['learned']['cues'], string][] = [
   ['come', '«Иди сюда»'],
   ['stay', '«Стоять»'],
   ['move', '«Подвинься»'],
+  ['back', '«En arrière» — назад'],
+  ['go', '«Partez» — вперёд'],
   ['follow', '«Пошли»'],
   ['lie', '«Ложись»'],
+  ['foot', '«Ногу»'],
   ['no', '«Нельзя»'],
 ];
+
+// Что кипер узнал о ней сам, наблюдая: манеру просить, ночную привычку
+function observed(e: Elephant): string[] {
+  const seen = e.mem.seen;
+  const out: string[] = [];
+  out.push(seen.signal > 0 ? signalHabitText(e.profile) : 'Как она просится, пока не видно — понаблюдай, когда ей что-то нужно.');
+  if (seen.wakePee >= 2) out.push('Проснувшись после пары часов сна, вскоре идёт в туалет — держи ведро наготове.');
+  else if (seen.wakePee === 1) out.push('Однажды, проснувшись после долгого сна, вскоре пошла в туалет. Привычка или случай — посмотрим.');
+  return out;
+}
 
 function bar(value: number, warn = 70, invert = false): string {
   const v = Math.max(0, Math.min(100, value));
@@ -304,7 +320,9 @@ export class Hud {
     const m = minuteOfDay(s.t);
     const night = m >= 21 * 60 || m < 5.5 * 60;
     this.refs.dayIcon.innerHTML = night ? ICON.moon : ICON.sun;
-    this.refs.clockText.textContent = `День ${shiftDay(s.t)} · ${clockText(s.t)}`;
+    // Слониха мочится рядом — время идёт как в жизни
+    const live = urinatingNearKeeper(s);
+    this.refs.clockText.textContent = `День ${shiftDay(s.t)} · ${clockText(s.t)}${live ? ' · как в жизни' : ''}`;
     this.refs.temp.textContent = `${Math.round(temperature(s.seed, s.t))}°`;
     const progress = ((s.t - s.dayStart) / 1440) * 100;
     this.refs.shift.style.width = `${Math.max(0, Math.min(100, progress)).toFixed(1)}%`;
@@ -335,6 +353,8 @@ export class Hud {
     const k = s.keeper;
     const b = s.world.barrow;
     const parts = [`<span class="ico">${ICON.hand}</span>${esc(heldLabel(k.held, s))}`];
+    // Ведро под струёй — видно, что ловишь
+    if (k.held?.kind === 'tank' && s.elephants.some((e) => e.act.kind === 'urinate' && e.act.phase === 'do' && keeperCatching(s, e))) parts.push('<b>ловишь струю</b>');
     if (b.pushed || b.load > 0 || b.cargo.length) parts.push(`тачка ${b.load}/${KEEPER.barrowMax}${b.cargo.length ? ` +${b.cargo.length}` : ''}`);
     parts.push(`лакомства ${k.pouch}`);
     const html = parts.join('<span class="dot">·</span>');
@@ -476,7 +496,8 @@ export class Hud {
     const L = e.learned;
     const gap = comfortGap(s, e);
     const mood = moodText(s, e);
-    const key = `${e.id}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(L.trust * 100)}:${Math.round(L.cooperation * 100)}:${Math.round(L.expectation * 100)}:${Math.round(L.toilet * 100)}:${Math.round(L.familiarity * 100)}:${Object.values(L.cues).map((v) => Math.round(v * 20)).join(',')}:${Math.round(gap * 5)}:${mood}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
+    const seen = e.mem.seen;
+    const key = `${e.id}:${seen.signal > 0 ? 1 : 0}:${Math.min(2, seen.wakePee)}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(L.trust * 100)}:${Math.round(L.cooperation * 100)}:${Math.round(L.expectation * 100)}:${Math.round(L.toilet * 100)}:${Math.round(L.familiarity * 100)}:${Object.values(L.cues).map((v) => Math.round(v * 20)).join(',')}:${Math.round(gap * 5)}:${mood}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
     if (key === this.inspectKey) return;
     const first = this.inspectKey === '' || !box.querySelector(`[data-eid="${e.id}"]`);
     this.inspectKey = key;
@@ -519,10 +540,12 @@ export class Hud {
         <div class="row"><span>Ты для неё «свой»</span>${bar(L.familiarity * 100, 0, true)}</div>
         <div class="row"><span>Покладистость</span>${bar(L.cooperation * 100, 0, true)}</div>
         <div class="row"><span>Ждёт ответа на сигналы</span>${bar(L.expectation * 100, 0, true)}</div>
-        <div class="row"><span>Приучена к баку</span>${bar(L.toilet * 100, 0, true)}</div>
+        <div class="row"><span>Приучена к ведру</span>${bar(L.toilet * 100, 0, true)}</div>
       </div>
       <p class="muted small-p">Личное место: ${esc(spaceText(gap))}.</p>
       <details data-d="cues"><summary>Как знает просьбы</summary><div class="grid">${CUE_LABELS.map(([c, label]) => `<div class="row"><span>${label}</span>${bar(L.cues[c] * 100, 0, true)}</div>`).join('')}</div></details>
+      <h3>Наблюдения</h3>
+      <ul class="hints">${observed(e).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>
       <h3>Характер</h3>
       <ul class="hints">${characterHints(p).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>
       <h3>Рацион</h3>
@@ -569,7 +592,7 @@ export class Hud {
       { from: 16 * 60, to: 17 * 60 + 30, text: 'Каша к 17:00 — снова запарить за час' },
       { from: 17 * 60 + 30, to: 19 * 60 + 30, text: 'Овощи к 19:00: нарезать по тазу на каждую, сено на ночь' },
       { from: 19 * 60 + 30, to: 24 * 60, text: 'Слоны в слоновнике: собери тазы, убери выгул' },
-      { from: 0, to: 8 * 60, text: 'Ночь: слоны спят, но могут позвать — бак в инвентарной, отведи на бетон или к стоку' },
+      { from: 0, to: 8 * 60, text: 'Ночь: спят по паре часов; проснулась — стоит сонная, потом обычно в туалет. Ведро — в инвентарной, вылить — в сток' },
     ];
     const day = shiftDay(s.t);
     const plan = vegPlan(s.seed, day);
@@ -621,7 +644,7 @@ export class Hud {
     for (const ev of events) {
       if (ev.kind === 'openJournal') this.openJournal();
       if (!ev.text) continue;
-      if (ev.severity === 'info' && !['refuse', 'report', 'welcome', 'tank', 'lie', 'prepDone', 'tipsy'].includes(ev.kind)) continue;
+      if (ev.severity === 'info' && !['refuse', 'report', 'welcome', 'tank', 'lie', 'prepDone', 'tipsy', 'wake'].includes(ev.kind)) continue;
       this.toast(ev.text, ev.severity);
     }
   }

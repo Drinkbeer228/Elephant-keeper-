@@ -225,7 +225,7 @@ export function generateHerd(opts: HerdOptions): ElephantProfile[] {
 }
 
 // Детерминированный разброс по слонихе: у каждой что-то выучено лучше, что-то хуже
-function jitter(seed: number, k: number): number {
+export function jitter(seed: number, k: number): number {
   const v = Math.sin((seed + k * 97.13) * 12.9898) * 43758.5453;
   return v - Math.floor(v) - 0.5;
 }
@@ -243,7 +243,8 @@ export function initialLearned(p: ElephantProfile): Learned {
     cooperation: round3(clamp(0.15 + 0.6 * t.cooperation, 0.1, 0.85)),
     expectation: round3(clamp(0.3 + 0.4 * t.expressiveness, 0.15, 0.85)),
     toilet: round3(clamp(0.15 + 0.3 * t.cooperation + 0.1 * t.expressiveness, 0.1, 0.6)),
-    cues: { come: cue(0.1, 1), stay: cue(-0.05, 2), move: cue(0.05, 3), lie: cue(-0.15, 4), follow: cue(0, 5), no: cue(0.05, 6) },
+    // «En arrière» и «Partez» — привычные команды из её прошлого; «ногу» — для осмотра стоп
+    cues: { come: cue(0.1, 1), stay: cue(-0.05, 2), move: cue(0.05, 3), lie: cue(-0.15, 4), follow: cue(0, 5), no: cue(0.05, 6), back: cue(0.05, 7), go: cue(0.08, 8), foot: cue(-0.08, 9) },
   };
 }
 
@@ -339,7 +340,6 @@ export function characterHints(p: ElephantProfile): string[] {
   if (t.activity > 0.64) out.push('Почти не стоит на месте.');
   if (t.mischief > 0.62) out.push('Тянет и грызёт всё, до чего дотянется; пустой таз или брошенный шланг может испортить.');
   if (t.mischief < 0.36) out.push('Бережно обращается с вещами.');
-  out.push(signalHabitText(p));
   const food = p.favoriteFood === 'produce' ? 'овощи и фрукты' : p.favoriteFood === 'browse' ? 'свежие ветки' : 'сено';
   out.push(`Любимая еда — ${food}.`);
   return out;

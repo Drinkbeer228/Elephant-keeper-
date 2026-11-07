@@ -10,7 +10,7 @@
 
 import { CONTACT, KEEPER, LEARN } from '../../data/balance';
 import { fx, log } from '../events';
-import { dist, keeperIndex } from '../geometry';
+import { angleDiff, dist, keeperIndex } from '../geometry';
 import { nameCase } from '../herd';
 import { chance, clamp } from '../rng';
 import type { Elephant, State, Vec } from '../types';
@@ -52,7 +52,9 @@ export function comfortGap(s: State, e: Elephant): number {
 export function invited(s: State, e: Elephant): boolean {
   if (s.t - e.mem.accepted < CONTACT.invitedFor) return true;
   const k = e.act.kind;
-  if (k === 'follow' || k === 'walkWith' || k === 'stay' || k === 'seekKeeper') return true;
+  if (k === 'follow' || k === 'walkWith' || k === 'stay' || k === 'seekKeeper' || k === 'foot' || k === 'backUp' || k === 'forward') return true;
+  // Приученная к ведру мочится, а кипер держит ведро у её ног — это их общее дело
+  if (k === 'urinate' && s.keeper.held?.kind === 'tank' && e.learned.toilet > 0.35) return true;
   if (k === 'lie' && e.lying) return true;
   if (k === 'explore' && e.act.key === 'explore:keeper') return true;
   if (k === 'signal' && (e.signal?.kind === 'attention' || e.profile.habits.signal === 'stare' || e.profile.habits.signal === 'beg')) return true;
@@ -231,7 +233,9 @@ export function updateContact(s: State, e: Elephant, dt: number): void {
     const job = k.task?.action;
     const talking = job?.verb === 'voice' && job.target === `${e.id}:talk`;
     const aboutHer = !!job && (job.target === e.id || job.target.startsWith(`${e.id}:`));
-    const keeperCame = talking ? 0 : aboutHer ? 0.2 : k.moving || k.task !== null ? 1 : guarding(e) ? 0.8 : 0.2;
+    // Шаг к ней — напор; шаг назад или в сторону — наоборот, даёт место
+    const approaching = k.moving && Math.cos(angleDiff(k.facing, Math.atan2(e.y - k.y, e.x - k.x))) > 0.2;
+    const keeperCame = talking ? 0 : aboutHer ? 0.2 : approaching || k.task !== null ? 1 : guarding(e) ? 0.8 : 0.2;
     m.tension = clamp(m.tension + CONTACT.tensionRise * (0.6 + T.nervousness) * closeness * known * keeperCame * dt);
   } else m.tension = Math.max(0, m.tension - CONTACT.tensionFall * (invited(s, e) ? 2.2 : 1) * dt);
 

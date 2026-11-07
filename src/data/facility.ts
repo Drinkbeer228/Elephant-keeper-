@@ -473,7 +473,7 @@ export const TOOL_SLOTS: Record<ToolKind, Point> = {
 export const BARROW_HOME = { x: 32.4, y: 37.4 };
 export const HOSE_REEL: Point = { x: 30.6, y: 22.6 };
 export const HOSE_LENGTH = 25;
-// Где стоит бак для мочи (65 л) — в инвентарной, у двери в зал
+// Где стоит ведро для мочи (20 л) — в инвентарной, у двери в зал
 export const TANK_HOME: Point = { x: 25.9, y: 33.8 };
 
 // Сток на бетоне в восточной части зала: моча здесь уходит в канализацию

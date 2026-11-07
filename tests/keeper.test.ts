@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { availableActions, NO_INPUT, runMinutes, step, tubKg, type State } from '../src/sim';
-import { HOSE_REEL, KEEPER_GAP, STATIONS, TROUGH_IDS } from '../src/data/facility';
+import { HOSE_REEL, KEEPER_GAP, STATIONS, TROUGH_IDS, areaAt } from '../src/data/facility';
 import { DIETS, PORRIDGE_SOAK_MIN, VEG_KINDS, vegPlan } from '../src/data/rations';
 import { shiftDay } from '../src/sim/time';
 import { addFood, cellOf, dropFruit, fruitStage, isBeddingCell } from '../src/sim/world';
 import { comfortGap } from '../src/sim/behavior/contact';
-import { gapToBody } from '../src/sim/behavior/perceive';
+import { footPos, gapToBody } from '../src/sim/behavior/perceive';
+import { cueCompliance } from '../src/sim/behavior/engine';
+import { angleDiff } from '../src/sim/geometry';
 import { act, actions, at, atStation, game, park, walk } from './helpers';
 import type { Elephant } from '../src/sim/types';
 
@@ -250,6 +252,103 @@ describe('личное место слонихи и голос', () => {
     expect(availableActions(s).some((a) => a.ref.verb === 'voice')).toBe(false);
     at(s, 15, 30.8);
     expect(availableActions(s).some((a) => a.ref.verb === 'voice')).toBe(true);
+  });
+});
+
+describe('команды: en arrière, partez, ногу', () => {
+  // Попросить, пока не согласится (она решает сама); вернуть, согласилась ли
+  function ask(s: State, e: Elephant, cue: string, kind: string): boolean {
+    for (let i = 0; i < 5; i++) {
+      act(s, `voice:${e.id}:${cue}`);
+      if (kindNow(e) === kind) return true;
+      runMinutes(s, 1.7);
+    }
+    return false;
+  }
+  function kindNow(e: Elephant): string {
+    return e.act.kind;
+  }
+  function willing(seed: number): { s: State; e: Elephant } {
+    const s = game(seed, 1, [{ cooperation: 0.9, nervousness: 0.2 }]);
+    const e = s.elephants[0];
+    e.learned.trust = 0.8;
+    e.learned.familiarity = 0.8;
+    for (const c of ['back', 'go', 'foot'] as const) e.learned.cues[c] = 0.95;
+    return { s, e };
+  }
+
+  it('«En arrière!» — пятится прямо назад, не разворачиваясь', () => {
+    const { s, e } = willing(41);
+    hold(e, 15, 26, 0); // мордой на восток
+    e.mem.nextThink = 0;
+    at(s, 17.9, 26);
+    s.keeper.facing = Math.PI;
+    expect(ask(s, e, 'back', 'backUp')).toBe(true);
+    const h0 = e.heading;
+    const x0 = e.x;
+    let turned = 0;
+    for (let i = 0; i < 30 * 8 && kindNow(e) === 'backUp'; i++) {
+      step(s);
+      turned = Math.max(turned, Math.abs(angleDiff(e.heading, h0)));
+    }
+    // Отошла назад — на запад, от кипера, — и всё это время смотрела туда же, куда смотрела
+    expect(x0 - e.x).toBeGreaterThan(1.2);
+    expect(turned).toBeLessThan(0.05);
+  });
+
+  it('«Partez!» — вперёд; у открытых ворот на выгул — проходит их', () => {
+    const { s, e } = willing(42);
+    s.world.gates.outer = true;
+    hold(e, 15.5, 23.2, -Math.PI / 2); // у ворот, мордой к выгулу
+    e.mem.nextThink = 0;
+    at(s, 17.6, 24.6);
+    s.keeper.facing = Math.PI;
+    expect(ask(s, e, 'go', 'forward')).toBe(true);
+    let out = false;
+    for (let i = 0; i < 30 * 40 && !out; i++) {
+      step(s);
+      out = areaAt(e.x, e.y) === 'paddock';
+    }
+    expect(out).toBe(true);
+  });
+
+  it('«Ногу!» — подаёт ближнюю к киперу ногу; стопу чистят, пока держит, и за это хвалят', () => {
+    const { s, e } = willing(43);
+    e.body.legs = 0.6;
+    hold(e, 15, 26, 0);
+    e.mem.nextThink = 0;
+    // Кипер у её левой задней ноги, снаружи от корпуса
+    const f = footPos(e, 'HL');
+    const out = { x: f.x - e.x, y: f.y - e.y };
+    const len = Math.hypot(out.x, out.y);
+    at(s, f.x + (out.x / len) * 0.9, f.y + (out.y / len) * 0.9);
+    s.keeper.facing = Math.atan2(e.y - s.keeper.y, e.x - s.keeper.x);
+    expect(ask(s, e, 'foot', 'foot')).toBe(true);
+    expect(e.act.key).toBe('foot:HL');
+    const cue0 = e.learned.cues.foot;
+    expect(act(s, `footCare:${e.id}`)).toBe(true);
+    expect(e.body.legs).toBeLessThan(0.6 - 0.3);
+    expect(s.world.checks.feet[e.id]).toBe(true);
+    expect(act(s, `voice:${e.id}:praise`)).toBe(true);
+    expect(e.learned.cues.foot).toBeGreaterThan(cue0);
+  });
+
+  it('команды не жёсткие: одна и та же просьба — охотнее от «своего» кипера, которому она доверяет', () => {
+    const s = game(44, 1, [{ cooperation: 0.6 }]);
+    const e = s.elephants[0];
+    hold(e, 15, 26, 0);
+    const chance = (trust: number, familiarity: number, knows: number) => {
+      e.learned.trust = trust;
+      e.learned.familiarity = familiarity;
+      for (const c of ['back', 'go', 'foot'] as const) e.learned.cues[c] = knows;
+      return (['back', 'go', 'foot'] as const).map((c) => cueCompliance(s, e, c, true));
+    };
+    const close = chance(0.85, 0.85, 0.8);
+    const stranger = chance(0.2, 0.05, 0.3);
+    for (let i = 0; i < 3; i++) {
+      expect(close[i].p).toBeGreaterThan(stranger[i].p + 0.25);
+      expect(stranger[i].why).toBe('пока не доверяет тебе');
+    }
   });
 });
 

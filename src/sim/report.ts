@@ -45,7 +45,7 @@ export function buildReport(s: State): DayReport {
       .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
     for (const [k, v] of mins.slice(0, 2)) if ((v ?? 0) >= 20) highlights.push(`${ACT_NAMES[k]} ${Math.round(v ?? 0)} мин`);
     if (d.lyingMinutes < 60) highlights.push('почти не спала лёжа');
-    if (d.urineTank > 0) highlights.push(`в бак: ${d.urineTank}`);
+    if (d.urineTank > 0) highlights.push(`в ведро: ${d.urineTank} (${Math.round(d.caughtLitres)} л)`);
     if (d.urineBedding > 0) highlights.push(`мимо, на подстилку: ${d.urineBedding}`);
     if (d.urineDrain > 0) highlights.push(`над стоком: ${d.urineDrain}`);
     if (d.robbed > 1) highlights.push(`у неё отнимали корм: ${d.robbed}`);
@@ -116,8 +116,8 @@ export function buildReport(s: State): DayReport {
   const loose = w.tubs.filter((t) => t.where === 'floor' && t.emptySince >= 0);
   if (loose.length) notes.push(`Не собраны пустые тазы: ${loose.map((t) => nameCase(s.elephants.find((e) => e.id === t.owner)?.profile.name ?? '', 'gen')).join(', ')}.`);
   const tank = w.items.find((it) => it.kind === 'tank');
-  if (!tank && s.keeper.held?.kind !== 'tank') notes.push('Бака для мочи нет на месте.');
-  else if (tank && (tank.load > 0 || tank.aux || dist(tank, TANK_HOME) > 1.5)) notes.push('Бак для мочи не вымыт или не на месте.');
+  if (!tank && s.keeper.held?.kind !== 'tank') notes.push('Ведра для мочи нет на месте.');
+  else if (tank && (tank.load > 0 || tank.aux || dist(tank, TANK_HOME) > 1.5)) notes.push('Ведро для мочи не вымыто или не на месте.');
   // Слоны
   let skin = 0;
   for (const e of s.elephants) {

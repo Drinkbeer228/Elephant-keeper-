@@ -48,7 +48,9 @@ function updateOne(s: State, e: Elephant, dt: number, dtSec: number): void {
   if (n.bladder >= 100 && !isElimination(e.act.kind)) forceElimination(s, e, 'urinate');
   else if (n.bowel >= 100 && !isElimination(e.act.kind)) forceElimination(s, e, 'defecate');
 
-  updateSignal(s, e);
+  // Просилась в туалет и не дождалась — справляется где стоит
+  const sigKind = e.signal?.kind;
+  if (updateSignal(s, e) === 'ignored' && sigKind === 'toilet' && n.bladder >= 50 && !isElimination(e.act.kind)) forceElimination(s, e, 'urinate');
   // Захмелевшая иногда спотыкается и замирает
   if (e.tipsy > 0.45 && !e.lying && e.speed > 0.3 && random(s) < dt * 0.12 * e.tipsy) {
     e.speed = 0;
@@ -83,6 +85,9 @@ const DONE_TEXT: Record<Request, string> = {
   lie: 'полежала по просьбе',
   follow: 'прошлась рядом',
   toilet: 'сходила в туалет по просьбе',
+  back: 'отошла назад',
+  go: 'пошла вперёд',
+  foot: 'подала ногу',
 };
 
 // Выполнила просьбу — окно похвалы недолгое: не похвалили, в следующий раз пойдёт неохотнее
@@ -117,6 +122,10 @@ function interruptible(s: State, e: Elephant, best: Candidate): boolean {
     case 'sleep':
     case 'lie':
     case 'walkWith':
+    case 'drowsy':
+    case 'backUp':
+    case 'forward':
+    case 'foot':
       return false;
     case 'stay':
       // Стоит по просьбе: отвлечь может только сильная нужда, если просьбу знает плохо
@@ -321,6 +330,7 @@ function wantsIt(s: State, e: Elephant, cue: Cue): number {
     if (sig === 'toilet' && h?.kind === 'tank') return 0.3;
   }
   if (cue === 'stay' && h?.kind === 'tank' && bladder > 50) return 0.15;
+  if (cue === 'go' && (sig === 'out' || sig === 'in') && s.world.gates.outer) return 0.35;
   return 0;
 }
 

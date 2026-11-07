@@ -60,6 +60,8 @@ export function moveKeeper(s: State, input: StepInput, dtSec: number): void {
   const b = s.world.barrow;
   let speed = KEEPER.speed * Math.min(1, len) * (k.running ? KEEPER.runFactor : 1);
   if (heavy(k.held, s)) speed *= k.held?.kind === 'tub' ? KEEPER.tubFactor : KEEPER.heavyFactor;
+  // Ведро с мочой: чем полнее, тем тяжелее идти
+  if (k.held?.kind === 'tank' && k.held.load > 0) speed *= 1 - 0.4 * Math.min(1, k.held.load / KEEPER.tankLiters);
   if (b.pushed) speed *= KEEPER.barrowFactor * (1 - 0.15 * (b.load / KEEPER.barrowMax));
   // Ведёшь слониху рядом — идёшь её шагом, а не убегаешь вперёд
   if (s.elephants.some((e) => e.act.kind === 'walkWith')) speed = Math.min(speed, KEEPER.leadSpeed);

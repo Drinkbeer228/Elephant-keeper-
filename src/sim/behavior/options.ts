@@ -48,6 +48,7 @@ import {
   zoneOf,
 } from './perceive';
 import { signalWillingness } from './signals';
+import { wakeBladder } from './night';
 import { nameCase } from '../herd';
 
 export interface Candidate {
@@ -392,12 +393,25 @@ function toiletSignalTarget(c: Ctx): TargetRef {
   return { t: 'point', x: e.x, y: e.y, face: null };
 }
 
+// Только что проснулась после долгого сна — тянет в туалет раньше обычного (если так её потянуло)
+function postWakeUrge(s: State, e: Elephant): number {
+  const w = e.mem.woke;
+  if (s.t - w.t > 40 || w.slept < 60) return ELEPHANT.urgeBladder;
+  // Встала после долгого сна — обычно хотя бы в туалет, даже если пузырь полон наполовину
+  if (w.plan === 'go' || w.plan === 'signal') return w.slept >= 90 ? 32 : 45;
+  if (w.plan === 'wander' && s.t - w.t > 8) return w.slept >= 90 ? 36 : 50;
+  // Сначала поела — а потом в туалет
+  if (w.plan === 'eat' && s.t - w.t > 12) return w.slept >= 90 ? 36 : 55;
+  return ELEPHANT.urgeBladder;
+}
+
 function addElimination(c: Ctx, out: Candidate[]): void {
   const { s, e } = c;
   const n = e.needs;
   const T = e.profile.traits;
-  if (n.bladder >= ELEPHANT.urgeBladder) {
-    const u = urg(n.bladder, ELEPHANT.urgeBladder, 100);
+  const urge = postWakeUrge(s, e);
+  if (n.bladder >= urge) {
+    const u = urg(n.bladder, urge, 100);
     if (c.zone === 'paddock') {
       out.push(cand('urinate', { t: 'point', x: e.x, y: e.y, face: null }, 0.75 + 0.5 * u, 1.2, 'urinate', 'мочится'));
     } else if (reach(c, 'paddock')) {
@@ -407,6 +421,15 @@ function addElimination(c: Ctx, out: Candidate[]): void {
     } else {
       const will = signalWillingness(e) * (0.7 + 0.6 * e.learned.toilet);
       out.push(cand('signal', toiletSignalTarget(c), (0.55 + 0.5 * u) * (0.35 + 0.75 * will), 0, 'signal:toilet', 'просится в туалет', 'toilet'));
+      // Не из тех, кто подолгу просится, или только что проснулась и пошла — справится сама:
+      // приученная — над стоком, остальные — где стоит
+      const w = e.mem.woke;
+      const goes = s.t - w.t < 40 && w.slept >= 60 && (w.plan === 'go' || (w.plan === 'wander' && s.t - w.t > 8) || (w.plan === 'eat' && s.t - w.t > 12));
+      if (goes || n.bladder >= 85 + 10 * e.learned.toilet) {
+        const drain = e.learned.toilet > 0.5 && reach(c, areaAt(TOILET_STANCE.x, TOILET_STANCE.y));
+        const t: TargetRef = drain ? { t: 'point', x: TOILET_STANCE.x, y: TOILET_STANCE.y, face: TOILET_STANCE.face } : { t: 'point', x: e.x, y: e.y, face: null };
+        out.push(cand('urinate', t, (goes ? 0.9 + 0.5 * u : (0.4 + 0.6 * u) * (1.2 - will)), 0.3, 'urinate', drain ? 'идёт к стоку в туалет' : 'мочится где стоит'));
+      }
     }
   }
   if (n.bowel >= ELEPHANT.urgeBowel && T.sensitivity > 0.45) {
@@ -455,7 +478,11 @@ function addRest(c: Ctx, out: Candidate[]): void {
     if (spot) {
       const need = 0.3 + 0.45 * T.sensitivity; // чувствительная не ляжет на мокрое и грязное
       const ok = spot.comfort >= need ? 1 : 0.12;
-      const score = (0.15 + 0.8 * Math.min(1, press)) * phys(n.fatigue, 25, 90) * ok * (1 - 0.35 * urg(n.stress, 40, 90));
+      // Хочет пить — сначала напьётся, потом ляжет; полный пузырь — не уснёт
+      const thirsty = n.thirst > 40 ? 0.45 : 1;
+      // Не ложится с полным пузырём — и с только что выпитым: сначала сходит в туалет
+      const full = n.bladder + e.fluid >= wakeBladder(e) - 8 ? 0 : 1;
+      const score = (0.15 + 0.8 * Math.min(1, press)) * phys(n.fatigue, 25, 90) * ok * (1 - 0.35 * urg(n.stress, 40, 90)) * thirsty * full;
       out.push(cand('sleep', { t: 'point', x: spot.x, y: spot.y, face: null }, score, 70 + 0.9 * n.fatigue, 'sleep', spot.comfort >= need ? 'ложится спать' : 'хотела лечь, но подстилка плохая'));
     }
   }
@@ -921,6 +948,17 @@ export function candidates(s: State, e: Elephant): Candidate[] {
   const filtered = out.filter((x) => x.score > 0.005 && (e.mem.cooldown[x.key] ?? -1) <= s.t && (e.mem.cooldown[x.key.split(':')[0]] ?? -1) <= s.t);
   // Небольшой разброс: одинаковые условия не дают одинакового поведения у разных слонов
   for (const x of filtered) x.score *= 1 + (random(s) - 0.5) * 0.18;
+  // Проснулась: куда её потянет — по её привычке и по случаю (план выбран при пробуждении)
+  const w = e.mem.woke;
+  if (s.t - w.t < 40 && w.plan !== 'none') {
+    for (const x of filtered) {
+      if (w.plan === 'signal' && x.kind === 'signal' && x.signal === 'toilet') x.score *= 1.5;
+      else if (w.plan === 'go' && x.kind === 'urinate') x.score *= 1.4;
+      else if (w.plan === 'eat' && x.kind === 'eat' && s.t - w.t < 12) x.score *= 1.6;
+      else if (w.plan === 'wander' && (x.kind === 'wander' || x.kind === 'explore')) x.score *= 1.8;
+      else if (w.plan === 'sleep' && x.kind === 'sleep') x.score *= 1.7;
+    }
+  }
   // Грязная зона давит на чувствительных: им хочется уйти в другую
   if (e.profile.traits.sensitivity > 0.55 && c.zones.length > 1) {
     const other = zone === 'barn' ? 'paddock' : 'barn';

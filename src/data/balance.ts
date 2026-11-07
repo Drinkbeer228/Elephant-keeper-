@@ -11,15 +11,19 @@ export const TIME = {
   paceNight: 2.5,
   nightFrom: 22 * 60,
   nightTo: 6 * 60,
+  // Слониха мочится рядом с кипером — время идёт как в жизни: успеть подойти и поймать струю
+  paceCatch: 1 / 60,
+  catchRange: 15,
 } as const;
 
 export const NEEDS = {
   hunger: 0.26,
   hungerSleep: 0.1,
   thirst: 0.2,
-  bladder: 0.28,
+  bladder: 0.12, // свой фон: почки работают и без питья (доля пузыря в минуту)
   bowel: 0.14,
-  drinkToBladder: 0.42, // каждая единица утолённой жажды
+  drinkToFluid: 1.0, // каждая единица утолённой жажды — столько процентов пузыря станет мочой
+  fluidRate: 0.018, // какая доля выпитого за минуту доходит до пузыря (полупериод около 40 мин)
   eatToBowel: 0.4, // каждая единица утолённого голода
   fatigueAwake: 0.05,
   fatigueWalk: 0.025,
@@ -91,7 +95,11 @@ export const WATER = {
 export const FLOOR = {
   urineRadius: 1.15,
   urineWet: 0.9,
-  urineLiters: 12,
+  urineLiters: 12, // обычная лужа — для мокрого пятна
+  urineFlow: 0.38, // литров в секунду: 4 л — 10 секунд, 11 л — полминуты
+  urineMinSec: 8,
+  urineMaxSec: 32,
+  bladderLitres: 11, // полный пузырь средней слонихи (× размер)
   sandDry: 0.006, // песок на выгуле подсыхает сам
   concreteDry: 0.004,
   drainDry: 0.05,
@@ -128,7 +136,8 @@ export const KEEPER = {
   barrowCargo: 3, // мест в тачке под тюки, мешки, инвентарь и тазы
   containerMax: 80,
   startTreats: 6,
-  tankLiters: 65,
+  tankLiters: 20, // ведро для мочи
+  catchReach: 1.3, // держит ведро под струёй: стоит позади неё или сбоку у задних ног
   sawdustUses: 6,
   chemUses: 3,
 } as const;
@@ -184,6 +193,8 @@ export const TASK = {
   handFeed: 1.4,
   feedPorridge: 2.6,
   tank: 1.0,
+  pourDrain: 0.5, // вылить ведро в сток
+  footCare: 1.6, // осмотреть и почистить стопу, пока она держит ногу
   emptyTank: 1.6,
   drum: 1.2,
   dump: 1.0,
@@ -203,6 +214,7 @@ export const ELEPHANT = {
   speedAmble: 0.95,
   speedPurpose: 1.35,
   speedTrot: 2.0,
+  speedBack: 0.55, // пятится назад
   turn: 1.8, // рад/с на ходу
   pivot: 1.05, // рад/с на месте
   radius: 0.95, // радиус проходимости (× размер)
@@ -230,6 +242,7 @@ export const LEARN = {
   coopUnrewarded: 0.025,
   toiletUp: 0.12,
   toiletDown: 0.04,
+  toiletWrongPraise: 0.08, // похвалили сразу после лужи на полу
   rewardWindow: 4, // минут после выполнения команды, когда угощение — награда
   baselinePull: 0.004, // в сутки к врождённому уровню
   cueTreat: 0.07, // выполнила просьбу и получила лакомство — знание просьбы растёт

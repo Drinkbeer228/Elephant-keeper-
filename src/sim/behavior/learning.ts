@@ -9,8 +9,9 @@
 // причины и одна и та же просьба по кругу подтачивают доверие. На физиологию всё это не влияет.
 
 import { LEARN } from '../../data/balance';
-import { initialLearned } from '../herd';
 import { clamp } from '../rng';
+import { log } from '../events';
+import { initialLearned, nameCase } from '../herd';
 import { CUES, type Cue, type Elephant, type Request, type State } from '../types';
 
 function up(v: number, rate: number): number {
@@ -56,16 +57,29 @@ function reward(s: State, e: Elephant, strength: 'treat' | 'praise'): Request | 
   return call.why;
 }
 
+// Похвала сразу после лужи на полу учит её, что так и надо: подкрепляют только то, чего хотят
+function wrongPraise(s: State, e: Elephant, k: number): boolean {
+  const p = e.mem.lastPee;
+  if (s.t - p.t > 3 || (p.where !== 'bedding' && p.where !== 'concrete')) return false;
+  e.learned.toilet = down(e.learned.toilet, LEARN.toiletWrongPraise * k);
+  log(s, 'warn', `Похвала сразу после лужи на полу учит ${nameCase(e.profile.name, 'acc')}, что можно и мимо ведра. Хвали за ведро и сток.`, { key: `wrongPraise:${e.id}`, cooldown: 30, elephantId: e.id, kind: 'refuse' });
+  return true;
+}
+
 // Угощение: укрепляет доверие; если она только что выполнила просьбу — это награда за неё
 export function onTreat(s: State, e: Elephant): Request | null {
   e.learned.trust = up(e.learned.trust, LEARN.trustTreat);
+  if (wrongPraise(s, e, 1)) return null;
   return reward(s, e, 'treat');
 }
 
 // «Молодец, хорошая» — награда слабее лакомства, зато всегда с собой
 export function onPraise(s: State, e: Elephant): Request | null {
+  if (wrongPraise(s, e, 0.5)) return null;
   const r = reward(s, e, 'praise');
   if (!r) e.learned.familiarity = up(e.learned.familiarity, 0.004);
+  // Просится — и её услышали: просить стоит
+  if (!r && e.signal) e.learned.expectation = up(e.learned.expectation, LEARN.expectUp * 0.3);
   return r;
 }
 

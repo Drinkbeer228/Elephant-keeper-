@@ -1,5 +1,6 @@
 import v2save from './fixtures/save-v2.json?raw';
 import v3save from './fixtures/save-v3.json?raw';
+import v4save from './fixtures/save-v4.json?raw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { deserialize, serialize, runMinutes, step, saveSlot, loadSlot, slotInfo, legacyKeys, clearLegacy, validateState, SAVE_VERSION, type State } from '../src/sim';
 import { AREA_IDS, HOSE_REEL, STATIONS, TANK_HOME, areaAt, inRect } from '../src/data/facility';
@@ -152,7 +153,7 @@ describe('сохранение и загрузка', () => {
       expect(e.learned.cooperation).toBe(old.state.elephants[i].learned.cooperation);
       expect(e.profile.habits).not.toHaveProperty('whistle');
       expect(e.learned.familiarity).toBeGreaterThan(0);
-      expect(Object.keys(e.learned.cues).sort()).toEqual(['come', 'follow', 'lie', 'move', 'no', 'stay']);
+      expect(Object.keys(e.learned.cues).sort()).toEqual(['back', 'come', 'follow', 'foot', 'go', 'lie', 'move', 'no', 'stay']);
       expect(e.mem.tension).toBe(0);
       if (e.mem.call) expect(e.mem.call.why).not.toBe('call');
       const r = 0.95 * e.profile.look.size;
@@ -172,6 +173,36 @@ describe('сохранение и загрузка', () => {
     const again = deserialize(v3save);
     expect(again.ok && serialize(again.state, 1)).toBe(serialize(s, 1));
     runMinutes(s, 120);
+    expect(validateState(s)).toBeNull();
+    expect(deserialize(serialize(s)).ok).toBe(true);
+  });
+
+  it('сейв v4 (записан прежней сборкой, ночь, кипер с баком) переносится: новые просьбы, вода, ночная память; бак стал ведром', () => {
+    const old = JSON.parse(v4save) as { version: number; state: { t: number; elephants: { learned: { cues: Record<string, number>; trust: number } }[]; keeper: { held: { load: number } } } };
+    expect(old.version).toBe(4);
+    const res = deserialize(v4save);
+    if (!res.ok) throw new Error(res.detail);
+    expect(res.migrated).toBe(true);
+    const s = res.state;
+    expect(s.version).toBe(SAVE_VERSION);
+    expect(s.t).toBe(old.state.t);
+    s.elephants.forEach((e, i) => {
+      // Выученное раньше — как было, новые просьбы — из врождённого
+      for (const [k, v] of Object.entries(old.state.elephants[i].learned.cues)) expect(e.learned.cues[k as keyof typeof e.learned.cues]).toBe(v);
+      for (const k of ['back', 'go', 'foot'] as const) expect(e.learned.cues[k]).toBeGreaterThan(0.1);
+      expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
+      expect(e.fluid).toBeGreaterThanOrEqual(0);
+      expect(e.mem.woke.plan).toBe('none');
+      expect(e.mem.seen).toEqual({ signal: 0, wakePee: 0 });
+    });
+    expect(s.keeper.held?.kind).toBe('tank');
+    expect(s.keeper.held!.load).toBeLessThanOrEqual(20);
+    expect(s.world.checks.feet).toEqual({});
+    expect(validateState(s)).toBeNull();
+    const again = deserialize(v4save);
+    expect(again.ok && serialize(again.state, 1)).toBe(serialize(s, 1));
+    // Ночь идёт дальше: спят, просыпаются, ходят в туалет
+    runMinutes(s, 240);
     expect(validateState(s)).toBeNull();
     expect(deserialize(serialize(s)).ok).toBe(true);
   });

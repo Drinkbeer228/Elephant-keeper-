@@ -4,6 +4,7 @@ export { createState, SAVE_VERSION, type NewGameOptions } from './state';
 export { step, runMinutes, NO_INPUT } from './step';
 export { availableActions, actionTarget, heldLabel, areaEmpty, keeperArea, nearGate, hoseUsable, nextVeg } from './keeper';
 export { comfortGap, invited, irritable } from './behavior/contact';
+export { keeperCatching, urinatingNearKeeper } from './behavior/urine';
 export { clockText, shiftDay, minuteOfDay, darkness, temperature, isNight } from './time';
 export { describeCharacter, characterHints, salientTraits, TRAIT_LABELS, rankScore, bondKey, signalHabitText, dietOf, nameCase } from './herd';
 export { wellbeing, pressingNeed, ambientTemp, bodyDirt } from './behavior/needs';

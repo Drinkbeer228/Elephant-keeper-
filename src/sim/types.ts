@@ -75,8 +75,9 @@ export interface Habits {
 
 // Голосовые просьбы кипера. Каждая слониха знает их по-своему: что-то с прежними киперами
 // выучено крепко, что-то — едва. Знание растёт, если за выполненное хвалят, и тает без похвалы
-export type Cue = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'no';
-export const CUES: Cue[] = ['come', 'stay', 'move', 'lie', 'follow', 'no'];
+// Просьбы кипера. Back — «En arrière!» (назад), go — «Partez!» (вперёд, пошла), foot — «Ногу!»
+export type Cue = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'no' | 'back' | 'go' | 'foot';
+export const CUES: Cue[] = ['come', 'stay', 'move', 'lie', 'follow', 'no', 'back', 'go', 'foot'];
 
 export interface ElephantProfile {
   id: string;
@@ -95,7 +96,7 @@ export interface Learned {
   familiarity: number; // насколько он для неё «свой»: растёт от времени рядом и каждодневной заботы
   cooperation: number; // готовность выполнять просьбы кипера
   expectation: number; // ожидание, что на сигнал ответят
-  toilet: number; // связь «попросилась — подставили бак — наградили»
+  toilet: number; // связь «попросилась — подставили ведро — похвалили»
   cues: Record<Cue, number>; // как знает каждую голосовую просьбу
 }
 
@@ -156,7 +157,11 @@ export type ActivityKind =
   | 'stay' // стоит на месте по просьбе
   | 'giveWay' // отступает от кипера по просьбе «подвинься»
   | 'walkWith' // идёт рядом с кипером
-  | 'warn'; // предупреждает: уши в стороны, мотает головой — кипер слишком близко
+  | 'warn' // предупреждает: уши в стороны, мотает головой — кипер слишком близко
+  | 'drowsy' // только что проснулась: стоит сонная, смотрит в одну точку
+  | 'backUp' // пятится назад по «En arrière!»
+  | 'forward' // идёт вперёд по «Partez!»
+  | 'foot'; // держит ногу поднятой по «Ногу!»
 
 export const ACTIVITY_KINDS: ActivityKind[] = [
   'idle',
@@ -186,6 +191,10 @@ export const ACTIVITY_KINDS: ActivityKind[] = [
   'giveWay',
   'walkWith',
   'warn',
+  'drowsy',
+  'backUp',
+  'forward',
+  'foot',
 ];
 
 export type SignalKind = 'toilet' | 'out' | 'in' | 'food' | 'water' | 'attention';
@@ -225,7 +234,7 @@ export interface SignalState {
   answered: boolean;
 }
 
-export type Request = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'toilet';
+export type Request = 'come' | 'stay' | 'move' | 'lie' | 'follow' | 'toilet' | 'back' | 'go' | 'foot';
 
 export interface DayStats {
   minutes: Partial<Record<ActivityKind, number>>;
@@ -251,6 +260,7 @@ export interface DayStats {
   wellbeingSamples: number;
   lyingMinutes: number;
   dirtyLying: number; // минут лёжа на мокром и грязном
+  caughtLitres: number; // сколько мочи кипер поймал в ведро
   shoves: number; // оттолкнула кипера
   kicks: number; // лягнула (подошли сзади без оклика)
   contactMinutes: number; // минут рядом с кипером
@@ -273,6 +283,24 @@ export interface ElephantMemory {
   zone: ZoneId;
   zoneSince: number; // когда вошла в текущую зону
   lastSignalFx: number; // когда последний раз топнула/заурчала (для ритма сигнала)
+  // Ночь: когда проснулась, сколько спала и куда её потянет после (у каждой — по-своему)
+  woke: { t: number; slept: number; plan: WakePlan };
+  stream: UrineStream | null; // мочится сейчас: сколько всего и куда ушло
+  lastPee: { t: number; where: UrineWhere }; // где и когда в последний раз
+  seen: { signal: number; wakePee: number }; // что кипер видел сам: её манеру просить, туалет после сна
+}
+
+// После пробуждения: попросится, сначала поест, побродит, снова ляжет или сразу пойдёт в туалет
+export type WakePlan = 'none' | 'signal' | 'eat' | 'wander' | 'sleep' | 'go';
+export type UrineWhere = 'bucket' | 'drain' | 'bedding' | 'concrete' | 'outside' | 'pool' | 'none';
+
+export interface UrineStream {
+  litres: number; // сколько всего: зависит от того, сколько выпила
+  bladder: number; // наполненность пузыря в начале
+  caught: number; // поймано в ведро
+  drain: number; // ушло в сток
+  floor: number; // на пол
+  bedding: boolean; // попало на подстилку
 }
 
 // Что слон держит хоботом
@@ -297,6 +325,7 @@ export interface Elephant {
   wet: number; // мокрая кожа 0..1
   dust: number; // пыль на спине 0..1
   body: BodyState;
+  fluid: number; // выпитая вода, которая ещё станет мочой (в долях пузыря, 0..)
   tipsy: number; // опьянение от забродивших яблок 0..1
   trunk: Trunk;
   signal: SignalState | null;
@@ -350,7 +379,7 @@ export type ThingKind =
   | 'shard';
 
 // load: лопата — мусор на полотне (0/1), швабра — сырость 0..1, мешок опилок — горстей,
-// бак — литров, набор для мытья — воды 0..1, средство — порций, ведро овощей — порций,
+// ведро для мочи — литров, набор для мытья — воды 0..1, средство — порций, ведро овощей — порций,
 // каша — кг, куча — объём; aux: таз — его id, каша — когда залили водой; owner — чей таз/каша
 export interface Held {
   kind: ThingKind;
@@ -429,6 +458,7 @@ export interface ShiftChecks {
   tubsBroken: number;
   porridge: Record<string, number[]>; // слон → когда кормили кашей
   vegTub: Record<string, number>; // слон → сколько кг овощей поставили в таз
+  feet: Record<string, boolean>; // слон → осмотрели и почистили стопу
 }
 
 export interface World {
@@ -538,7 +568,8 @@ export type Verb =
   | 'rinse'
   | 'shower'
   | 'hoseWash'
-  | 'tankPlace'
+  | 'pourDrain'
+  | 'footCare'
   | 'tankTake'
   | 'emptyTank'
   | 'feedPorridge'

@@ -3,11 +3,11 @@
 // Список действий собирается из всего, что рядом: слоны, станции, вещи, тачка, пол.
 
 import { TASK } from '../../data/balance';
-import { DRUM, GATE_BY_ID, HOSE_REEL, STATIONS, TANK_HOME, TOOL_KINDS, TOOL_SLOTS, areaAt, type GateId, type StationId, type ToolKind, type TroughId } from '../../data/facility';
-import { headPos, keeperContact, rearPos } from '../behavior/perceive';
+import { DRAIN, DRUM, GATE_BY_ID, HOSE_REEL, STATIONS, TANK_HOME, TOOL_KINDS, TOOL_SLOTS, areaAt, type GateId, type StationId, type ToolKind, type TroughId } from '../../data/facility';
+import { footPos, headPos, keeperContact } from '../behavior/perceive';
 import { log } from '../events';
 import { dist } from '../geometry';
-import type { ActionOption, ActionRef, State, Vec } from '../types';
+import type { ActionOption, ActionRef, Foot, State, Vec } from '../types';
 import { cellCenter, tubById } from '../world';
 import { applyGate, gateOptions } from './access';
 import { applyCare, careOptions } from './care';
@@ -74,7 +74,8 @@ const TASK_TIME: Partial<Record<ActionRef['verb'], number>> = {
   hoseWash: TASK.hoseWash,
   handFeed: TASK.handFeed,
   feedPorridge: TASK.feedPorridge,
-  tankPlace: TASK.tank,
+  pourDrain: TASK.pourDrain,
+  footCare: TASK.footCare,
   tankTake: TASK.tank,
   dumpBarrow: TASK.dump,
   refillPouch: TASK.pouch,
@@ -177,8 +178,10 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
       return e ? (e.lying ? { x: e.x, y: e.y } : headPos(e, 1.6)) : null;
     case 'voice':
       return e ? { x: e.x, y: e.y } : null;
-    case 'tankPlace':
-      return e ? rearPos(e) : null;
+    case 'footCare':
+      return e && e.act.kind === 'foot' ? footPos(e, e.act.key.split(':')[1] as Foot) : null;
+    case 'pourDrain':
+      return { x: DRAIN.x, y: DRAIN.y };
     case 'tankTake': {
       const it = s.world.items.find((x) => String(x.id) === t);
       return it ? { x: it.x, y: it.y } : TANK_HOME;

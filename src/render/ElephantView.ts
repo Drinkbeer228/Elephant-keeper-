@@ -58,6 +58,7 @@ export class ElephantView {
   private tuft: Phaser.GameObjects.Image;
   private stompFoot = -1;
   private stompT = 0;
+  private liftFoot = -1; // «Ногу!» — держит ногу поднятой
   private skinKey = '';
   readonly name: Phaser.GameObjects.Image;
   private bubble: Phaser.GameObjects.Image;
@@ -214,6 +215,22 @@ export class ElephantView {
           ears = 0.45;
           break;
         }
+        case 'drowsy': {
+          // Только что проснулась: голова опущена, хобот висит, уши прижаты — смотрит в одну точку
+          want = { reach: 0.75, side: 0, curl: 0.1, raise: 0 };
+          ears = 0.06;
+          headTurn = 0;
+          tailSwing *= 0.15;
+          break;
+        }
+        case 'foot': {
+          // Держит ногу: стоит смирно, хобот свёрнут, слушает кипера
+          const l = local(s.keeper);
+          want = { reach: 0.7, side: Math.max(-1, Math.min(1, l.ang)) * 0.4, curl: 0.6, raise: 0 };
+          ears = 0.3;
+          headTurn = Math.max(-0.3, Math.min(0.3, l.ang * 0.35));
+          break;
+        }
         case 'warn': {
           // Предупреждает: уши растопырены, голова к киперу, мотает ею, хобот свёрнут
           const l = local(s.keeper);
@@ -344,6 +361,8 @@ export class ElephantView {
     this.drawSkin(e, lying, t);
     this.tuft.setVisible(!!e.trunk.kind && !lying);
 
+    const f = a.kind === 'foot' ? a.key.split(':')[1] : '';
+    this.liftFoot = f === 'FR' ? 0 : f === 'FL' ? 1 : f === 'HR' ? 2 : f === 'HL' ? 3 : -1;
     this.drawFeet(e, walking);
     this.drawTail(tailSwing, tailRaise, lying);
     this.drawTrunk(lying);
@@ -399,7 +418,11 @@ export class ElephantView {
     feet.forEach((f, i) => {
       let off = Math.sin(this.walkPhase + f.ph) * stride;
       let lift = 1;
-      if (i === this.stompFoot && this.stompT > 0) {
+      if (i === this.liftFoot) {
+        // Поднятая нога: чуть вынесена (передняя — вперёд, задняя — назад) и ближе к зрителю
+        lift = 1.3;
+        off += (i < 2 ? 0.2 : -0.16) * s;
+      } else if (i === this.stompFoot && this.stompT > 0) {
         // Подняла и с силой опустила
         const k = this.stompT / 0.6;
         lift = 1 + 0.35 * Math.sin(k * Math.PI);

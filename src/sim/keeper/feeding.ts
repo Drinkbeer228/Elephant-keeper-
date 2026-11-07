@@ -126,9 +126,9 @@ function kitchenOptions(c: KCtx, out: ActionOption[]): void {
     const group = STATIONS[sink].label;
     if (h.kind === 'tank') {
       if (h.load > 0) {
-        if (sink === 'washSink') out.push(opt({ verb: 'wash', target: 'emptyTank' }, `Вылить бак в слив (${Math.round(h.load)} л)`, 96, { group, timed: true }));
-        else out.push(off({ verb: 'wash', target: 'emptyTank' }, 'Вылить бак', 'Мочу выливают в слив в инвентарной, не на кухне', 40, { group }));
-      } else if (h.aux) out.push(opt({ verb: 'wash', target: 'tank' }, 'Помыть бак', 90, { group, timed: true }));
+        if (sink === 'washSink') out.push(opt({ verb: 'wash', target: 'emptyTank' }, `Вылить ведро в слив (${Math.round(h.load)} л)`, 96, { group, timed: true }));
+        else out.push(off({ verb: 'wash', target: 'emptyTank' }, 'Вылить ведро', 'Мочу выливают в сток в зале или в слив в инвентарной, не на кухне', 40, { group }));
+      } else if (h.aux) out.push(opt({ verb: 'wash', target: 'tank' }, 'Помыть ведро', 90, { group, timed: true }));
     }
     if (h.kind === 'tub') {
       const tub = tubById(s, h.aux);

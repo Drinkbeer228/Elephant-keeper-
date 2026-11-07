@@ -8,7 +8,7 @@ import type { BodyState, DayStats, Elephant, ElephantProfile, ShiftChecks, State
 import { addLitter, cellCenter, dropDung, forCells, touchCells } from './world';
 import { log } from './events';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface NewGameOptions {
   seed: number;
@@ -28,6 +28,7 @@ export function emptyDayStats(): DayStats {
     urineOutside: 0,
     urineBedding: 0,
     urineTank: 0,
+    caughtLitres: 0,
     dung: 0,
     ate: 0,
     tubKg: 0,
@@ -51,7 +52,7 @@ export function emptyDayStats(): DayStats {
 export function emptyChecks(): ShiftChecks {
   const troughChanged = {} as Record<TroughId, boolean>;
   for (const id of TROUGH_IDS) troughChanged[id] = false;
-  return { troughChanged, hoseIncidents: 0, tubsBroken: 0, porridge: {}, vegTub: {} };
+  return { troughChanged, hoseIncidents: 0, tubsBroken: 0, porridge: {}, vegTub: {}, feet: {} };
 }
 
 export function cleanBody(): BodyState {
@@ -109,6 +110,7 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
     wet: 0,
     dust: range(s, 0, 0.4),
     body: { ...cleanBody(), side: Math.round(range(s, 0, 0.15) * 1000) / 1000, legs: Math.round(range(s, 0.05, 0.2) * 1000) / 1000, hay: Math.round(range(s, 0, 0.3) * 1000) / 1000 },
+    fluid: Math.round(range(s, 8, 22) * 10) / 10,
     tipsy: 0,
     trunk: { kind: null, amount: 0 },
     signal: null,
@@ -130,6 +132,10 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
       accepted: -100,
       lastWarn: -100,
       nag: { cue: '', t: -100, n: 0 },
+      woke: { t: -1000, slept: 0, plan: 'none' },
+      stream: null,
+      lastPee: { t: -1000, where: 'none' },
+      seen: { signal: 0, wakePee: 0 },
     },
     day: emptyDayStats(),
   };

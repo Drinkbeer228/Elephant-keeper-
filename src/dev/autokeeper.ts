@@ -8,11 +8,12 @@
 // в бак ночью, уборка выгула.
 
 import { CONTACT, KEEPER } from '../data/balance';
-import { BARROW_HOME, STALL_E, STALL_W, STATIONS, TANK_HOME, TOILET_STANCE, TROUGH_IDS, areaAt, hardFloor, type AreaId, type FeederId, type StationId, type TroughId } from '../data/facility';
+import { BARROW_HOME, DRAIN, STALL_E, STALL_W, STATIONS, TANK_HOME, TOILET_STANCE, TROUGH_IDS, areaAt, hardFloor, type AreaId, type FeederId, type StationId, type TroughId } from '../data/facility';
 import { PORRIDGE_SOAK_MIN } from '../data/rations';
 import { availableActions, bodyDirt, minuteOfDay, type ActionOption, type Elephant, type State, type StepInput, type Vec } from '../sim';
 import { comfortGap, invited } from '../sim/behavior/contact';
 import { bodyCircles, gapToBody, headPos, keeperCanTouch, rearPos } from '../sim/behavior/perceive';
+import { bucketSpots, keeperCatching } from '../sim/behavior/urine';
 import { keeperNav } from '../sim/keeper';
 import { keeperFieldAt, keeperRoute, keeperRouteAround, type Obstacle } from '../sim/nav';
 import { cellCenter, isBeddingCell } from '../sim/world';
@@ -26,6 +27,7 @@ type Step =
 interface Job {
   name: string;
   steps: Step[];
+  focus?: string; // с кем работает вплотную
 }
 
 const IDLE: StepInput = { move: { x: 0, y: 0 }, run: false, actions: [], cancel: false };
@@ -176,6 +178,7 @@ export class AutoKeeper {
   private cool = new Map<string, number>();
   private now = 0;
   private voiceCool = new Map<string, number>();
+  private focus: string | null = null; // с кем сейчас работает вплотную (у неё не просить подвинуться)
   stats = { jobs: {} as Record<string, number>, failed: {} as Record<string, number>, voice: {} as Record<string, number> };
 
   decide(s: State): StepInput {
@@ -195,6 +198,7 @@ export class AutoKeeper {
       if (!this.job) {
         this.job = this.plan(s);
         if (!this.job) return IDLE;
+        this.focus = this.job.focus ?? null;
         if (this.cooling(this.job.name, s)) this.job = { name: 'cooldown', steps: [wait(() => false, 3)] };
         this.stats.jobs[this.job.name] = (this.stats.jobs[this.job.name] ?? 0) + 1;
         this.route = [];
@@ -257,7 +261,8 @@ export class AutoKeeper {
       if (d > 5.5) continue;
       // Предупреждает — отступить, дать ей место (в любую свободную сторону, не к другим слонам);
       // отступать совсем некуда — попросить её подвинуться
-      if ((e.act.kind === 'warn' || e.mem.tension > 0.4) && gapToBody(e, k) - KEEPER.radius < comfortGap(s, e) + 0.3) {
+      const working = e.id === this.focus && e.act.kind !== 'warn';
+      if (!working && (e.act.kind === 'warn' || e.mem.tension > 0.4) && gapToBody(e, k) - KEEPER.radius < comfortGap(s, e) + 0.3) {
         const away = Math.atan2(k.y - e.y, k.x - e.x);
         const nav = keeperNav(s);
         for (const turn of [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
@@ -356,7 +361,7 @@ export class AutoKeeper {
     this.lastPos = { x: k.x, y: k.y };
     // Упёрся в слониху: попросить подвинуться
     if (this.stuck > 0.3) {
-      const e = s.elephants.find((q) => gapToBody(q, k) < KEEPER.radius + 0.6 && !q.lying);
+      const e = s.elephants.find((q) => gapToBody(q, k) < KEEPER.radius + 0.6 && !q.lying && q.id !== this.focus);
       const key = e ? `move:${e.id}` : '';
       if (e && (this.voiceCool.get(key) ?? -1) < s.t) {
         this.voiceCool.set(key, s.t + 8);
@@ -432,6 +437,16 @@ export class AutoKeeper {
       if (t.valve && !t.drain && t.level >= 95) return { name: 'valveClose', steps: [go(st(id)), act(`valve:${id}`)] };
     }
 
+    // Ночью проснулась после долгого сна — скоро пойдёт в туалет: ведро заранее
+    if (night && !k.held) {
+      const tankHome = w.items.some((it) => it.kind === 'tank' && dist(it, TANK_HOME) < 1.5);
+      const up = s.elephants.find((q) => q.mem.woke.slept >= 90 && s.t - q.mem.woke.t < 10 && areaOfE(q) !== 'paddock' && !this.done.has(`woke:${q.id}:${Math.round(q.mem.woke.t)}`));
+      if (up && tankHome) {
+        this.done.add(`woke:${up.id}:${Math.round(up.mem.woke.t)}`);
+        return this.toiletWalk(up);
+      }
+    }
+
     // Сигналы слонов
     for (const e of s.elephants) {
       const sig = e.signal;
@@ -486,9 +501,10 @@ export class AutoKeeper {
     // Рано утром, пока все в слоновнике, — сменить воду на выгуле
     if (m >= 5 * 60 && m < 6.5 * 60 && allIn(s, STALLS) && !w.gates.outer && !w.checks.troughChanged.paddockWater && w.supplies.chem > 0 && !this.cooling('troughChange:paddockWater', s)) return this.troughChange('paddockWater');
 
-    // Сено
+    // Сено. Вечером сначала овощи к 19:00, потом сено на ночь (до 19:30 подождёт)
+    const vegPending = m >= 14 * 60 && m < 19.5 * 60 && w.tubs.some((t) => t.where === 'rack' && !t.dirty && !t.broken && !this.done.has(`prep:${t.id}:${day}`));
     if (w.stock.hay > 0) {
-      if ((m >= 15.5 * 60 || m < 6 * 60) && !w.gates.outer) for (const a of ['stallW', 'stallE'] as const) if (w.feeders[RACK[a]].hay < 30) return this.hay(RACK[a], s);
+      if ((m >= 15.5 * 60 || m < 6 * 60) && !w.gates.outer && !vegPending) for (const a of ['stallW', 'stallE'] as const) if (w.feeders[RACK[a]].hay < 30) return this.hay(RACK[a], s);
       if (w.feeders.paddockFeeder.hay < 30 && m >= 6 * 60 && m < 16 * 60) return this.hay('paddockFeeder', s);
     }
 
@@ -517,7 +533,8 @@ export class AutoKeeper {
       const a = areaAt(floorTub.x, floorTub.y);
       if (a && (a !== 'paddock' || this.inside(s, a) || this.nearLine(floorTub))) return this.collectTub(s, floorTub.id, a);
     }
-    if (m >= 14.5 * 60 && m < 19 * 60 && !porridgeDue) {
+    // Нарезку начинать сразу после обеденной каши: вечером много работы с ведром, к 19:00 можно не успеть
+    if (m >= 14 * 60 && m < 20 * 60 && !porridgeDue) {
       const tub = w.tubs.find((t) => t.where === 'rack' && !t.dirty && !t.broken && !this.done.has(`prep:${t.id}:${day}`));
       const onTable = w.tubs.find((t) => t.where === 'prep');
       if (onTable) return { name: 'serveTub', steps: [go(st('prepTable')), act(`takeTub:${onTable.id}`), go((x) => this.tubSpot(x, onTable.owner), 0.5), act('placeTub')] };
@@ -606,33 +623,6 @@ export class AutoKeeper {
   // Подойти на её расстояние и спокойно заговорить, если она ещё не подпустила
   private greet(id: string): Step {
     return expand((x) => (keeperCanTouch(x, her(x, id)) || invited(x, her(x, id)) ? [] : [go((y) => meetPoint(y, her(y, id)), 0.7), act(`voice:${id}:talk`, true)]));
-  }
-
-  // Встать у её бока, ближе к задним ногам (для бака): с той стороны, где есть место
-  private flank(s: State, e: Elephant): Vec {
-    const nav = keeperNav(s);
-    const L = e.profile.look;
-    const half = 1.05 * L.size * L.length;
-    const girth = 0.95 * L.size * L.girth;
-    const c = Math.cos(e.heading);
-    const sn = Math.sin(e.heading);
-    let best: Vec | null = null;
-    let bestD = Infinity;
-    for (const along of [-0.35, 0, -0.65]) {
-      for (const side of [1, -1]) {
-        const bx = e.x + c * along * half;
-        const by = e.y + sn * along * half;
-        const q = { x: bx - sn * side * (girth + 0.5), y: by + c * side * (girth + 0.5) };
-        if (keeperFieldAt(q.x, q.y, nav) < 0.34) continue;
-        if (s.elephants.some((o) => o !== e && gapToBody(o, q) < 0.8)) continue;
-        const d = dist(q, s.keeper);
-        if (d < bestD) {
-          bestD = d;
-          best = q;
-        }
-      }
-    }
-    return best ?? { x: e.x - sn * (girth + 0.5), y: e.y + c * (girth + 0.5) };
   }
 
   // Свободная минута: к той, с кем давно не были рядом — поговорить, почесать, угостить
@@ -737,40 +727,42 @@ export class AutoKeeper {
     return { name: `hay:${id}`, steps: [go(st('hayStack')), act('take:hay'), go(st(id)), act(`loadFeeder:${id}:hay`)] };
   }
 
-  // Ночной туалет: взять бак, подойти так, чтобы видела, «пошли» — довести рядом с собой до
-  // бетона, «стоять», подставить бак у её бока, «давай», наградить и забрать бак (вылить — потом).
-  // Не пошла — не повторять сразу: поговорить, подождать и попросить снова. Бак не подставить
-  // (стоит на соломе) — «давай» не говорить: на подстилку пусть не учится.
+  // Ночной туалет с ведром: взять ведро, подойти так, чтобы видела, заговорить, встать у её задних
+  // ног (сзади или сбоку), «давай» — и держать ведро под струёй, пока не закончит (если сдвинется —
+  // переставить); похвалить, вылить в сток посреди зала. Где она стоит — там и ловить.
   private toiletWalk(e: Elephant): Job {
     const id = e.id;
-    const tankUnderHer = (x: State) => x.world.items.some((it) => it.kind === 'tank' && dist(it, rearPos(her(x, id))) < 1.35);
+    const peeing = (x: State) => her(x, id).act.kind === 'urinate' && her(x, id).act.phase === 'do';
+    const hold = (n: number): Step =>
+      expand((x) => {
+        if (!peeing(x) || n > 40) return [];
+        return [go((y) => this.bucketSpot(y, her(y, id)), 0.12), wait((y) => !peeing(y) || !keeperCatching(y, her(y, id)), 40), hold(n + 1)];
+      });
     return {
       name: 'toiletWalk',
+      focus: id,
       steps: [
         go(TANK_HOME, 0.9),
-        pick('takeTank', (_s, o) => o.ref.verb === 'pickUp' && o.label.includes('бак')),
+        pick('takeTank', (x, o) => o.ref.verb === 'pickUp' && x.world.items.some((it) => String(it.id) === o.ref.target && it.kind === 'tank')),
         go((x) => meetPoint(x, her(x, id)), 0.7),
         this.greet(id),
-        this.lead(id, 0),
-        expand((x) =>
-          onConcrete(her(x, id))
-            ? [
-                ...(her(x, id).act.kind === 'stay' ? [] : [act(`voice:${id}:stay`, true)]),
-                go((y) => this.flank(y, her(y, id)), 0.35),
-                wait((y) => her(y, id).speed < 0.25, 3),
-                act(`tankPlace:${id}`, true),
-              ]
-            : [],
-        ),
-        expand((x) => (tankUnderHer(x) ? [act(`voice:${id}:toilet`, true), wait((y) => her(y, id).act.kind !== 'urinate', 6), act(`treat:${id}`, true)] : [])),
-        go((x) => {
-          const t = x.world.items.find((it) => it.kind === 'tank');
-          return t && !x.keeper.held ? this.standNear(x, t, 0.9) : null;
-        }, 0.35),
-        pick('tankTake', (_s, o) => o.ref.verb === 'tankTake', true),
-        expand((x) => (x.keeper.held?.kind === 'tank' ? [] : [pick('tankPick', (_s, o) => o.ref.verb === 'pickUp' && o.label.includes('бак'), true)])),
+        expand((x) => (her(x, id).act.kind === 'walkWith' || her(x, id).act.kind === 'stay' ? [] : [act(`voice:${id}:stay`, true)])),
+        go((x) => this.bucketSpot(x, her(x, id)), 0.12),
+        expand((x) => (peeing(x) ? [] : [act(`voice:${id}:toilet`, true)])),
+        wait((x) => peeing(x), 2),
+        hold(0),
+        expand((x) => (x.keeper.held?.kind === 'tank' && x.keeper.held.load > 0.5 ? [act(`treat:${id}`, true), act(`voice:${id}:praise`, true)] : [])),
+        expand((x) => (x.keeper.held?.kind === 'tank' && x.keeper.held.load > 0 ? [go({ x: DRAIN.x + DRAIN.r + 0.45, y: DRAIN.y }, 0.4), act('pourDrain:drain', true)] : [])),
       ],
     };
+  }
+
+  // Встать с ведром у её задних ног: свободное из мест позади и по бокам, ближайшее к киперу
+  private bucketSpot(s: State, e: Elephant): Vec {
+    const nav = keeperNav(s);
+    const spots = bucketSpots(e).filter((p) => keeperFieldAt(p.x, p.y, nav) >= 0.34 && !s.elephants.some((o) => o !== e && gapToBody(o, p) < KEEPER.radius + 0.2));
+    const list = spots.length ? spots : bucketSpots(e);
+    return list.reduce((b, p) => (dist(p, s.keeper) < dist(b, s.keeper) ? p : b));
   }
 
   // К стоку: подойти, заговорить, «пошли» — довести до стока, «давай» — встанет над решёткой
@@ -1190,7 +1182,7 @@ export class AutoKeeper {
       case 'washKit':
         return { name: 'putBack', steps: [...exit, go(st('cabinet')), act(`putBack:${h.kind}`)] };
       case 'tank':
-        if (h.load > 0) return { name: 'tankEmpty', steps: [...exit, go(st('washSink')), act('wash:emptyTank'), act('wash:tank', true), go(TANK_HOME, 0.9), act('putBack:tank')] };
+        if (h.load > 0) return { name: 'tankEmpty', steps: [...exit, go({ x: DRAIN.x + DRAIN.r + 0.45, y: DRAIN.y }, 0.4), act('pourDrain:drain', true), go(st('washSink')), act('wash:emptyTank', true), act('wash:tank', true), go(TANK_HOME, 0.9), act('putBack:tank')] };
         if (h.aux) return { name: 'tankWash', steps: [...exit, go(st('washSink')), act('wash:tank'), go(TANK_HOME, 0.9), act('putBack:tank')] };
         return { name: 'tankHome', steps: [...exit, go(TANK_HOME, 0.9), act('putBack:tank')] };
       case 'porridge':

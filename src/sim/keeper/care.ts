@@ -1,21 +1,22 @@
 // Работа рядом со слонихой, в одном пространстве с ней: угостить и наградить, погладить, почесать,
 // протянуть руку, почистить щёткой (спину — когда легла), вымыть (мыло → щётка → смыть) или из
-// шланга, подставить бак под неё на бетоне, покормить кашей и овощами с руки, поставить таз.
+// шланга, держать ведро под струёй (где бы она ни мочилась) и вылить его в сток, осмотреть
+// поданную ногу, покормить кашей и овощами с руки, поставить таз.
 // Голосовые просьбы (позвать, стоять, подвинься, пошли, ложись, давай, нельзя) — в voice.ts.
 
 import { BODY, FOOD, KEEPER, LEARN } from '../../data/balance';
-import { areaAt, hardFloor } from '../../data/facility';
+import { DRAIN, areaAt } from '../../data/facility';
 import { DIETS, PORRIDGE_SOAK_MIN } from '../../data/rations';
 import { spook } from '../behavior/act';
 import { acceptContact } from '../behavior/contact';
 import { onGroom, onHand, onPet, onRewardPushy, onScratch, onShowerEnjoyed, onTreat } from '../behavior/learning';
 import { ambientTemp } from '../behavior/needs';
-import { contactSpotNear, keeperCanTouch, keeperContact, keeperDistanceToBody, keeperDistanceToHead, rearPos } from '../behavior/perceive';
+import { contactSpotNear, footPos, keeperCanTouch, keeperContact, keeperDistanceToHead, rearPos } from '../behavior/perceive';
 import { answerSignal } from '../behavior/signals';
 import { fx, log } from '../events';
 import { closestOnSegment, dist } from '../geometry';
 import { nameCase } from '../herd';
-import type { ActionOption, ActionRef, BodyPart, Elephant, State } from '../types';
+import type { ActionOption, ActionRef, BodyPart, Elephant, Foot, State } from '../types';
 import { tubById, tubKg } from '../world';
 import { off, opt, ownerName, type KCtx } from './common';
 import { hoseUsable } from './hose';
@@ -51,20 +52,12 @@ function rewardOpen(s: State, e: Elephant): boolean {
   return !!call && call.arrivedAt >= 0 && !call.rewarded && s.t - call.arrivedAt <= LEARN.rewardWindow;
 }
 
-// Бак, стоящий рядом с кипером на полу
+// Ведро, стоящее рядом с кипером на полу
 function tankNear(s: State) {
   return s.world.items.find((it) => it.kind === 'tank' && dist(it, s.keeper) < 1.8);
 }
 
-// Подставить бак: кипер у её бока, она стоит на бетоне (на соломе бак заваливается) и знает, что он тут
-function tankSpot(s: State, e: Elephant): { ok: boolean; why: string } {
-  if (keeperDistanceToBody(s, e) > 1.0) return { ok: false, why: 'Подойди к её боку' };
-  const r = rearPos(e);
-  if (!hardFloor(r.x, r.y)) return { ok: false, why: 'На соломе бак не устоит — отведи её на бетон, к стоку' };
-  if (e.speed > 0.25 || e.lying) return { ok: false, why: e.lying ? 'Лежит' : 'Она идёт — попроси постоять' };
-  if (s.t - e.mem.aware > 2) return { ok: false, why: 'Она тебя не видит — окликни её, прежде чем лезть под бок' };
-  return { ok: true, why: '' };
-}
+const FOOT_ACC: Record<Foot, string> = { FL: 'левую переднюю', FR: 'правую переднюю', HL: 'левую заднюю', HR: 'правую заднюю' };
 
 // Достать до слонихи: до головы — хобот дотянется, до бока — стоишь рядом
 function reachable(s: State, e: Elephant): boolean {
@@ -120,21 +113,24 @@ export function careOptions(c: KCtx, out: ActionOption[]): void {
       if (h.owner === e.id) out.push(opt({ verb: 'feedPorridge', target: e.id }, `Покормить ${acc} кашей (${DIETS[e.profile.habits.diet].porridge.product})`, 120, { ...x, timed: true }));
       else out.push(off({ verb: 'feedPorridge', target: e.id }, `Покормить ${acc} кашей`, `Это каша для ${ownerName(s, h.owner)} — у ${nameCase(e.profile.name, 'gen')} свой рацион`, 30, x));
     }
-    // Бак в руках: подставить под неё, пока стоит на бетоне
-    if (h?.kind === 'tank') {
-      const spot = tankSpot(s, e);
-      const toilet = e.signal?.kind === 'toilet' || e.needs.bladder > 60;
-      if (h.load >= KEEPER.tankLiters - 5) out.push(off({ verb: 'tankPlace', target: e.id }, 'Подставить бак', 'Бак полон — вылей в мойке', 80, x));
-      else if (!spot.ok) out.push(off({ verb: 'tankPlace', target: e.id }, `Подставить бак под ${acc}`, spot.why, toilet ? 90 : 30, x));
-      else out.push(opt({ verb: 'tankPlace', target: e.id }, `Подставить бак под ${acc}`, toilet ? 140 : 40, { ...x, timed: true }));
-    }
   }
-  // Бак на полу рядом: забрать
+  // Подала ногу: осмотреть и почистить стопу, пока держит
+  for (const e of s.elephants) {
+    if (e.act.kind !== 'foot') continue;
+    const foot = e.act.key.split(':')[1] as Foot;
+    if (dist(k, footPos(e, foot)) > 1.6) continue;
+    out.push(opt({ verb: 'footCare', target: e.id }, `Осмотреть и почистить ${FOOT_ACC[foot]} стопу ${nameCase(e.profile.name, 'gen')}`, 112, { elephantId: e.id, group: e.profile.name, timed: true }));
+  }
+  // Ведро с мочой: вылить в сток посреди зала (или в слив в инвентарной)
+  if (h?.kind === 'tank' && h.load > 0 && dist(k, DRAIN) <= DRAIN.r + 0.9) {
+    out.push(opt({ verb: 'pourDrain', target: 'drain' }, `Вылить ведро в сток (${Math.round(h.load)} л)`, 94, { group: 'Сток', timed: true }));
+  }
+  // Ведро на полу рядом: забрать
   const tank = tankNear(s);
   if (tank && !h && !c.pushing) {
     const busy = s.elephants.some((e) => e.act.kind === 'urinate' && e.act.phase === 'do' && dist(rearPos(e), tank) < 1.5);
-    if (busy) out.push(off({ verb: 'tankTake', target: String(tank.id) }, 'Забрать бак', 'Подожди, она ещё не закончила', 60, { group: 'Бак' }));
-    else out.push(opt({ verb: 'tankTake', target: String(tank.id) }, tank.load > 0 ? `Забрать бак (${Math.round(tank.load)} л)` : 'Забрать пустой бак', tank.load > 0 ? 95 : 40, { group: 'Бак', timed: true }));
+    if (busy) out.push(off({ verb: 'tankTake', target: String(tank.id) }, 'Забрать ведро', 'Подожди, она ещё не закончила', 60, { group: 'Ведро' }));
+    else out.push(opt({ verb: 'tankTake', target: String(tank.id) }, tank.load > 0 ? `Забрать ведро (${Math.round(tank.load)} л)` : 'Забрать пустое ведро', tank.load > 0 ? 95 : 40, { group: 'Ведро', timed: true }));
   }
   tubOptions(c, out);
 }
@@ -346,13 +342,27 @@ export function applyCare(s: State, ref: ActionRef): boolean {
       }
       return true;
     }
-    case 'tankPlace': {
-      if (!e || h?.kind !== 'tank' || !tankSpot(s, e).ok) return true;
-      const r = rearPos(e);
-      w.items.push({ id: s.nextId++, kind: 'tank', x: r.x, y: r.y, load: h.load, aux: h.aux, owner: null });
-      k.held = null;
+    case 'pourDrain': {
+      if (h?.kind !== 'tank' || h.load <= 0) return true;
+      h.load = 0;
+      h.aux = 1;
+      fx('pour', DRAIN.x, DRAIN.y);
+      fx('drain', DRAIN.x, DRAIN.y);
+      log(s, 'info', 'Ведро вылито в сток. Помыть его можно в мойке инвентарной.', { silent: true });
+      return true;
+    }
+    case 'footCare': {
+      if (!e || e.act.kind !== 'foot') return true;
+      const foot = e.act.key.split(':')[1] as Foot;
+      if (dist(k, footPos(e, foot)) > 1.8) return true;
+      e.body.legs = Math.max(0, e.body.legs - 0.45);
+      w.checks.feet[e.id] = true;
       acceptContact(s, e);
-      fx('tankPlace', r.x, r.y);
+      // Подала и держала ногу, пока осматривали, — за это хвалят
+      e.mem.call = { until: s.t + 10, x: e.x, y: e.y, arrivedAt: s.t, rewarded: false, why: 'foot' };
+      s.dailyKeeper.interactions++;
+      fx('brush', footPos(e, foot).x, footPos(e, foot).y);
+      log(s, 'good', `Стопа ${nameCase(e.profile.name, 'gen')} чистая, трещин и камешков нет. Похвали — держала ногу.`, { elephantId: e.id, silent: true });
       return true;
     }
     case 'tankTake': {
