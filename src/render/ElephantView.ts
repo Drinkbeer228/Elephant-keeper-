@@ -241,6 +241,25 @@ export class ElephantView {
           tailRaise = 0.4;
           break;
         }
+        case 'shoo': {
+          // Прогоняет котёнка: уши растопырены, голова к нему, хобот взмахивает
+          const l = local(s.kitten);
+          want = { reach: 0.9 + Math.abs(Math.sin(t * 9)) * 0.5, side: Math.max(-1, Math.min(1, l.ang)) * 0.7 + Math.sin(t * 9) * 0.35, curl: 0.35, raise: 0.35 };
+          ears = 1;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5)) + Math.sin(t * 8) * 0.18;
+          tailSwing = Math.sin(t * 6) * 0.7;
+          tailRaise = 0.5;
+          break;
+        }
+        case 'sniffCat': {
+          // Тянется хоботом к котёнку — медленно, кончиком вниз
+          const l = local(s.kitten);
+          want = { reach: Math.min(1.8, Math.max(0.8, l.d)), side: Math.max(-1, Math.min(1, l.ang)), curl: 0.1 + Math.sin(t * 2.2) * 0.1, raise: 0 };
+          ears = 0.55;
+          headTurn = Math.max(-0.4, Math.min(0.4, l.ang * 0.5));
+          tailSwing *= 0.5;
+          break;
+        }
         case 'stay':
         case 'walkWith': {
           // Стоит или идёт рядом по просьбе: внимание на кипере, спокойна

@@ -7,8 +7,9 @@ import { random, range } from './rng';
 import type { BodyState, DayStats, Elephant, ElephantProfile, ShiftChecks, State, TroughState, Traits, Tub } from './types';
 import { addLitter, cellCenter, dropDung, forCells, touchCells } from './world';
 import { log } from './events';
+import { createKitten } from './kitten';
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 export interface NewGameOptions {
   seed: number;
@@ -135,7 +136,8 @@ function createElephant(s: State, p: ElephantProfile, i: number): Elephant {
       woke: { t: -1000, slept: 0, plan: 'none' },
       stream: null,
       lastPee: { t: -1000, where: 'none' },
-      seen: { signal: 0, wakePee: 0 },
+      seen: { signal: 0, wakePee: 0, cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } },
+      cat: { saw: -100, next: 0, react: -100 },
     },
     day: emptyDayStats(),
   };
@@ -197,6 +199,7 @@ export function createState(opts: NewGameOptions): State {
     startOfDay: {},
     reports: [],
     pendingReport: null,
+    kitten: createKitten(seed),
   };
   for (let i = 0; i < cells; i++) {
     const c = cellCenter(i);

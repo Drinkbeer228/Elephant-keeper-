@@ -15,6 +15,7 @@ import { applyCleaning, cleaningOptions } from './cleaning';
 import { makeCtx } from './common';
 import { applyFeeding, feedingOptions, prepOptions } from './feeding';
 import { applyHose, hoseOptions } from './hose';
+import { applyKitten, kittenOptions } from './kitten';
 import { applyThing, thingOptions } from './things';
 import { applyTrough, troughOptions } from './troughs';
 import { applyVoice, voiceOptions } from './voice';
@@ -40,6 +41,7 @@ export function availableActions(s: State): ActionOption[] {
   hoseOptions(c, out);
   cleaningOptions(c, out);
   thingOptions(c, out);
+  kittenOptions(c, out);
   for (const o of out) {
     const p = actionTarget(s, o);
     o.dist = p ? Math.round(dist(k, p) * 10) / 10 : 0;
@@ -76,6 +78,7 @@ const TASK_TIME: Partial<Record<ActionRef['verb'], number>> = {
   feedPorridge: TASK.feedPorridge,
   pourDrain: TASK.pourDrain,
   footCare: TASK.footCare,
+  petKitten: TASK.pet,
   tankTake: TASK.tank,
   dumpBarrow: TASK.dump,
   refillPouch: TASK.pouch,
@@ -130,6 +133,7 @@ export function stepKeeperTask(s: State, dtSec: number): void {
 
 // Эффект действия: здесь всё, что меняет мир
 export function applyAction(s: State, ref: ActionRef): void {
+  if (applyKitten(s, ref)) return;
   if (applyVoice(s, ref)) return;
   if (applyGate(s, ref)) return;
   if (applyTrough(s, ref)) return;
@@ -182,6 +186,8 @@ export function actionTarget(s: State, o: ActionOption): Vec | null {
       return e && e.act.kind === 'foot' ? footPos(e, e.act.key.split(':')[1] as Foot) : null;
     case 'pourDrain':
       return { x: DRAIN.x, y: DRAIN.y };
+    case 'petKitten':
+      return { x: s.kitten.x, y: s.kitten.y };
     case 'tankTake': {
       const it = s.world.items.find((x) => String(x.id) === t);
       return it ? { x: it.x, y: it.y } : TANK_HOME;

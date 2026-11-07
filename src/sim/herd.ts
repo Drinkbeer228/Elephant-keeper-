@@ -245,6 +245,8 @@ export function initialLearned(p: ElephantProfile): Learned {
     toilet: round3(clamp(0.15 + 0.3 * t.cooperation + 0.1 * t.expressiveness, 0.1, 0.6)),
     // «En arrière» и «Partez» — привычные команды из её прошлого; «ногу» — для осмотра стоп
     cues: { come: cue(0.1, 1), stay: cue(-0.05, 2), move: cue(0.05, 3), lie: cue(-0.15, 4), follow: cue(0, 5), no: cue(0.05, 6), back: cue(0.05, 7), go: cue(0.08, 8), foot: cue(-0.08, 9) },
+    // Кошки в слоновниках не редкость: старшие и спокойные чаще к ним привыкли
+    cat: round3(clamp(0.08 + 0.25 * clamp((p.age - 6) / 30, 0, 1) + 0.15 * (1 - t.nervousness) + 0.3 * (jitter(seed, 13) + 0.5), 0.05, 0.75)),
   };
 }
 

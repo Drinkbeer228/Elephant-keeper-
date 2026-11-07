@@ -1,7 +1,7 @@
 // Исполнение поведения: подход к цели, поворот, само действие и его последствия.
 // Каждое занятие — состояние конечного автомата с фазами «идти» и «делать».
 
-import { BODY, ELEPHANT, FOOD, HOSE, KEEPER, LEARN, NEEDS, WATER } from '../../data/balance';
+import { BODY, ELEPHANT, FOOD, HOSE, KEEPER, KITTEN, LEARN, NEEDS, WATER } from '../../data/balance';
 import { DRUM, GATE_BY_ID, STATIONS, TIRE, TREES, areaAt, zoneAt, type FeederId, type TroughId } from '../../data/facility';
 import { VEG_KINDS } from '../../data/rations';
 import { fx, log } from '../events';
@@ -709,6 +709,15 @@ function doStep(s: State, e: Elephant, dt: number, dtSec: number, elapsed: numbe
     case 'foot':
       e.speed = 0;
       return elapsed >= a.dur ? 'done' : 'continue';
+    case 'shoo':
+      return stepShoo(s, e, dtSec, elapsed);
+    case 'sniffCat': {
+      // Тянется хоботом к котёнку: стоит, повернувшись к нему
+      const c = s.kitten;
+      e.speed = 0;
+      turnToward(e, Math.atan2(c.y - e.y, c.x - e.x), dtSec, ELEPHANT.pivot);
+      return elapsed >= a.dur || dist(e, c) > 4.5 || c.perch ? 'done' : 'continue';
+    }
     case 'forward':
       return elapsed >= a.dur ? 'done' : 'continue';
     case 'explore':
@@ -1299,6 +1308,34 @@ function afterPee(s: State, e: Elephant, where: string): void {
   const k = s.keeper;
   const woke = e.mem.woke;
   if (woke.slept >= 90 && s.t - woke.t < 50 && Math.hypot(k.x - e.x, k.y - e.y) < 18 && !keeperIndoors(s)) e.mem.seen.wakePee++;
+}
+
+// Прогоняет котёнка: резко поворачивается к нему, уши в стороны, пара быстрых шагов —
+// и останавливается. Дальше выпада не гонится и на котёнка не наступает: тот всегда успевает удрать
+function stepShoo(s: State, e: Elephant, dtSec: number, elapsed: number): DoResult {
+  const c = s.kitten;
+  const from = e.act.aux;
+  turnToward(e, Math.atan2(c.y - e.y, c.x - e.x), dtSec, ELEPHANT.pivot * 1.8);
+  const gap = gapToBody(e, c);
+  const lunged = from ? Math.hypot(e.x - from.x, e.y - from.y) : KITTEN.lunge;
+  if (elapsed >= e.act.dur || lunged >= KITTEN.lunge || gap > 3.5 || c.perch) {
+    e.speed = 0;
+    return 'done';
+  }
+  if (gap > 1.1) {
+    const step = KITTEN.lungeSpeed * dtSec;
+    const nx = e.x + Math.cos(e.heading) * step;
+    const ny = e.y + Math.sin(e.heading) * step;
+    if (elephantCanStand(nx, ny, radiusOf(e), gateMask(s))) {
+      e.x = nx;
+      e.y = ny;
+      e.speed = KITTEN.lungeSpeed;
+      e.day.distance += step;
+      return 'continue';
+    }
+  }
+  e.speed = 0;
+  return 'continue';
 }
 
 // «En arrière!»: пятится назад, не разворачиваясь

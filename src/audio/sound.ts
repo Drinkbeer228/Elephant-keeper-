@@ -291,6 +291,25 @@ class Sound {
       case 'voice':
         this.voice(ev.tag ?? 'name', (ev.elephantId && nameOf?.(ev.elephantId)) || 'слон');
         break;
+      // Котёнок: тихое «мяу», мурлыканье; слониха фыркает, прогоняя его
+      case 'meow':
+        if (near && this.throttle('meow', 4000)) {
+          this.tone(620, 0.09, { type: 'triangle', gain: 0.018, to: 880 });
+          this.tone(880, 0.16, { type: 'triangle', gain: 0.016, to: 560, delay: 0.09 });
+        }
+        break;
+      case 'purr':
+        if (this.throttle('purr', 2500)) for (let i = 0; i < 4; i++) this.noise(0.16, { freq: 140, type: 'lowpass', gain: 0.05, delay: i * 0.2 });
+        break;
+      case 'shoo':
+        if (near && this.throttle(`shoo-${ev.elephantId}`, 3000)) {
+          this.noise(0.35, { freq: 650, type: 'bandpass', gain: 0.07 });
+          this.tone(130, 0.3, { type: 'sawtooth', gain: 0.03, to: 85 });
+        }
+        break;
+      case 'catStartle':
+        if (near && this.throttle(`catStartle-${ev.elephantId}`, 3000)) this.noise(0.22, { freq: 420, type: 'bandpass', gain: 0.06 });
+        break;
       case 'shove':
         this.noise(0.25, { freq: 160, gain: 0.12 });
         this.tone(70, 0.3, { gain: 0.05, to: 50 });

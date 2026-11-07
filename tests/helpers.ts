@@ -1,11 +1,27 @@
 import { createState, runMinutes, step, availableActions, NO_INPUT, type State, type Traits, type StepInput } from '../src/sim';
-import { STATIONS, type StationId } from '../src/data/facility';
+import { KITTEN_PLACES, STATIONS, type StationId } from '../src/data/facility';
 import type { Elephant } from '../src/sim/types';
 
 export function game(seed = 1, herd = 3, overrides?: Partial<Traits>[], mess = false): State {
   const s = createState({ seed, herdSize: herd, overrides, mess });
   s.journal = [];
+  quietKitten(s);
   return s;
+}
+
+// Котёнок спит на сене в сеннике и не мешает тестам, где речь не о нём
+export function quietKitten(s: State): void {
+  const k = s.kitten;
+  const hay = KITTEN_PLACES.find((p) => p.id === 'hay')!;
+  k.x = hay.x;
+  k.y = hay.y;
+  k.path = [];
+  k.hop = false;
+  k.up = null;
+  k.pending = null;
+  k.perch = { x: hay.x, y: hay.y, down: { ...hay.from }, tree: false };
+  k.act = { kind: 'nap', start: s.t, until: 1e9, target: null, arrived: true, look: null, spot: hay.text };
+  k.fear = 0;
 }
 
 export function el(s: State, i: number): Elephant {

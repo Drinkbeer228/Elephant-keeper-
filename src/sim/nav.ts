@@ -320,8 +320,11 @@ export interface Obstacle {
 
 export function keeperRouteAround(from: Vec, to: Vec, s: KeeperNavState, bodies: Obstacle[]): Vec[] | null {
   if (!bodies.length) return keeperRoute(from, to, s);
-  const base = keeperField(s);
-  const need = KEEPER_NEED;
+  return routeAround(keeperField(s), from, to, KEEPER_NEED, KEEPER_SMOOTH, bodies);
+}
+
+// Обход тел: корпус непроходим, мягкая зона вокруг — дороже. Клетки старта и цели остаются как были
+function routeAround(base: Float32Array, from: Vec, to: Vec, need: number, smooth: number, bodies: Obstacle[]): Vec[] | null {
   const field = new Float32Array(base);
   const extra = new Float32Array(GW * GH);
   for (const b of bodies) {
@@ -345,14 +348,34 @@ export function keeperRouteAround(from: Vec, to: Vec, s: KeeperNavState, bodies:
     field[i] = base[i];
   }
   const clear = (a: Vec, b: Vec) => {
-    if (!lineClear(field, a, b, KEEPER_SMOOTH)) return false;
+    if (!lineClear(field, a, b, smooth)) return false;
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const n = Math.max(1, Math.ceil(len / 0.25));
     for (let k = 1; k < n; k++) if (extra[cellIndex(a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n)] > 0) return false;
     return true;
   };
   if (clear(from, to)) return [to];
-  return astar(field, from, to, need, (i) => 1 + extra[i], KEEPER_SMOOTH);
+  return astar(field, from, to, need, (i) => 1 + extra[i], smooth);
+}
+
+// Котёнок ходит там же, где кипер, и ещё проскальзывает между прутьями закрытых ворот
+const KITTEN_NAV: KeeperNavState = { mask: 3, access: AREA_IDS };
+const KITTEN_NEED = 0.17;
+const KITTEN_SMOOTH = 0.42;
+
+export function kittenRoute(from: Vec, to: Vec, bodies: Obstacle[] = []): Vec[] | null {
+  const field = keeperField(KITTEN_NAV);
+  if (!bodies.length) {
+    if (lineClear(field, from, to, KITTEN_SMOOTH)) return [to];
+    return astar(field, from, to, KITTEN_NEED, undefined, KITTEN_SMOOTH);
+  }
+  return routeAround(field, from, to, KITTEN_NEED, KITTEN_SMOOTH, bodies);
+}
+
+// Может ли котёнок стоять здесь: по настоящей геометрии стен, вещей и бассейна
+export function kittenCanStand(x: number, y: number): boolean {
+  if (x < 0.5 || y < 0.5 || x > W - 0.5 || y > H - 0.5) return false;
+  return !keeperIndex.hits(x, y, 0.13);
 }
 
 export function keeperFieldAt(x: number, y: number, s: KeeperNavState): number {

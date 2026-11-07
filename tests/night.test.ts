@@ -29,11 +29,13 @@ function nights(seed: number): { wakes: Wake[]; drowsy: number; otherWakes: numb
   while (s.t < 480 + 1440 * 2) {
     keepUp(s);
     const before = s.elephants.map((e) => e.act.kind);
+    const lying = s.elephants.map((e) => e.lying);
     step(s);
     s.pendingReport = null;
     s.elephants.forEach((e, i) => {
       const k = e.act.kind;
-      if (before[i] === 'sleep' && k !== 'sleep') {
+      // Проснулась — значит, лежала и спала (а не передумала по дороге к подстилке)
+      if (before[i] === 'sleep' && lying[i] && k !== 'sleep') {
         if (k === 'drowsy') {
           drowsy++;
           open[i] = { t: s.t, slept: e.mem.woke.slept, plan: e.mem.woke.plan, first: '', peed: false };

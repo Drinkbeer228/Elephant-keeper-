@@ -15,7 +15,8 @@ import { initialLearned, assignDiets, extraProfile, makeHabits } from './herd';
 import { elephantCanStand, nearestStandable } from './nav';
 import { SAVE_VERSION, cleanBody, emptyChecks, emptyDayStats, freshTrough, rackSpot, vegStockFor } from './state';
 import { clockText, shiftDay } from './time';
-import { ACTIVITY_KINDS, TRAIT_KEYS, type ActivityKind, type ElephantProfile, type State } from './types';
+import { ACTIVITY_KINDS, KITTEN_ACTS, TRAIT_KEYS, type ActivityKind, type ElephantProfile, type KittenActKind, type State } from './types';
+import { createKitten } from './kitten';
 
 export const SAVE_FORMAT = 'elephant-keeper';
 
@@ -256,7 +257,24 @@ function migrate4to5(doc: Doc): Doc {
   return { ...doc, version: 5 };
 }
 
-const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3, 3: migrate3to4, 4: migrate4to5 };
+// v5 → v6: котёнок со станции и привычка слонов к нему
+function migrate5to6(doc: Doc): Doc {
+  const st = doc.state as any;
+  if (!st || typeof st !== 'object') return doc;
+  const els: any[] = Array.isArray(st.elephants) ? st.elephants : [];
+  for (const e of els) {
+    const p = e.profile as ElephantProfile;
+    if (e.learned && p?.traits && p.look && typeof e.learned.cat !== 'number') e.learned.cat = initialLearned(p).cat;
+    if (e.mem) {
+      e.mem.seen = { signal: 0, wakePee: 0, ...(e.mem.seen ?? {}), cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } };
+      e.mem.cat = { saw: -100, next: 0, react: -100 };
+    }
+  }
+  if (!st.kitten) st.kitten = createKitten(typeof st.seed === 'number' ? st.seed : 1);
+  return { ...doc, version: 6 };
+}
+
+const MIGRATIONS: Record<number, Migration> = { 2: migrate2to3, 3: migrate3to4, 4: migrate4to5, 5: migrate5to6 };
 
 export function serialize(state: State, savedAt = Date.now()): string {
   const file: SaveFile = {
@@ -304,6 +322,7 @@ export function validateState(s: unknown): string | null {
     if (!isObj(e.mem) || !isObj(e.day) || !isObj(e.body) || !isObj(e.trunk)) return `слон ${e.id}: память`;
     if (!num(e.mem.tension) || !num(e.mem.aware) || !isObj(e.mem.nag)) return `слон ${e.id}: память о кипере`;
     if (!num(e.fluid) || !isObj(e.mem.woke) || !isObj(e.mem.seen) || !isObj(e.mem.lastPee)) return `слон ${e.id}: ночь и вода`;
+    if (!num(L.cat) || !isObj(e.mem.cat) || !num(e.mem.cat.next) || !isObj(e.mem.seen.cat)) return `слон ${e.id}: котёнок`;
   }
   const k = s.keeper;
   if (!isObj(k) || !num(k.x) || !num(k.y) || !num(k.pouch) || !num(k.stun)) return 'нет кипера';
@@ -318,6 +337,10 @@ export function validateState(s: unknown): string | null {
   if (!isObj(w.gates) || !isObj(w.feeders) || !isObj(w.troughs) || !isObj(w.stock) || !isObj(w.barrow) || !isObj(w.hose) || !isObj(w.checks)) return 'нет станций';
   if (!Array.isArray(s.journal) || !Array.isArray(s.alerts) || !Array.isArray(s.reports)) return 'нет журнала';
   if (!isObj(s.bonds)) return 'нет отношений';
+  const c = s.kitten;
+  if (!isObj(c) || !num(c.x) || !num(c.y) || !num(c.heading) || !num(c.fear) || !num(c.energy) || !num(c.rng) || !Array.isArray(c.path) || !isObj(c.wary)) return 'нет котёнка';
+  if (!isObj(c.act) || !KITTEN_ACTS.includes(c.act.kind as KittenActKind) || !num(c.act.until)) return 'котёнок: занятие';
+  if (!(c.path as unknown[]).every((p) => isObj(p) && num(p.x) && num(p.y))) return 'котёнок: путь';
   return null;
 }
 

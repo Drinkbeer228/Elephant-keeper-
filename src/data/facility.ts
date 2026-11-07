@@ -693,3 +693,40 @@ export function hardFloor(x: number, y: number): boolean {
   const s = surfaceAt(x, y);
   return s === 'concrete' || s === 'floor' || s === 'gravel';
 }
+
+// ---------------------------------------------------------------------------
+// Места котёнка: где уютно спать и куда забраться повыше — слону туда не дотянуться.
+// Высокие места (стол, шкаф, сено, дерево): x, y — где сидит наверху, from — откуда запрыгивает.
+// ---------------------------------------------------------------------------
+
+export interface KittenPlace {
+  id: string;
+  x: number;
+  y: number;
+  from: { x: number; y: number };
+  high: boolean;
+  tree?: boolean;
+  nap: number; // насколько уютно спать 0..1
+  sun?: boolean; // днём на солнце
+  text: string; // где: «на тюках сена»
+}
+
+export const KITTEN_PLACES: KittenPlace[] = [
+  { id: 'hay', x: 37.8, y: 38.5, from: { x: 37.8, y: 36.5 }, high: true, nap: 1, text: 'на тюках сена в сеннике' },
+  { id: 'straw', x: 42.2, y: 38.5, from: { x: 42.2, y: 36.5 }, high: true, nap: 0.9, text: 'на соломе в сеннике' },
+  { id: 'desk', x: 4.6, y: 36.9, from: { x: 4.6, y: 35.6 }, high: true, nap: 0.8, text: 'на столе в дежурке' },
+  { id: 'cabinet', x: 34.4, y: 34.6, from: { x: 33.3, y: 34.6 }, high: true, nap: 0.35, text: 'на шкафу в инвентарной' },
+  { id: 'tubRack', x: 21.5, y: 33.6, from: { x: 21.5, y: 34.6 }, high: true, nap: 0.3, text: 'на стеллаже с тазами' },
+  { id: 'browse', x: 45.2, y: 35, from: { x: 44, y: 35 }, high: true, nap: 0.45, text: 'на куче веток' },
+  { id: 'yardE', x: 45, y: 22.4, from: { x: 45, y: 22.4 }, high: false, nap: 0.6, sun: true, text: 'на солнышке во дворе' },
+  { id: 'yardW', x: 3.2, y: 22.6, from: { x: 3.2, y: 22.6 }, high: false, nap: 0.55, sun: true, text: 'на солнышке в западном дворе' },
+  { id: 'dutyCorner', x: 2.8, y: 39.2, from: { x: 2.8, y: 39.2 }, high: false, nap: 0.5, text: 'в углу дежурки' },
+  { id: 'cornerW', x: 10.8, y: 20.8, from: { x: 10.8, y: 20.8 }, high: false, nap: 0.45, text: 'в углу зала на подстилке' },
+  { id: 'cornerE', x: 29.2, y: 20.8, from: { x: 29.2, y: 20.8 }, high: false, nap: 0.45, text: 'в углу зала на подстилке' },
+  { id: 'treeA', x: 19, y: 6.5, from: { x: 19, y: 7.5 }, high: true, tree: true, nap: 0.4, text: 'на дереве' },
+  { id: 'treeB', x: 29, y: 13.5, from: { x: 29, y: 14.4 }, high: true, tree: true, nap: 0.35, text: 'на дереве' },
+  { id: 'treeC', x: 43.5, y: 15.8, from: { x: 43.5, y: 16.6 }, high: true, tree: true, nap: 0.35, text: 'на дереве' },
+];
+
+// Где котёнок живёт с утра первого дня: спит на столе в дежурке
+export const KITTEN_HOME = 'desk';

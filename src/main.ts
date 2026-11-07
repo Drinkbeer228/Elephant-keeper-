@@ -7,6 +7,7 @@ import { Input } from './input';
 import { WorldScene } from './render/WorldScene';
 import {
   actionTarget,
+  kittenDoing,
   availableActions,
   clearLegacy,
   createState,
@@ -284,6 +285,7 @@ function start(): void {
     getState: () => state,
     frame,
     onSelect: (id) => (selected = id),
+    onKitten: () => hud.toast(`Котёнок со станции ${kittenDoing(state)}. Живёт сам по себе — заботиться о нём не нужно.`, 'info'),
     selected: () => selected,
     showNames: () => showNames,
     marker: () => {

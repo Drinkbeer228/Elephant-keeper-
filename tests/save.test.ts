@@ -193,7 +193,7 @@ describe('сохранение и загрузка', () => {
       expect(e.learned.trust).toBe(old.state.elephants[i].learned.trust);
       expect(e.fluid).toBeGreaterThanOrEqual(0);
       expect(e.mem.woke.plan).toBe('none');
-      expect(e.mem.seen).toEqual({ signal: 0, wakePee: 0 });
+      expect(e.mem.seen).toEqual({ signal: 0, wakePee: 0, cat: { startle: 0, shoo: 0, sniff: 0, calm: 0 } });
     });
     expect(s.keeper.held?.kind).toBe('tank');
     expect(s.keeper.held!.load).toBeLessThanOrEqual(20);

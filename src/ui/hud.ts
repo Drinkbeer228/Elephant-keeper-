@@ -14,6 +14,7 @@ import {
   shiftDay,
   signalClarity,
   signalHabitText,
+  catHabitText,
   slotInfo,
   temperature,
   TRAIT_KEYS,
@@ -176,6 +177,8 @@ function observed(e: Elephant): string[] {
   out.push(seen.signal > 0 ? signalHabitText(e.profile) : 'Как она просится, пока не видно — понаблюдай, когда ей что-то нужно.');
   if (seen.wakePee >= 2) out.push('Проснувшись после пары часов сна, вскоре идёт в туалет — держи ведро наготове.');
   else if (seen.wakePee === 1) out.push('Однажды, проснувшись после долгого сна, вскоре пошла в туалет. Привычка или случай — посмотрим.');
+  const cat = catHabitText(e);
+  if (cat) out.push(cat);
   return out;
 }
 
@@ -497,7 +500,7 @@ export class Hud {
     const gap = comfortGap(s, e);
     const mood = moodText(s, e);
     const seen = e.mem.seen;
-    const key = `${e.id}:${seen.signal > 0 ? 1 : 0}:${Math.min(2, seen.wakePee)}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(L.trust * 100)}:${Math.round(L.cooperation * 100)}:${Math.round(L.expectation * 100)}:${Math.round(L.toilet * 100)}:${Math.round(L.familiarity * 100)}:${Object.values(L.cues).map((v) => Math.round(v * 20)).join(',')}:${Math.round(gap * 5)}:${mood}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
+    const key = `${e.id}:${seen.signal > 0 ? 1 : 0}:${Math.min(2, seen.wakePee)}:${catHabitText(e) ?? ''}:${Object.values(n).map((v) => Math.round(v / 4)).join(',')}:${doingText(e)}:${e.signal?.kind}:${Math.round(L.trust * 100)}:${Math.round(L.cooperation * 100)}:${Math.round(L.expectation * 100)}:${Math.round(L.toilet * 100)}:${Math.round(L.familiarity * 100)}:${Object.values(L.cues).map((v) => Math.round(v * 20)).join(',')}:${Math.round(gap * 5)}:${mood}:${[b.back, b.side, b.legs, b.head, b.hay, b.soap, e.wet].map((v) => Math.round(v * 10)).join(',')}`;
     if (key === this.inspectKey) return;
     const first = this.inspectKey === '' || !box.querySelector(`[data-eid="${e.id}"]`);
     this.inspectKey = key;
@@ -644,7 +647,7 @@ export class Hud {
     for (const ev of events) {
       if (ev.kind === 'openJournal') this.openJournal();
       if (!ev.text) continue;
-      if (ev.severity === 'info' && !['refuse', 'report', 'welcome', 'tank', 'lie', 'prepDone', 'tipsy', 'wake'].includes(ev.kind)) continue;
+      if (ev.severity === 'info' && !['refuse', 'report', 'welcome', 'tank', 'lie', 'prepDone', 'tipsy', 'wake', 'catStartle', 'catShoo', 'kitten'].includes(ev.kind)) continue;
       this.toast(ev.text, ev.severity);
     }
   }

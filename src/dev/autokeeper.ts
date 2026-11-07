@@ -876,7 +876,11 @@ export class AutoKeeper {
           return [go(st('cabinet')), act('take:chem'), go(st(id), 0.4), expand(() => this.troughFinishSteps(id))];
         }
         if (t.stage === 'drained' || (t.stage === 'ok' && t.drain)) return [act(`chemTrough:${id}`), expand(() => this.troughFinishSteps(id))];
-        if (t.stage === 'chem') return [act(`scrubTrough:${id}`), expand(() => this.troughFinishSteps(id))];
+        if (t.stage === 'chem') {
+          // Средство нанесли, а набор с ершом отложили (отвлекли на другую работу) — сходить за ним
+          if (h?.kind !== 'chem') return s.world.supplies.chem > 0 ? [go(st('cabinet')), act('take:chem'), go(st(id), 0.4), expand(() => this.troughFinishSteps(id))] : [];
+          return [act(`scrubTrough:${id}`), expand(() => this.troughFinishSteps(id))];
+        }
         if (t.stage === 'scrubbed') return [...(t.drain ? [] : [act(`drainTrough:${id}`)]), act(`rinseTrough:${id}`), expand(() => this.troughFinishSteps(id))];
         if (t.stage === 'rinsed') return [...(t.drain ? [act(`drainTrough:${id}`)] : []), ...(t.valve ? [] : [act(`valve:${id}`)])];
         return [];

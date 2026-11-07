@@ -126,6 +126,8 @@ function interruptible(s: State, e: Elephant, best: Candidate): boolean {
     case 'backUp':
     case 'forward':
     case 'foot':
+    case 'shoo':
+    case 'sniffCat':
       return false;
     case 'stay':
       // Стоит по просьбе: отвлечь может только сильная нужда, если просьбу знает плохо

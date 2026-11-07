@@ -6,6 +6,7 @@ import { updateAlerts } from './alerts';
 import { updateElephants } from './behavior/engine';
 import { urinatingNearKeeper } from './behavior/urine';
 import { drainEvents } from './events';
+import { updateKitten } from './kitten';
 import { moveKeeper, performAction, stepKeeperTask } from './keeper';
 import { rollDay } from './report';
 import { pace } from './time';
@@ -28,6 +29,7 @@ export function step(s: State, input: StepInput = NO_INPUT): SimEvent[] {
   s.simSec += dtSec;
   updateWorld(s, dt, dtSec);
   updateElephants(s, dt, dtSec);
+  updateKitten(s, dt, dtSec);
   if (Math.floor(before * 2) !== Math.floor(s.t * 2)) updateAlerts(s);
   if (s.t >= s.dayStart + TIME.day) rollDay(s);
   return drainEvents();
