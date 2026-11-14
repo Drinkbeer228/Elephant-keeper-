@@ -1,6 +1,10 @@
-// Интерфейс: верхняя строка (время, смена, скорость), карточки стада, действия рядом (строка и
-// панель Q), уведомления, осмотр слона, журнал смены с рационом, меню с настройками, итог смены.
-// Мир остаётся главным — панели компактны.
+// Интерфейс: верхняя строка (время, смена, скорость), карточки стада, подсказка «цель · главное
+// действие» и панель всех действий рядом (Q), уведомления, осмотр слона, журнал смены с рационом,
+// меню с настройками, итог смены. Мир остаётся главным — панели компактны.
+//
+// Подсказка одна и стоит на одном месте: на клавиатуре — внизу по центру, на телефоне — над
+// кнопкой-рукой (под пальцем её не видно). Её разметка создаётся один раз и дальше только
+// обновляется: кнопка не исчезает из-под пальца между касанием и отпусканием.
 
 import {
   bodyDirt,
@@ -30,6 +34,7 @@ import {
   type ActivityKind,
   type DayReport,
   type Elephant,
+  type InteractionTarget,
   type NeedKey,
   type SimEvent,
   type SlotId,
@@ -39,11 +44,15 @@ import { CAPACITY } from '../data/facility';
 import { KEEPER } from '../data/balance';
 import { MEALS, VEG_LABEL, vegPlan, type VegKind } from '../data/rations';
 import { BIND_LABEL, keyName, type BindAction } from '../input';
+import type { FocusView } from './focus';
 import { ICON } from './icons';
 import { portrait } from './portrait';
 
 export interface HudHandlers {
   action: (id: string) => void;
+  peek: () => string | null; // что главное действие сделало бы прямо сейчас (id действия)
+  primary: (armed?: string | null) => void; // главное действие; armed — запомненное кнопкой при касании
+  nextTarget: () => void; // следующая цель
   select: (id: string | null) => void;
   focus: (x: number, y: number) => void;
   speed: (v: number) => void;
@@ -192,8 +201,15 @@ export class Hud {
   private refs: Record<string, HTMLElement> = {};
   private toasts: { el: HTMLElement; until: number }[] = [];
   private cardsKey = '';
-  private bannerKey = '__init__';
-  private panelKey = '';
+  private heldHtml = '';
+  private promptKey = '__init__';
+  private promptSeq = -1;
+  private everFocused = false; // пока игрок ни разу не подошёл к цели, показываем, с чего начать
+  private panelBuilt: { x: number; y: number; at: number } | null = null; // где и когда собран открытый список
+  private panelDirty = false; // из списка выбрали действие — после него собрать заново
+  private panelRows = new Map<string, { row: HTMLElement; label: HTMLElement; reason: HTMLElement }>();
+  private panelDist = new Map<string, HTMLElement>();
+  private panelDown = false; // палец или кнопка мыши на панели — строки не переставляем
   private inspectId: string | null = null;
   private inspectKey = '';
   private journalOpen = false;
@@ -203,13 +219,16 @@ export class Hud {
   private lastSpeed = 1;
   private herdChoice = 3;
   private state: State | null = null;
+  private insetsAt = -1e9;
+  private insetsCache = { top: 0, bottom: 0 };
+  private targets: InteractionTarget[] = [];
+  private focus: FocusView = { target: null, main: null, more: 0, others: 0, pinned: false, seq: 0 };
   actions: ActionOption[] = [];
-  bannerList: ActionOption[] = [];
   panelList: ActionOption[] = [];
 
   constructor(root: HTMLElement, private h: HudHandlers) {
     root.innerHTML = `
-      <header class="top">
+      <header class="top" data-r="top">
         <div class="pill brand"><span class="ico">${ICON.logo}</span><b>ELEPHANT KEEPER</b></div>
         <div class="pill clock" data-r="clock">
           <span class="ico" data-r="dayIcon">${ICON.sun}</span>
@@ -236,7 +255,19 @@ export class Hud {
       <section class="panel" data-r="panel" hidden aria-label="Все действия рядом"></section>
       <footer class="bottom">
         <div class="pill held" data-r="held"></div>
-        <div class="banner" data-r="banner"></div>
+        <div class="prompt none" data-r="prompt">
+          <button class="p-target" data-r="pTarget" title="Следующая цель" aria-label="Следующая цель">
+            <span class="p-name" data-r="pName"></span>
+            <span class="p-next" data-r="pNext">${ICON.swap}<kbd data-r="pNextKey"></kbd></span>
+          </button>
+          <button class="p-main" data-r="pMain">
+            <kbd data-r="pKey"></kbd>
+            <span class="p-text"><span class="p-label" data-r="pLabel"></span><small class="p-reason" data-r="pReason"></small></span>
+          </button>
+          <button class="p-more" data-r="pMore" title="Все действия рядом" aria-label="Все действия рядом"><kbd data-r="pMoreKey"></kbd><span data-r="pMoreText"></span></button>
+          <div class="p-busy"><span class="spin"></span><span data-r="pBusyText"></span></div>
+          <div class="p-idle muted">Подойди к слонихе, станции или вещи</div>
+        </div>
         <div class="zoom">
           <button class="btn icon small" data-r="zoomIn" aria-label="Приблизить">${ICON.plus}</button>
           <button class="btn icon small" data-r="zoomOut" aria-label="Отдалить">${ICON.minus}</button>
@@ -244,7 +275,7 @@ export class Hud {
       </footer>
       <div class="touch" data-r="touch">
         <div class="stick" data-r="stick"><div class="knob" data-r="knob"></div></div>
-        <div class="touch-btns">
+        <div class="touch-btns" data-r="touchBtns">
           <button class="btn round small" data-r="tMore" aria-label="Все действия рядом">${ICON.dots}</button>
           <button class="btn round small" data-r="tDrop" aria-label="Положить вещь">${ICON.drop2}</button>
           <button class="btn round primary" data-r="tAct" aria-label="Главное действие">${ICON.hand}</button>
@@ -267,22 +298,34 @@ export class Hud {
       const card = (e.target as HTMLElement).closest<HTMLElement>('[data-id]');
       if (card) this.h.select(card.dataset.id === this.inspectId ? null : card.dataset.id!);
     });
-    this.refs.banner.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
-      if (b) this.h.action(b.dataset.action!);
-      else if ((e.target as HTMLElement).closest('[data-more]')) this.togglePanel();
-    });
+    // Подсказка и кнопка-рука делают одно и то же: то, что написано в подсказке. Что именно —
+    // запоминается в момент касания: пока палец на кнопке, подсказка может смениться, а выполнено
+    // должно быть то, на что нажимали. Без касания (Enter на кнопке) — то, что показано сейчас
+    for (const b of [this.refs.pMain, this.refs.tAct]) {
+      let armed: { id: string | null; at: number } | null = null;
+      b.addEventListener('pointerdown', () => (armed = { id: this.h.peek(), at: performance.now() }));
+      b.addEventListener('click', () => {
+        const a = armed && performance.now() - armed.at < 1500 ? armed : null;
+        armed = null;
+        if (a) this.h.primary(a.id);
+        else this.h.primary();
+      });
+    }
+    this.refs.pTarget.addEventListener('click', () => this.h.nextTarget());
+    this.refs.pMore.addEventListener('click', () => this.togglePanel());
     this.refs.panel.addEventListener('click', (e) => {
+      this.panelDown = false;
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
       if (b) {
+        if (b.classList.contains('gone')) return;
+        this.panelDirty = true;
         this.h.action(b.dataset.action!);
         if (window.matchMedia('(max-width: 760px)').matches) this.togglePanel(false);
       } else if ((e.target as HTMLElement).closest('[data-close]')) this.togglePanel(false);
     });
-    this.refs.tAct.addEventListener('click', () => {
-      const first = this.actions.find((a) => a.enabled);
-      if (first) this.h.action(first.id);
-    });
+    // Пока палец на панели, строки не переставляем: нажатие должно попасть в то, на что смотрели
+    this.refs.panel.addEventListener('pointerdown', () => (this.panelDown = true));
+    for (const type of ['pointerup', 'pointercancel'] as const) window.addEventListener(type, () => this.panelDown && setTimeout(() => (this.panelDown = false), 120));
     this.refs.tDrop.addEventListener('click', () => {
       const d = this.actions.find((a) => a.ref.verb === 'drop');
       if (d) this.h.action(d.id);
@@ -303,6 +346,40 @@ export class Hud {
     return { base: this.refs.stick, knob: this.refs.knob };
   }
 
+  // Сколько экрана сверху и снизу занято интерфейсом над средней колонкой — там, где стоит кипер.
+  // Камера держит его в свободной части: на телефоне в портрете подсказка и кнопки занимают
+  // нижнюю треть, и у южной стены кипер иначе оказался бы под ними. Под подсказку место
+  // считается всегда, даже когда её нет, — чтобы камера не качалась при каждом её появлении
+  insets(): { top: number; bottom: number } {
+    const now = performance.now();
+    if (now - this.insetsAt < 300) return this.insetsCache;
+    this.insetsAt = now;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const x0 = vw * 0.42;
+    const x1 = vw * 0.58;
+    const over = (el: HTMLElement): DOMRect | null => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.right > x0 && r.left < x1 ? r : null;
+    };
+    let top = 0;
+    let bottom = 0;
+    for (const el of [this.refs.top, this.refs.herd, this.refs.held]) {
+      const r = over(el);
+      if (r) top = Math.max(top, r.bottom);
+    }
+    const touch = document.documentElement.dataset.input === 'touch';
+    for (const el of [this.refs.stick, this.refs.touchBtns, this.refs.prompt]) {
+      const r = over(el);
+      if (!r) continue;
+      const edge = el === this.refs.prompt && touch ? r.bottom - Math.max(r.height, 104) : r.top;
+      bottom = Math.max(bottom, vh - edge);
+    }
+    // Свободной должна остаться хотя бы треть высоты — иначе не сдвигаем вовсе
+    if (vh - top - bottom < vh / 3) top = bottom = 0;
+    return (this.insetsCache = { top, bottom });
+  }
+
   updateSound(muted: boolean): void {
     this.refs.soundBtn.innerHTML = muted ? ICON.mute : ICON.sound;
     this.refs.soundBtn.setAttribute('aria-pressed', String(!muted));
@@ -317,9 +394,11 @@ export class Hud {
   // Кадр
   // -------------------------------------------------------------------------
 
-  render(s: State, actions: ActionOption[], selected: string | null): void {
+  render(s: State, actions: ActionOption[], targets: InteractionTarget[], focus: FocusView, selected: string | null): void {
     this.state = s;
     this.actions = actions;
+    this.targets = targets;
+    this.focus = focus;
     const m = minuteOfDay(s.t);
     const night = m >= 21 * 60 || m < 5.5 * 60;
     this.refs.dayIcon.innerHTML = night ? ICON.moon : ICON.sun;
@@ -331,8 +410,8 @@ export class Hud {
     this.refs.shift.style.width = `${Math.max(0, Math.min(100, progress)).toFixed(1)}%`;
     this.renderHeld(s);
     this.renderCards(s, selected);
-    this.renderBanner(s, actions);
-    if (this.panelOpen) this.renderPanel(s, actions);
+    this.renderPrompt(s, focus);
+    if (this.panelOpen) this.renderPanel();
     if (selected !== this.inspectId) {
       this.inspectId = selected;
       this.inspectKey = '';
@@ -355,13 +434,19 @@ export class Hud {
   private renderHeld(s: State): void {
     const k = s.keeper;
     const b = s.world.barrow;
-    const parts = [`<span class="ico">${ICON.hand}</span>${esc(heldLabel(k.held, s))}`];
+    // Положить вещь — своя клавиша и своя кнопка: показываем её рядом с тем, что в руках
+    const drop = this.actions.find((a) => a.ref.verb === 'drop');
+    const parts = [`<span class="ico">${ICON.hand}</span>${esc(heldLabel(k.held, s))}${drop ? `<span class="keyhint"><kbd>${esc(this.keyFor('drop'))}</kbd>положить</span>` : ''}`];
     // Ведро под струёй — видно, что ловишь
     if (k.held?.kind === 'tank' && s.elephants.some((e) => e.act.kind === 'urinate' && e.act.phase === 'do' && keeperCatching(s, e))) parts.push('<b>ловишь струю</b>');
     if (b.pushed || b.load > 0 || b.cargo.length) parts.push(`тачка ${b.load}/${KEEPER.barrowMax}${b.cargo.length ? ` +${b.cargo.length}` : ''}`);
     parts.push(`лакомства ${k.pouch}`);
     const html = parts.join('<span class="dot">·</span>');
-    if (this.refs.held.innerHTML !== html) this.refs.held.innerHTML = html;
+    if (html !== this.heldHtml) {
+      this.heldHtml = html;
+      this.refs.held.innerHTML = html;
+    }
+    this.refs.tDrop.hidden = !drop;
   }
 
   private renderCards(s: State, selected: string | null): void {
@@ -394,46 +479,66 @@ export class Hud {
     return k ? keyName(k) : '';
   }
 
-  private renderBanner(s: State, actions: ActionOption[]): void {
+  // Подсказка: «цель · главное действие». Разметка постоянная, меняется только текст —
+  // поэтому она не прыгает и не исчезает из-под пальца
+  private renderPrompt(s: State, f: FocusView): void {
+    const p = this.refs.prompt;
     const task = s.keeper.task;
-    const list = actions.filter((a) => a.ref.verb !== 'drop' || actions.length === 1);
-    const drop = actions.find((a) => a.ref.verb === 'drop');
-    const key = task ? `task:${task.label}:${Math.floor((task.elapsed / task.dur) * 10)}` : `${actions.map((a) => `${a.id}:${a.enabled}:${a.label}`).join('|')}:${this.keyFor('action')}`;
-    if (key === this.bannerKey) return;
-    this.bannerKey = key;
-    const b = this.refs.banner;
-    if (task) {
-      b.className = 'banner busy';
-      b.innerHTML = `<span class="spin"></span><span>${esc(task.label)}…</span>`;
-      this.bannerList = [];
-      return;
+    const t = f.target;
+    const main = f.main;
+    if (t && main) this.everFocused = true;
+    const mode = task ? 'busy' : t && main ? 'focus' : this.everFocused || s.keeper.prep ? 'none' : 'idle';
+    const key =
+      mode === 'busy'
+        ? `busy|${task!.label}`
+        : mode === 'focus'
+          ? [t!.key, t!.label, main!.id, main!.label, main!.enabled, main!.reason, f.more, f.others, f.pinned, this.keyFor('action'), this.keyFor('target'), this.keyFor('panel')].join('|')
+          : mode;
+    this.refs.tAct.classList.toggle('idle', mode !== 'focus');
+    if (key !== this.promptKey) {
+      this.promptKey = key;
+      p.className = `prompt ${mode}${mode === 'focus' && f.pinned ? ' pinned' : ''}${mode === 'focus' && !main!.enabled ? ' off' : ''}`;
+      if (mode === 'busy') this.refs.pBusyText.textContent = `${task!.label}…`;
+      if (mode === 'focus') {
+        this.refs.pName.textContent = t!.label;
+        this.refs.pNext.hidden = f.others <= 0;
+        this.refs.pNextKey.textContent = this.keyFor('target');
+        this.refs.pTarget.title = f.others > 0 ? `Следующая цель (рядом ещё ${f.others})` : t!.label;
+        this.refs.pKey.textContent = this.keyFor('action');
+        this.refs.pLabel.textContent = promptLabel(main!.label, t!.label);
+        this.refs.pReason.textContent = main!.enabled ? '' : main!.reason;
+        this.refs.pMain.title = main!.enabled ? main!.label : `${main!.label} — ${main!.reason}`;
+        this.refs.pMain.setAttribute('aria-label', `${t!.label}: ${main!.label}${main!.enabled ? '' : `. ${main!.reason}`}`);
+        this.refs.pMain.setAttribute('aria-disabled', String(!main!.enabled));
+        this.refs.pMoreKey.textContent = this.keyFor('panel');
+        this.refs.pMoreText.textContent = f.more > 0 ? `ещё ${f.more}` : 'все';
+        this.refs.pMore.hidden = f.more <= 0 && f.others <= 0;
+      }
     }
-    if (!list.length && !drop) {
-      b.className = 'banner idle';
-      b.innerHTML = `<span class="muted">Подойди к слону, станции или вещи</span>`;
-      this.bannerList = [];
-      return;
+    // Цель сменилась — подсказка коротко «появляется», чтобы смену было видно
+    if (mode === 'focus' && f.seq !== this.promptSeq) {
+      this.promptSeq = f.seq;
+      p.classList.remove('pop');
+      void p.offsetWidth;
+      p.classList.add('pop');
     }
-    const main = list[0] ?? drop!;
-    const rest = list.slice(1, 6);
-    this.bannerList = [main, ...rest];
-    const more = list.length + (drop && main !== drop ? 1 : 0) - this.bannerList.length;
-    b.className = 'banner';
-    b.innerHTML = `
-      <button class="act main ${main.enabled ? '' : 'off'}" data-action="${main.id}" title="${esc(main.reason)}">
-        <kbd>${esc(this.keyFor('action'))}</kbd><span>${esc(main.label)}</span>${main.enabled ? '' : `<small>${esc(main.reason)}</small>`}
-      </button>
-      ${rest
-        .map((a, i) => `<button class="act ${a.enabled ? '' : 'off'}" data-action="${a.id}" title="${esc(a.reason)}"><kbd>${i + 2}</kbd><span>${esc(a.label)}</span></button>`)
-        .join('')}
-      ${drop && main !== drop ? `<button class="act ghost" data-action="${drop.id}"><kbd>${esc(this.keyFor('drop'))}</kbd><span>${esc(drop.label)}</span></button>` : ''}
-      ${more > 0 ? `<button class="act ghost more" data-more><kbd>${esc(this.keyFor('panel'))}</kbd><span>все действия (${list.length + (drop ? 1 : 0)})</span></button>` : ''}`;
   }
 
-  // Действия по клавишам: главное, 2…6 — остальные в строке; в открытой панели — по номерам панели
+  // Нажатие не сработало, потому что подсказка только что сменилась: коротко привлечь к ней взгляд
+  nudge(): void {
+    const p = this.refs.prompt;
+    p.classList.remove('pop');
+    void p.offsetWidth;
+    p.classList.add('pop');
+  }
+
+  // Быстрый выбор по цифрам — только в открытой панели: там видно, какая цифра что значит
   actionForKey(index: number): ActionOption | undefined {
-    if (this.panelOpen) return this.panelList[index];
-    return this.bannerList[index];
+    if (!this.panelOpen) return undefined;
+    const o = this.panelList[index];
+    if (!o || this.panelRows.get(o.id)?.row.classList.contains('gone')) return undefined;
+    this.panelDirty = true;
+    return o;
   }
 
   // -------------------------------------------------------------------------
@@ -443,43 +548,118 @@ export class Hud {
   togglePanel(force?: boolean): void {
     this.panelOpen = force ?? !this.panelOpen;
     this.refs.panel.hidden = !this.panelOpen;
-    this.panelKey = '';
-    if (this.panelOpen && this.state) this.renderPanel(this.state, this.actions);
+    this.panelBuilt = null;
+    this.panelDown = false;
+    if (this.panelOpen) this.renderPanel();
   }
 
-  private renderPanel(s: State, actions: ActionOption[]): void {
-    const key = `${actions.map((a) => `${a.id}:${a.enabled}:${a.label}:${a.reason}`).join('|')}:${s.keeper.task ? 1 : 0}`;
-    if (key === this.panelKey) return;
-    this.panelKey = key;
-    // Группы по цели: ближние — выше; внутри группы — по важности
-    const groups = new Map<string, ActionOption[]>();
-    for (const a of actions) {
-      const g = a.group || 'Рядом';
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g)!.push(a);
+  private panelRow(o: ActionOption, n: number): string {
+    const num = n <= 9 ? `<kbd>${n}</kbd>` : '<kbd class="blank"></kbd>';
+    return `<button class="prow" data-action="${esc(o.id)}">${num}<span><b data-l></b><small data-why></small></span>${o.timed ? `<i class="timed" title="займёт время">${ICON.clock}</i>` : ''}</button>`;
+  }
+
+  private panelRegister(root: HTMLElement): void {
+    for (const row of root.querySelectorAll<HTMLElement>('.prow')) {
+      if (!this.panelRows.has(row.dataset.action!)) this.panelRows.set(row.dataset.action!, { row, label: row.querySelector<HTMLElement>('[data-l]')!, reason: row.querySelector<HTMLElement>('[data-why]')! });
     }
-    const ordered = [...groups.entries()].sort((a, b) => Math.min(...a[1].map((x) => x.dist)) - Math.min(...b[1].map((x) => x.dist)) || Math.max(...b[1].map((x) => x.priority)) - Math.max(...a[1].map((x) => x.priority)));
-    this.panelList = [];
-    let n = 0;
-    const html = ordered
-      .map(([g, list]) => {
-        const rows = list
-          .sort((a, b) => Number(b.enabled) - Number(a.enabled) || b.priority - a.priority)
-          .map((a) => {
-            this.panelList.push(a);
-            n++;
-            const num = n <= 9 ? `<kbd>${n}</kbd>` : '<kbd class="blank"></kbd>';
-            return `<button class="prow ${a.enabled ? '' : 'off'}" data-action="${a.id}">${num}<span>${esc(a.label)}${a.enabled ? '' : `<small>${esc(a.reason)}</small>`}</span>${a.timed ? `<i class="timed" title="займёт время">${ICON.clock}</i>` : ''}</button>`;
-          })
-          .join('');
-        const d = Math.min(...list.map((x) => x.dist));
-        return `<div class="pgroup"><h4>${esc(g)}<small>${d > 0.2 ? `${d.toFixed(1)} м` : ''}</small></h4>${rows}</div>`;
-      })
-      .join('');
-    this.refs.panel.innerHTML = `
-      <div class="panel-head"><h3>Что можно сделать здесь</h3><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
-      <div class="panel-body">${html || '<p class="muted">Рядом ничего нет — подойди к слонихе, станции или вещи.</p>'}</div>
-      <p class="panel-hint">Действия зависят от того, что в руках, где ты стоишь, кто рядом и в каком они настроении. Цифры — быстрый выбор.</p>`;
+  }
+
+  // Список всего, что можно сделать рядом, по целям. Это меню, а не лента: пока оно открыто и
+  // кипер стоит, строки не двигаются — их читают и в них целятся пальцем. Строки стоят в
+  // постоянном порядке (уход, затем просьбы — как они собраны); что стало недоступным, сереет
+  // на своём месте; что появилось, дописывается в конец. Заново список собирается, когда его
+  // открывают, когда кипер отошёл и после выбранного из него действия
+  private renderPanel(): void {
+    const s = this.state;
+    if (!s) return;
+    // Пока идёт работа, список не трогаем
+    if (s.keeper.task && this.panelBuilt) return;
+    const f = this.focus;
+    const k = s.keeper;
+    const now = performance.now();
+    const drop = this.actions.find((a) => a.ref.verb === 'drop');
+    const groups = this.targets.map((t) => ({ key: t.key, label: t.label, gap: t.gap, options: t.options.slice().sort((x, y) => x.order - y.order) }));
+    if (drop) groups.push({ key: 'hands', label: drop.group || 'В руках', gap: 0, options: [drop] });
+    const built = this.panelBuilt;
+    const stale = !built || this.panelDirty || (Math.hypot(k.x - built.x, k.y - built.y) > 0.5 && now - built.at > 300);
+    if (stale && !this.panelDown) {
+      this.panelBuilt = { x: k.x, y: k.y, at: now };
+      this.panelDirty = false;
+      // Цель — первой; остальные — как их расставила симуляция: ближе к намерению — выше
+      const fk = f.target?.key;
+      const ordered = [...groups.filter((g) => g.key === fk), ...groups.filter((g) => g.key !== fk)];
+      this.panelList = [];
+      const html = ordered
+        .map((g) => {
+          const rows = g.options
+            .map((o) => {
+              this.panelList.push(o);
+              return this.panelRow(o, this.panelList.length);
+            })
+            .join('');
+          return `<div class="pgroup${g.key === fk ? ' focus' : ''}" data-g="${esc(g.key)}"><h4><span>${esc(g.label)}${g.key === fk ? '<em>цель</em>' : ''}</span><small data-d></small></h4>${rows}</div>`;
+        })
+        .join('');
+      this.refs.panel.innerHTML = `
+        <div class="panel-head"><h3>Что можно сделать здесь</h3><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
+        <div class="panel-body">${html || '<p class="muted" data-empty>Рядом ничего нет — подойди к слонихе, станции или вещи.</p>'}</div>
+        <p class="panel-hint">Действия зависят от того, что в руках, где ты стоишь, кто рядом и в каком они настроении. <span class="keys-only">Цифры — быстрый выбор.</span></p>`;
+      this.panelRows.clear();
+      this.panelDist.clear();
+      this.panelRegister(this.refs.panel);
+      for (const g of this.refs.panel.querySelectorAll<HTMLElement>('.pgroup')) this.panelDist.set(g.dataset.g!, g.querySelector<HTMLElement>('[data-d]')!);
+    }
+    // На месте: подписи, доступность, главное действие, расстояния
+    const live = new Set<string>();
+    const fresh: ActionOption[] = [];
+    for (const g of groups) {
+      const d = this.panelDist.get(g.key);
+      const dist = g.gap > 0.2 ? `${g.gap.toFixed(1)} м` : '';
+      if (d && d.textContent !== dist) d.textContent = dist;
+      for (const o of g.options) {
+        live.add(o.id);
+        const r = this.panelRows.get(o.id);
+        if (!r) {
+          fresh.push(o);
+          continue;
+        }
+        if (r.label.textContent !== o.label) r.label.textContent = o.label;
+        const why = o.enabled ? '' : o.reason;
+        if (r.reason.textContent !== why) r.reason.textContent = why;
+        r.row.classList.toggle('off', !o.enabled);
+        r.row.classList.toggle('main', o.id === f.main?.id);
+        r.row.classList.remove('gone');
+      }
+    }
+    // Действия уже нет, а строка на месте: серая, ничего не делает
+    for (const [id, r] of this.panelRows) {
+      if (live.has(id) || r.row.classList.contains('gone')) continue;
+      r.row.classList.add('off', 'gone');
+      r.row.classList.remove('main');
+      r.reason.textContent = 'сейчас недоступно';
+    }
+    // Появилось новое — дописываем в конец: строки выше не сдвигаются
+    if (fresh.length && !this.panelDown) {
+      const body = this.refs.panel.querySelector<HTMLElement>('.panel-body')!;
+      body.querySelector('[data-empty]')?.remove();
+      let extra = body.querySelector<HTMLElement>('[data-extra]');
+      if (!extra) {
+        extra = el('div', 'pgroup', '<h4><span>Появилось рядом</span></h4>');
+        extra.dataset.extra = '';
+        body.appendChild(extra);
+      }
+      for (const o of fresh) {
+        this.panelList.push(o);
+        extra.insertAdjacentHTML('beforeend', this.panelRow(o, this.panelList.length));
+      }
+      this.panelRegister(extra);
+      for (const o of fresh) {
+        const r = this.panelRows.get(o.id)!;
+        r.label.textContent = o.label;
+        r.reason.textContent = o.enabled ? '' : o.reason;
+        r.row.classList.toggle('off', !o.enabled);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -684,11 +864,14 @@ export class Hud {
   private helpHtml(): string {
     const k = (a: BindAction) => `<kbd>${esc(this.keyFor(a))}</kbd>`;
     return `<div class="help">
-        <div>${k('up')}${k('left')}${k('down')}${k('right')} / стрелки — идти, ${k('run')} — бежать (пугает нервных)</div>
-        <div>${k('action')} — главное действие, <kbd>2</kbd>…<kbd>6</kbd> — другие, ${k('panel')} — все действия рядом, ${k('drop')} — положить</div>
+        <div class="keys-only">${k('up')}${k('left')}${k('down')}${k('right')} / стрелки — идти, ${k('run')} — бежать (пугает нервных)</div>
+        <div class="keys-only">${k('action')} — главное действие: оно написано в подсказке внизу и относится к цели — к тому, к чему стоишь лицом и ближе всего. Пока стоишь, цель не меняется</div>
+        <div class="keys-only">${k('target')} или клик по объекту — выбрать другую цель · ${k('panel')} — все действия рядом (цифры — выбор) · ${k('drop')} — положить вещь</div>
+        <div class="touch-only">Телефон держат вертикально. Стик слева — идти (за край — бегом). Над кнопкой-рукой написано, что она сделает и с кем</div>
+        <div class="touch-only">Цель — то, к чему стоишь лицом и ближе всего. Другую выбирают касанием её названия или самого объекта; «⋯» — все действия рядом</div>
         <div>Рядом со слонихой — голосом: окликнуть по имени, «иди сюда», «подвинься», «стоять», «пошли», «ложись», «давай», «молодец». Подходи так, чтобы видела; спящую сначала окликни</div>
-        <div>Клик по слону — осмотр · ${k('journal')} — журнал и рацион · ${k('speed')} — скорость · ${k('overview')} — карта</div>
-        <div class="muted">На телефоне: стик, кнопка руки — главное действие, «⋯» — все действия.</div>
+        <div class="keys-only">Клик по слону — осмотр · ${k('journal')} — журнал и рацион · ${k('speed')} — скорость · ${k('overview')} — карта</div>
+        <div class="touch-only">Касание слона или её карточки — осмотр · два пальца — масштаб · вверху — время, журнал и меню</div>
       </div>`;
   }
 
@@ -736,7 +919,7 @@ export class Hud {
     this.h.setPaused(true);
     const slots: SlotId[] = ['auto', 'slot-1', 'slot-2', 'slot-3'];
     const binds = this.h.binds();
-    const order: BindAction[] = ['action', 'panel', 'drop', 'up', 'down', 'left', 'right', 'run', 'inspect', 'journal', 'pause', 'speed', 'overview', 'recenter', 'zoomIn', 'zoomOut', 'names', 'mute'];
+    const order: BindAction[] = ['action', 'target', 'panel', 'drop', 'up', 'down', 'left', 'right', 'run', 'inspect', 'journal', 'pause', 'speed', 'overview', 'recenter', 'zoomIn', 'zoomOut', 'names', 'mute'];
     const m = this.showModal(
       'menu',
       `<div class="drawer-head"><h2>Пауза</h2><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
@@ -755,12 +938,14 @@ export class Hud {
       <h3>Управление</h3>
       <div class="touch-help small-p">
         <div><b>Стик</b> — идти; если тянуть за край — бежать (нервных это пугает).</div>
-        <div><b>Рука</b> — главное действие, <b>⋯</b> — все действия рядом, <b>стрелка вниз</b> — положить вещь.</div>
+        <div><b>Рука</b> — главное действие: над ней написано, что именно она сделает и с кем. Нажать можно и на саму подсказку.</div>
+        <div><b>Цель</b> — то, к чему стоишь лицом и ближе всего; пока стоишь, она не меняется. Другую выбирают касанием названия цели или самого объекта.</div>
+        <div><b>⋯</b> — все действия рядом, <b>стрелка вниз</b> — положить вещь (появляется, когда что-то в руках).</div>
         <div><b>Касание слона</b> или карточки — осмотр. <b>Два пальца</b> — приблизить или отдалить.</div>
         <div>Вверху — время, скорость, журнал и это меню. <b>Нарезка овощей</b>: левая половина экрана — взять и бросить, правая — нож.</div>
       </div>
       <div class="key-help">
-        <p class="muted small-p">Действия зависят от того, что в руках, у чего стоишь и в каком состоянии слоны. ${esc(this.keyFor('panel'))} — список всего, что можно сделать рядом. Нажми «Изменить», затем нужную клавишу (Esc — отмена).</p>
+        <p class="muted small-p">Подсказка внизу показывает цель и главное действие: цель — то, к чему стоишь лицом и ближе всего; пока стоишь, она не меняется. ${esc(this.keyFor('target'))} или клик по объекту — выбрать другую цель, ${esc(this.keyFor('panel'))} — список всего, что можно сделать рядом. Нажми «Изменить», затем нужную клавишу (Esc — отмена).</p>
         <ul class="binds">${order
           .map((a) => `<li><span>${esc(BIND_LABEL[a])}</span><span class="keys">${binds[a].map((c) => `<kbd>${esc(keyName(c))}</kbd>`).join(' ') || '<span class="muted">—</span>'}</span><button class="btn small" data-bind="${a}">Изменить</button></li>`)
           .join('')}</ul>
@@ -868,6 +1053,12 @@ function plural(n: number, one: string, few: string, many: string): string {
   if (a === 1 && b !== 11) return one;
   if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return few;
   return many;
+}
+
+// Название цели уже стоит рядом — в подписи действия его не повторяем («Открыть: ворота на выгул»)
+function promptLabel(label: string, target: string): string {
+  const tail = `: ${target.toLowerCase()}`;
+  return label.toLowerCase().endsWith(tail) ? label.slice(0, label.length - tail.length) : label;
 }
 
 export type { Elephant };

@@ -15,14 +15,26 @@ import { WorldView } from './WorldView';
 
 const P = PPM;
 
+// Что подсветить как цель подсказки: слониху — кольцом вокруг неё, станцию или ворота — рамкой,
+// вещь или место работы — кружком
+export interface FocusMark {
+  x: number;
+  y: number;
+  rect: { x0: number; y0: number; x1: number; y1: number } | null;
+  elephantId: string | null;
+  enabled: boolean; // главное действие сейчас доступно
+}
+
 export interface SceneHooks {
   getState: () => State;
   frame: (dt: number) => SimEvent[];
   onSelect: (elephantId: string | null) => void;
   onKitten: () => void;
+  onTap: (x: number, y: number, elephantId: string | null) => void; // клик или касание в мире, метры
   selected: () => string | null;
   showNames: () => boolean;
-  marker: () => { x: number; y: number } | null;
+  marker: () => FocusMark | null;
+  insets: () => { top: number; bottom: number }; // сколько экрана сверху и снизу занято интерфейсом, CSS-пиксели
   dpr: number;
 }
 
@@ -138,6 +150,7 @@ export class WorldScene extends Phaser.Scene {
     // Котёнок маленький: попасть по нему — значит спросить, чем он занят
     if (Math.hypot(s.kitten.x - wx, s.kitten.y - wy) < 0.6) {
       this.hooks.onKitten();
+      this.hooks.onTap(wx, wy, null);
       return;
     }
     let best: string | null = null;
@@ -150,6 +163,8 @@ export class WorldScene extends Phaser.Scene {
       }
     }
     if (best) this.hooks.onSelect(best);
+    // Тот же клик выбирает объект целью подсказки
+    this.hooks.onTap(wx, wy, best);
   }
 
   private onPinch(): void {
@@ -193,10 +208,15 @@ export class WorldScene extends Phaser.Scene {
     const t = time / 1000;
     const sel = this.hooks.selected();
     const names = this.hooks.showNames();
+    const mk = this.hooks.marker();
+    // Линия подсветки не тоньше 2.6 пикселя экрана при любом масштабе — её видно и на телефоне
+    const line = Math.max(0.07 * P, (2.6 * this.hooks.dpr) / Math.max(0.01, this.zoomLevel));
     for (const e of s.elephants) {
       const v = this.elephants.get(e.id);
       if (!v) continue;
       v.selected = sel === e.id;
+      v.focus = mk && mk.elephantId === e.id ? (mk.enabled ? 1 : 0.5) : 0;
+      v.focusLine = line;
       v.update(e, s, t, dt, names);
     }
     this.keeper.update(s, dt);
@@ -204,18 +224,35 @@ export class WorldScene extends Phaser.Scene {
     const cam = this.cameras.main;
     this.world.update(s, t, dt);
     this.fx.update(dt);
-    // Кольцо на цели главного действия: видно, что сделает E
-    const mk = this.hooks.marker();
-    this.markerG.clear();
-    if (mk) {
+    // Подсветка цели подсказки: видно, к чему относится главное действие. Слониху подсвечивает
+    // её собственный вид (кольцо вокруг корпуса), здесь — станции, ворота, вещи и место работы.
+    // Светлая подложка под зелёной линией — чтобы читалось на любом полу
+    const g = this.markerG;
+    g.clear();
+    if (mk && !mk.elephantId) {
       const pulse = 0.5 + 0.5 * Math.sin(t * 5);
-      this.markerG.lineStyle(0.07 * P, 0x2e5a44, 0.55 + 0.35 * pulse);
-      this.markerG.strokeCircle(mk.x * P, mk.y * P, (0.42 + 0.08 * pulse) * P);
+      const k = mk.enabled ? 1 : 0.5;
+      const stroke = (width: number, color: number, alpha: number) => {
+        g.lineStyle(width, color, alpha);
+        const r = mk.rect;
+        if (r) {
+          const pad = 0.12 + 0.05 * pulse;
+          g.strokeRoundedRect((r.x0 - pad) * P, (r.y0 - pad) * P, (r.x1 - r.x0 + pad * 2) * P, (r.y1 - r.y0 + pad * 2) * P, 0.16 * P);
+        } else g.strokeCircle(mk.x * P, mk.y * P, (0.46 + 0.07 * pulse) * P);
+      };
+      stroke(line * 2.2, 0xf4f1ea, 0.8 * k);
+      stroke(line, 0x2e5a44, (0.7 + 0.3 * pulse) * k);
     }
     // Плавный зум
     const want = this.overview ? this.fitZoom() : this.baseZoom() * this.targetZoom;
     this.zoomLevel += (want - this.zoomLevel) * Math.min(1, dt * 7);
     cam.setZoom(this.zoomLevel);
+    // Кипер — в середине свободной от интерфейса части экрана, а не всего экрана; у края карты
+    // камера может уйти за него ровно настолько, сколько закрыто интерфейсом
+    const ins = this.hooks.insets();
+    const perCss = this.hooks.dpr / Math.max(0.01, this.zoomLevel); // пикселей мира в одном CSS-пикселе
+    cam.setFollowOffset(0, -((ins.bottom - ins.top) / 2) * perCss);
+    cam.setBounds(-3 * P, -3 * P - ins.top * perCss, (W + 6) * P, (H + 6) * P + (ins.top + ins.bottom) * perCss);
     // Подписи — читаемого размера при любом зуме
     setLabelZoom(this.zoomLevel / this.baseZoom());
     const ls = SIGN_SCALE * labelScale();

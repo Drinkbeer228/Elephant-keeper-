@@ -1,8 +1,26 @@
 // Клавиатура и экранный стик сводятся в вектор движения и очередь команд.
 // Раскладка настраивается в меню паузы и хранится в браузере игрока.
+// Здесь же — чем игрок сейчас играет: клавишами или пальцами. От этого зависит, что показывать:
+// подписи клавиш или стик и кнопки. Узнаём не по размеру экрана и не по одному медиазапросу
+// (у телефона со стилусом «основной указатель» — точный), а по тому, чем игрок на самом деле
+// нажимает: коснулся пальцем — касания, нажал клавишу — клавиши.
+
+export type InputMode = 'keys' | 'touch';
+
+function initialMode(): InputMode {
+  try {
+    if (window.matchMedia('(pointer: coarse)').matches) return 'touch';
+    // Сенсорный экран без мыши и трекпада (например, телефон со стилусом)
+    if (navigator.maxTouchPoints > 0 && !window.matchMedia('(any-pointer: fine)').matches) return 'touch';
+  } catch {
+    // старый браузер без этих запросов — считаем, что клавиатура
+  }
+  return 'keys';
+}
 
 export type BindAction =
   | 'action'
+  | 'target'
   | 'panel'
   | 'drop'
   | 'inspect'
@@ -23,6 +41,7 @@ export type BindAction =
 
 export type Press =
   | { kind: 'action' }
+  | { kind: 'target' }
   | { kind: 'choice'; index: number }
   | { kind: 'panel' }
   | { kind: 'drop' }
@@ -39,6 +58,7 @@ export type Press =
 
 export const BIND_LABEL: Record<BindAction, string> = {
   action: 'Главное действие',
+  target: 'Следующая цель',
   panel: 'Все действия рядом',
   drop: 'Положить вещь',
   inspect: 'Осмотр ближайшего слона',
@@ -60,6 +80,7 @@ export const BIND_LABEL: Record<BindAction, string> = {
 
 export const DEFAULT_BINDS: Record<BindAction, string[]> = {
   action: ['KeyE', 'Space', 'Enter'],
+  target: ['KeyF'],
   panel: ['KeyQ'],
   drop: ['KeyG'],
   inspect: ['KeyI'],
@@ -115,12 +136,28 @@ export class Input {
   private capture: ((code: string) => void) | null = null;
   // Вызывается прямо в обработчике нажатия: браузер разрешает звук только в нём
   onGesture: () => void = () => undefined;
+  mode: InputMode = 'keys';
+
+  private setMode(m: InputMode): void {
+    this.mode = m;
+    document.documentElement.dataset.input = m;
+  }
 
   constructor() {
+    this.setMode(initialMode());
+    // Палец на экране — показываем стик и кнопки, даже если браузер считает устройство «с мышью»
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType === 'touch' && this.mode !== 'touch') this.setMode('touch');
+      },
+      { capture: true, passive: true },
+    );
     window.addEventListener('keydown', (e) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       this.onGesture();
+      if (this.mode !== 'keys' && !e.ctrlKey && !e.metaKey && !e.altKey) this.setMode('keys');
       if (this.capture) {
         e.preventDefault();
         const cb = this.capture;
@@ -139,6 +176,7 @@ export class Input {
         return;
       }
       if (is('action')) this.queue.push({ kind: 'action' });
+      else if (is('target')) this.queue.push({ kind: 'target' });
       else if (is('panel')) this.queue.push({ kind: 'panel' });
       else if (is('drop')) this.queue.push({ kind: 'drop' });
       else if (is('inspect')) this.queue.push({ kind: 'inspect' });

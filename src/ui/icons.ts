@@ -31,6 +31,7 @@ export const ICON = {
   minus: wrap('<path d="M5 12h14"/>'),
   dots: wrap('<circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/>'),
   clock: wrap('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 2"/>'),
+  swap: wrap('<path d="M4 8h14M15 5l3 3-3 3"/><path d="M20 16H6M9 13l-3 3 3 3"/>'),
   knife: wrap('<path d="M4 20L15 9l2 2-9 9z"/><path d="M15 9l3-3a2 2 0 0 1 2.8 2.8L18 11.6"/>'),
 };
 

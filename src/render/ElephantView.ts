@@ -63,6 +63,7 @@ export class ElephantView {
   readonly name: Phaser.GameObjects.Image;
   private bubble: Phaser.GameObjects.Image;
   private ring: Phaser.GameObjects.Graphics;
+  private focusRing: Phaser.GameObjects.Graphics;
   private geom: ReturnType<typeof bodyGeom>;
   private walkPhase = 0;
   private lastX = 0;
@@ -75,6 +76,8 @@ export class ElephantView {
   private seed: number;
   private skin: string;
   selected = false;
+  focus = 0; // она — цель подсказки: 1 — действие доступно, 0.5 — сейчас нельзя, 0 — не цель
+  focusLine = 0.07 * P; // толщина линии подсветки (сцена подбирает под масштаб)
 
   constructor(scene: Phaser.Scene, e: Elephant) {
     const id = e.id;
@@ -86,6 +89,7 @@ export class ElephantView {
       return scene.add.image(0, 0, key).setOrigin(o.ox, o.oy).setScale(ART_SCALE);
     };
     this.ring = scene.add.graphics().setDepth(D.shadow - 1);
+    this.focusRing = scene.add.graphics().setDepth(D.shadow - 1);
     this.shadow = img(`el-shadow-${id}`).setDepth(D.shadow);
     this.ripple = scene.add.graphics();
     this.feet = scene.add.graphics();
@@ -416,6 +420,22 @@ export class ElephantView {
       this.ring.strokeEllipse(e.x * P, e.y * P, (this.geom.a * 2 + 1.1) * P, (this.geom.a * 2 + 1.1) * P * 0.62);
       this.ring.setRotation(0);
     }
+    // Цель подсказки: кольцо по контуру слонихи, от хвоста до головы, повёрнутое вместе с ней
+    this.focusRing.clear();
+    if (this.focus > 0) {
+      const G = this.geom;
+      const pulse = 0.5 + 0.5 * Math.sin(time * 5);
+      const front = G.headX + G.headR + 0.45;
+      const back = G.tailX - 0.2;
+      const w = (front - back + 0.1 * pulse) * P;
+      const h = (Math.max(G.b, G.headR * 1.5) * 2 + 0.7 + 0.1 * pulse) * P;
+      const cx = ((front + back) / 2) * P;
+      this.focusRing.setPosition(e.x * P, e.y * P).setRotation(this.heading);
+      this.focusRing.lineStyle(this.focusLine * 2.2, hex(C.paper), 0.8 * this.focus);
+      this.focusRing.strokeEllipse(cx, 0, w, h);
+      this.focusRing.lineStyle(this.focusLine, hex(C.sage), (0.7 + 0.3 * pulse) * this.focus);
+      this.focusRing.strokeEllipse(cx, 0, w, h);
+    }
   }
 
   private drawFeet(e: Elephant, walking: boolean): void {
@@ -610,6 +630,7 @@ export class ElephantView {
     this.name.destroy();
     this.bubble.destroy();
     this.ring.destroy();
+    this.focusRing.destroy();
   }
 }
 

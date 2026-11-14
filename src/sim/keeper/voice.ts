@@ -141,15 +141,17 @@ export function voiceOptions(c: KCtx, out: ActionOption[]): void {
       const catching = h?.kind === 'tank' && keeperCatching(s, e);
       const label = catching ? `«${name}, давай» — в ведро` : `«${name}, давай» — в туалет`;
       const ready = catching || dist(e, TOILET_STANCE) < 4;
+      // Главным «давай» становится, только когда к месту: ведро под ней, она у стока или сама просится
       if (e.needs.bladder < 20) out.push(off(ref('toilet'), label, 'Ей сейчас не нужно', 8, x));
-      else out.push(opt(ref('toilet'), label, (ready ? 120 : 30) + (sig === 'toilet' ? 50 : 0), x));
+      else out.push(opt(ref('toilet'), label, (ready ? 120 : 20) + (sig === 'toilet' ? 50 : 0), x));
     }
     if (d <= 6) {
       const bad = misbehaving(s, e);
       out.push(opt(ref('no'), bad ? `«Нельзя, ${name}!» — ${bad}` : `«Нельзя, ${name}!»`, bad ? 115 : 4, x));
       out.push(opt(ref('praise'), `«Молодец, ${name}!»`, rewardOpen(s, e) ? 100 : 10, x));
     }
-    if (d <= 5) out.push(opt(ref('talk'), `Поговорить с ${nameCase(name, 'ins')} спокойно`, 22 + (e.mem.tension > 0.3 ? 60 : 0) + (e.needs.stress > 40 ? 25 : 0), { ...x, timed: true }));
+    // Рядом с ней, когда других причин нет, главное — заговорить: так она подпускает ближе
+    if (d <= 5) out.push(opt(ref('talk'), `Поговорить с ${nameCase(name, 'ins')} спокойно`, 22 + (gap <= 2.2 ? 10 : 0) + (e.mem.tension > 0.3 ? 60 : 0) + (e.needs.stress > 40 ? 25 : 0), { ...x, timed: true }));
   }
 }
 

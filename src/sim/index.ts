@@ -3,6 +3,7 @@
 export { createState, SAVE_VERSION, type NewGameOptions } from './state';
 export { step, runMinutes, NO_INPUT } from './step';
 export { availableActions, actionTarget, heldLabel, areaEmpty, keeperArea, nearGate, hoseUsable, nextVeg } from './keeper';
+export { interactionTargets, targetScore } from './keeper/targets';
 export { comfortGap, invited, irritable } from './behavior/contact';
 export { keeperCatching, urinatingNearKeeper } from './behavior/urine';
 export { kittenDoing } from './kitten';

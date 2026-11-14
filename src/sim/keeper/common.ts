@@ -51,6 +51,8 @@ export function opt(ref: ActionRef, label: string, priority: number, extra: Part
     timed: false,
     group: '',
     dist: 0,
+    order: 0,
+    at: null,
     ...extra,
   };
 }
