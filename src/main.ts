@@ -26,8 +26,17 @@ import { FocusTracker } from './ui/focus';
 import { Hud } from './ui/hud';
 import { PrepView } from './ui/prep';
 import './ui/styles.css';
+import { scenarioById, ScenarioRun } from './station/scenarios';
+import { connectStation, EMBEDDED, markScenario, postTitle, requestClose } from './station/link';
+import { TaskBanner } from './station/banner';
 
 const params = new URLSearchParams(location.search);
+// Задание стажировки по ссылке `?scenario=<id>`: свежая смена-песочница, которая не трогает автосохранение карьеры.
+const scenario = scenarioById(params.get('scenario'));
+const run = scenario ? new ScenarioRun(scenario) : null;
+function autosave(): void {
+  if (!run) saveSlot(state, 'auto');
+}
 const seedParam = Number(params.get('seed'));
 const herdParam = Number(params.get('herd'));
 
@@ -90,7 +99,7 @@ const hud = new Hud(hudRoot, {
     focus.reset();
     paused = false;
     sound.unlock();
-    saveSlot(state, 'auto');
+    autosave();
   },
   continueGame: () => {
     const res = loadSlot('auto');
@@ -315,11 +324,20 @@ function frame(dt: number): SimEvent[] {
       if (ev.text && (ev.severity === 'warn' || ev.severity === 'bad')) sound.chime(ev.severity);
     }
   }
+  if (run && events.length) {
+    const before = run.done;
+    if (run.push(events)) {
+      markScenario(run.scenario.id, 'done');
+      hud.toast(`Задание «${run.scenario.title}» выполнено.`, 'good');
+    }
+    if (run.done !== before) banner?.render(run);
+  }
+  banner?.place(hudRoot.querySelector<HTMLElement>('[data-r="prompt"]'), performance.now());
   prep.update(state, events, dt);
   if (state.pendingReport !== null && !hud.modalOpen) {
     const r = state.reports[state.pendingReport];
     if (r) hud.openReport(r);
-    saveSlot(state, 'auto');
+    autosave();
   }
   const h0 = performance.now();
   const actions = availableActions(state);
@@ -330,14 +348,14 @@ function frame(dt: number): SimEvent[] {
   perf.frameMs = perf.frameMs * 0.9 + (performance.now() - f0) * 0.1;
   if (performance.now() > autosaveAt && running) {
     autosaveAt = performance.now() + 60_000;
-    saveSlot(state, 'auto');
+    autosave();
   }
   return events;
 }
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    if (!hud.modalOpen && !paused) saveSlot(state, 'auto');
+    if (!hud.modalOpen && !paused) autosave();
     if (!hud.modalOpen && !paused) hud.openMenu();
   }
 });
@@ -401,8 +419,18 @@ function start(): void {
 }
 start();
 
+const banner = run ? new TaskBanner(document.body, EMBEDDED ? requestClose : null) : null;
+connectStation(() => {
+  if (!hud.modalOpen && !paused) hud.openMenu();
+});
+
 const auto = slotInfo('auto');
-if (params.get('autostart') === '1' || params.has('bot')) {
+if (run) {
+  paused = false;
+  markScenario(run.scenario.id, 'started');
+  banner!.render(run);
+  postTitle(`Стажировка: ${run.scenario.title}`);
+} else if (params.get('autostart') === '1' || params.has('bot')) {
   paused = false;
   if (params.has('bot')) {
     void import('./dev/autokeeper').then((m) => {
@@ -411,4 +439,5 @@ if (params.get('autostart') === '1' || params.has('bot')) {
   }
 } else {
   hud.openTitle(auto.ok ? auto.text : null);
+  postTitle('Смена');
 }

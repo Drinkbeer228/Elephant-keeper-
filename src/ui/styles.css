@@ -1849,3 +1849,56 @@ html[data-input='touch'] .panel {
     animation: none;
   }
 }
+
+/* Плашка задания стажировки (?scenario=<id>, src/station/banner.ts) */
+.task-banner {
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  bottom: calc(var(--safe-b) + 112px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 14px;
+  align-items: center;
+  width: min(440px, calc(100vw - 24px - var(--safe-l) - var(--safe-r)));
+  padding: 10px 14px;
+  border: 1.6px solid var(--ink);
+  border-left: 6px solid var(--ochre);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font: 14px/1.35 var(--font);
+  color: var(--ink);
+  pointer-events: auto;
+}
+.task-banner p {
+  margin: 0;
+  grid-column: 1;
+}
+.task-head {
+  font-weight: 700;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.task-count {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.task-banner.done {
+  border-left-color: var(--sage);
+}
+.task-exit {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1.6px solid var(--ink);
+  border-radius: 10px;
+  background: var(--stone);
+  font: 600 14px var(--font);
+  color: var(--ink);
+  cursor: pointer;
+}
