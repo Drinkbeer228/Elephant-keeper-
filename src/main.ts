@@ -6,21 +6,23 @@ import { sound } from './audio/sound';
 import { Input } from './input';
 import { WorldScene } from './render/WorldScene';
 import {
-  actionTarget,
   kittenDoing,
   availableActions,
   clearLegacy,
   createState,
+  interactionTargets,
   LOAD_FAILURE_TEXT,
   legacyKeys,
   loadSlot,
   saveSlot,
   slotInfo,
   step,
+  type InteractionTarget,
   type SimEvent,
   type State,
   type StepInput,
 } from './sim';
+import { FocusTracker } from './ui/focus';
 import { Hud } from './ui/hud';
 import { PrepView } from './ui/prep';
 import './ui/styles.css';
@@ -39,7 +41,17 @@ let autosaveAt = performance.now() + 60_000;
 let bot: { decide(s: State): StepInput } | null = null;
 let scene: WorldScene | null = null;
 const pending: string[] = [];
+// Последние отправленные в симуляцию действия — для отладки и проверок из браузера (window.keeper.sent)
+const sent: string[] = [];
+function send(id: string): void {
+  pending.push(id);
+  sent.push(id);
+  if (sent.length > 50) sent.shift();
+}
 const input = new Input();
+// Главная цель и главное действие: одна подсказка, которая не скачет (ui/focus.ts)
+const focus = new FocusTracker();
+let targets: InteractionTarget[] = [];
 // Нарезка овощей: пока открыт крупный план, время идёт медленнее, чем на территории
 const PREP_PACE = 0.4;
 
@@ -54,7 +66,18 @@ const hud = new Hud(hudRoot, {
   action: (id) => {
     sound.unlock();
     sound.click();
-    pending.push(id);
+    send(id);
+    focus.acted(performance.now());
+  },
+  peek: () => focus.peek(performance.now())?.id ?? null,
+  primary: (armed) => {
+    sound.unlock();
+    primary(true, armed);
+  },
+  nextTarget: () => {
+    sound.unlock();
+    sound.click();
+    focus.cycle(performance.now());
   },
   select: (id) => (selected = id),
   focus: (x, y) => scene?.focus(x, y),
@@ -64,6 +87,7 @@ const hud = new Hud(hudRoot, {
   newGame: (herd, seed) => {
     state = createState({ seed: seed ?? (seedParam || Math.floor(Math.random() * 1e9)), herdSize: herd });
     selected = null;
+    focus.reset();
     paused = false;
     sound.unlock();
     saveSlot(state, 'auto');
@@ -75,6 +99,7 @@ const hud = new Hud(hudRoot, {
       return false;
     }
     state = res.state;
+    focus.reset();
     paused = false;
     sound.unlock();
     return true;
@@ -89,6 +114,7 @@ const hud = new Hud(hudRoot, {
     if (!res.ok) return LOAD_FAILURE_TEXT[res.reason];
     state = res.state;
     selected = null;
+    focus.reset();
     return null;
   },
   toggleSound: () => {
@@ -152,6 +178,41 @@ function nearestElephant(): string | null {
   return best;
 }
 
+// Главное действие: ровно то, что написано в подсказке (клавиша, кнопка-рука, сама подсказка).
+// Кнопка на экране передаёт действие, которое запомнила в момент касания
+function primary(click: boolean, armed?: string | null): void {
+  const now = performance.now();
+  const o = armed === undefined ? focus.press(now) : focus.commit(armed, now);
+  if (!o) {
+    // Нажали, а выполнять нечего: подсказка только что сменилась сама — пусть на неё посмотрят
+    if (focus.view.main) hud.nudge();
+    return;
+  }
+  if (click) sound.click();
+  send(o.id);
+}
+
+// Клик или касание по объекту в мире — выбрать его целью
+function tapTarget(x: number, y: number, elephantId: string | null): void {
+  const now = performance.now();
+  if (elephantId) {
+    focus.pin(`el:${elephantId}`, now);
+    return;
+  }
+  let best: InteractionTarget | null = null;
+  let bestD = 1.1;
+  for (const t of targets) {
+    if (t.elephantId) continue;
+    const r = t.rect;
+    const d = r ? Math.hypot(Math.max(r.x0 - x, 0, x - r.x1), Math.max(r.y0 - y, 0, y - r.y1)) : Math.hypot(t.x - x, t.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  if (best) focus.pin(best.key, now);
+}
+
 function handlePresses(): void {
   for (const p of input.take()) {
     if (p.kind === 'pause') {
@@ -169,23 +230,28 @@ function handlePresses(): void {
       case 'panel':
         hud.togglePanel();
         break;
-      case 'action': {
-        const a = hud.actionForKey(0);
-        if (a) pending.push(a.id);
+      case 'action':
+        primary(false);
         break;
-      }
+      case 'target':
+        focus.cycle(performance.now());
+        break;
       case 'choice': {
         const a = hud.actionForKey(p.index);
-        if (a) pending.push(a.id);
+        if (a) {
+          send(a.id);
+          focus.acted(performance.now());
+        }
         break;
       }
       case 'drop': {
         const d = hud.actions.find((a) => a.ref.verb === 'drop');
-        if (d) pending.push(d.id);
+        if (d) send(d.id);
         break;
       }
       case 'inspect':
-        selected = selected ? null : nearestElephant();
+        // Осмотр — той, что сейчас цель; иначе — ближайшей
+        selected = selected ? null : (focus.view.target?.elephantId ?? nearestElephant());
         break;
       case 'journal':
         hud.toggleJournal();
@@ -256,7 +322,10 @@ function frame(dt: number): SimEvent[] {
     saveSlot(state, 'auto');
   }
   const h0 = performance.now();
-  hud.render(state, availableActions(state), selected);
+  const actions = availableActions(state);
+  targets = interactionTargets(state, actions);
+  const view = focus.update(targets, performance.now(), state.keeper, state.keeper.task !== null || state.keeper.prep !== null);
+  hud.render(state, actions, targets, view, selected);
   perf.hudMs = perf.hudMs * 0.9 + (performance.now() - h0) * 0.1;
   perf.frameMs = perf.frameMs * 0.9 + (performance.now() - f0) * 0.1;
   if (performance.now() > autosaveAt && running) {
@@ -286,13 +355,17 @@ function start(): void {
     frame,
     onSelect: (id) => (selected = id),
     onKitten: () => hud.toast(`Котёнок со станции ${kittenDoing(state)}. Живёт сам по себе — заботиться о нём не нужно.`, 'info'),
+    onTap: tapTarget,
     selected: () => selected,
     showNames: () => showNames,
+    // Подсветка цели: видно, к чему относится подсказка
     marker: () => {
-      if (state.keeper.task) return null;
-      const a = hud.actions.find((x) => x.enabled);
-      return a ? actionTarget(state, a) : null;
+      const v = focus.view;
+      const t = v.target;
+      if (!t || !v.main || hud.modalOpen) return null;
+      return { x: t.x, y: t.y, rect: t.rect, elephantId: t.elephantId, enabled: v.main.enabled };
     },
+    insets: () => hud.insets(),
     dpr,
   });
   const game = new Phaser.Game({
@@ -319,6 +392,10 @@ function start(): void {
       game,
       perf,
       sound,
+      sent,
+      get focus() {
+        return focus.view;
+      },
     },
   });
 }

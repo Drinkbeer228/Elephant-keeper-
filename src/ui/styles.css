@@ -88,7 +88,7 @@ button svg {
 .pill,
 .btn,
 .card,
-.banner,
+.prompt,
 .toast,
 .drawer,
 .modal {
@@ -132,7 +132,10 @@ button svg {
 }
 
 .btn:focus-visible,
-.act:focus-visible,
+.p-main:focus-visible,
+.p-target:focus-visible,
+.p-more:focus-visible,
+.prow:focus-visible,
 .card:focus-visible,
 .seg button:focus-visible {
   outline: 2px solid var(--sage);
@@ -462,74 +465,213 @@ kbd {
   color: var(--sage);
 }
 
-.banner {
+.held .keyhint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Подсказка: «цель · главное действие». Одна, на одном месте, одной высоты —
+   меняется только текст. Клавиатура — внизу по центру; касания — над кнопкой-рукой
+   --------------------------------------------------------------------------- */
+
+.prompt {
   margin: 0 auto;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  align-items: stretch;
   gap: 6px;
   padding: 6px;
-  max-width: min(720px, 60vw);
+  min-height: 54px;
+  max-width: min(720px, 62vw);
   pointer-events: auto;
+  transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.banner.idle,
-.banner.busy {
-  padding: 9px 16px;
-  align-items: center;
-  gap: 10px;
+/* Нечего показывать — подсказки нет, но место под неё остаётся: соседи не сдвигаются */
+.prompt.none {
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
 }
 
-.act {
+.prompt.none > * {
+  visibility: hidden;
+}
+
+.prompt.pop {
+  animation: promptIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes promptIn {
+  from {
+    opacity: 0.35;
+    transform: translateY(5px);
+  }
+}
+
+.p-target,
+.p-main,
+.p-more {
   appearance: none;
-  border: 1.5px solid transparent;
-  background: transparent;
-  border-radius: 9px;
   font: 600 13px var(--font);
   color: var(--ink);
+  border: 1.5px solid transparent;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 40px;
   padding: 4px 10px;
   cursor: pointer;
+  text-align: left;
 }
 
-.act:hover {
-  background: #fff;
-  border-color: var(--stone-line);
+.p-target[hidden],
+.p-more[hidden],
+.p-next[hidden] {
+  display: none;
 }
 
-.act.main {
+/* Цель: к чему относится действие. Нажатие — следующая цель */
+.p-target {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 300px;
+  background: var(--sage-soft);
+  color: var(--sage);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.p-target:hover {
+  background: rgba(46, 90, 68, 0.2);
+}
+
+.p-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.p-next svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Цель выбрана игроком — заливка, чтобы было видно, что она закреплена */
+.prompt.pinned .p-target {
   background: var(--sage);
   color: var(--stone);
 }
 
-.act.main kbd {
-  background: var(--stone);
+.p-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--sage);
+  color: var(--stone);
 }
 
-.act.main:hover {
+.p-main:hover {
   background: #234735;
 }
 
-.act.off {
-  opacity: 0.55;
+.p-main:active {
+  transform: scale(0.985);
 }
 
-.act.main.off {
+.p-main kbd {
+  background: var(--stone);
+  flex-shrink: 0;
+}
+
+.p-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.p-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p-reason {
+  font-weight: 400;
+  font-size: 11.5px;
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p-reason:empty {
+  display: none;
+}
+
+/* Действие сейчас недоступно: серое, с причиной */
+.prompt.off .p-main {
   background: var(--stone-line);
   color: var(--ink);
-  opacity: 1;
 }
 
-.act small {
-  font-weight: 400;
-  opacity: 0.85;
-}
-
-.act.ghost {
+.p-more {
+  flex-shrink: 0;
   color: var(--ink-muted);
+  background: transparent;
+  white-space: nowrap;
+}
+
+.p-more:hover {
+  background: #fff;
+  border-color: var(--stone-line);
+}
+
+.p-busy,
+.p-idle {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.p-idle {
+  font-weight: 500;
+}
+
+.prompt.busy > *,
+.prompt.idle > * {
+  display: none;
+}
+
+.prompt.busy > .p-busy,
+.prompt.idle > .p-idle {
+  display: flex;
+}
+
+/* Играют пальцами — подписи клавиш не нужны: подсказка стоит прямо над кнопкой-рукой */
+html[data-input='touch'] .prompt kbd,
+html[data-input='touch'] .keyhint,
+html[data-input='touch'] .keys-only,
+html[data-input='touch'] .prow kbd {
+  display: none;
 }
 
 .spin {
@@ -1129,14 +1271,47 @@ details .traits {
   flex-direction: column;
 }
 
+.prow b {
+  font-weight: 600;
+}
+
 .prow small {
   font-weight: 400;
   color: var(--ink-muted);
   font-size: 11.5px;
 }
 
+.prow small:empty {
+  display: none;
+}
+
 .prow.off {
   opacity: 0.62;
+}
+
+.prow.gone {
+  opacity: 0.35;
+}
+
+/* Главное действие цели — то, что сделает клавиша действия или кнопка-рука */
+.prow.main {
+  background: var(--sage-soft);
+  border-color: rgba(46, 90, 68, 0.35);
+}
+
+.pgroup.focus h4 {
+  color: var(--sage);
+}
+
+.pgroup h4 em {
+  font-style: normal;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--sage);
+  color: var(--stone);
+  letter-spacing: 0.04em;
 }
 
 .prow .timed {
@@ -1229,13 +1404,12 @@ details .traits {
   margin-bottom: 6px;
 }
 
-@media (pointer: coarse) {
-  .touch-help {
-    display: grid;
-  }
-  .key-help {
-    display: none;
-  }
+html[data-input='touch'] .touch-help {
+  display: grid;
+}
+
+html[data-input='touch'] .key-help {
+  display: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1403,10 +1577,8 @@ details .traits {
   pointer-events: none;
 }
 
-@media (pointer: coarse) {
-  .side kbd.k {
-    display: none;
-  }
+html[data-input='touch'] .side kbd.k {
+  display: none;
 }
 
 @media (max-width: 640px) {
@@ -1446,49 +1618,114 @@ details .traits {
   display: none;
 }
 
-@media (pointer: coarse) {
-  .touch {
-    display: block;
-  }
-  .stick {
-    position: absolute;
-    left: calc(18px + var(--safe-l));
-    bottom: calc(92px + var(--safe-b));
-    width: 116px;
-    height: 116px;
-    border-radius: 50%;
-    border: 1.5px solid var(--ink);
-    background: rgba(244, 241, 234, 0.6);
-    pointer-events: auto;
-    touch-action: none;
-  }
-  .knob {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 50px;
-    height: 50px;
-    margin: -25px 0 0 -25px;
-    border-radius: 50%;
-    background: var(--stone);
-    border: 1.5px solid var(--ink);
-    box-shadow: var(--shadow);
-  }
-  .touch-btns {
-    position: absolute;
-    right: calc(18px + var(--safe-r));
-    bottom: calc(98px + var(--safe-b));
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-  }
-  .touch-btns svg {
-    width: 26px;
-    height: 26px;
-  }
-  .zoom {
-    display: none;
-  }
+/* Стик и кнопки показываются, когда игрок играет пальцами (см. input.ts) */
+html[data-input='touch'] .touch {
+  display: block;
+}
+
+html[data-input='touch'] .zoom {
+  display: none;
+}
+
+.stick {
+  position: absolute;
+  left: calc(18px + var(--safe-l));
+  bottom: calc(26px + var(--safe-b));
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  background: rgba(244, 241, 234, 0.6);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50px;
+  height: 50px;
+  margin: -25px 0 0 -25px;
+  border-radius: 50%;
+  background: var(--stone);
+  border: 1.5px solid var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.touch-btns {
+  position: absolute;
+  right: calc(18px + var(--safe-r));
+  bottom: calc(32px + var(--safe-b));
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.touch-btns svg {
+  width: 26px;
+  height: 26px;
+}
+
+.touch-btns [hidden] {
+  display: none;
+}
+
+/* Делать нечего — рука приглушена */
+.touch-btns .btn.idle {
+  opacity: 0.45;
+}
+
+/* Подсказка — над кнопками, у большого пальца: под пальцем её не было бы видно.
+   Нажатие на неё делает то же, что рука; на название цели — следующая цель */
+html[data-input='touch'] .prompt {
+  position: fixed;
+  right: calc(18px + var(--safe-r));
+  bottom: calc(108px + var(--safe-b));
+  margin: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  width: max-content;
+  min-width: 168px;
+  /* не шире, чем от правого края до стика: карточка его не задевает */
+  max-width: min(330px, calc(100vw - 172px - var(--safe-l) - var(--safe-r)));
+  min-height: 0;
+  z-index: 1;
+}
+
+html[data-input='touch'] .p-target {
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 3px 10px;
+}
+
+html[data-input='touch'] .p-main {
+  min-height: 46px;
+  font-size: 14px;
+}
+
+html[data-input='touch'] .p-label {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+html[data-input='touch'] .p-reason,
+html[data-input='touch'] .p-idle,
+html[data-input='touch'] .p-busy {
+  white-space: normal;
+}
+
+html[data-input='touch'] .p-more {
+  display: none;
+}
+
+/* Список действий на телефоне закрывает кнопки целиком — непрозрачный, чтобы сквозь него ничего не читалось */
+html[data-input='touch'] .panel {
+  background: var(--stone);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1559,19 +1796,12 @@ details .traits {
     min-height: 30px;
     padding: 4px 10px;
   }
-  .banner {
+  .prompt {
     max-width: 100%;
     margin: 0;
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
-  .banner .act {
-    flex-shrink: 0;
-  }
-  .act span {
-    font-size: 12px;
+  .p-target {
+    max-width: 34vw;
   }
 }
 
@@ -1608,6 +1838,12 @@ details .traits {
     animation: none;
   }
   .toast {
+    animation: none;
+  }
+  .prompt {
+    transition: none;
+  }
+  .prompt.pop {
     animation: none;
   }
 }

@@ -42,11 +42,13 @@ export function availableActions(s: State): ActionOption[] {
   cleaningOptions(c, out);
   thingOptions(c, out);
   kittenOptions(c, out);
-  for (const o of out) {
+  out.forEach((o, i) => {
     const p = actionTarget(s, o);
+    o.at = p;
+    o.order = i;
     o.dist = p ? Math.round(dist(k, p) * 10) / 10 : 0;
     o.timed = o.timed || taskTime(o.ref) > 0;
-  }
+  });
   // Сначала доступное, потом по важности; при равной важности — ближнее
   return out.sort((a, b) => Number(b.enabled) - Number(a.enabled) || b.priority - a.priority || a.dist - b.dist);
 }
