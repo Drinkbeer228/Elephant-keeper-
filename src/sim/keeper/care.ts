@@ -395,6 +395,8 @@ export function applyCare(s: State, ref: ActionRef): boolean {
       if (e.signal?.kind === 'food') answerSignal(s, e, 'покормили кашей');
       s.dailyKeeper.interactions++;
       fx('munch', e.x, e.y, e.id);
+      // Отдельное событие подачи каши: по нему засчитывается задание стажировки (src/station/scenarios.ts)
+      fx('porridgeServed', e.x, e.y, e.id);
       log(s, 'good', `${e.profile.name} съела кашу${soaked < PORRIDGE_SOAK_MIN ? ' (не до конца запаренную)' : ''}.`, { elephantId: e.id, silent: true });
       return true;
     }

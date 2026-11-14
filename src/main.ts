@@ -332,6 +332,7 @@ function frame(dt: number): SimEvent[] {
     }
     if (run.done !== before) banner?.render(run);
   }
+  banner?.place(hudRoot.querySelector<HTMLElement>('[data-r="prompt"]'), performance.now());
   prep.update(state, events, dt);
   if (state.pendingReport !== null && !hud.modalOpen) {
     const r = state.reports[state.pendingReport];

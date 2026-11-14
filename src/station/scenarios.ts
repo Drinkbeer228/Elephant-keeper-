@@ -16,8 +16,8 @@ export interface Scenario {
 
 export const SCENARIOS: readonly Scenario[] = [
   { id: 'prep', title: 'Кормокухня', task: 'Нарежьте овощи и соберите таз рациона для слона.', event: 'prepDone', count: 1 },
-  { id: 'feeding', title: 'Раздача сена', task: 'Разложите сено по кормовым местам слонов.', event: 'scatter', count: 2 },
-  { id: 'porridge', title: 'Каша', task: 'Приготовьте и разлейте кашу по мискам.', event: 'pour', count: 2 },
+  { id: 'feeding', title: 'Раздача сена', task: 'Заложите сено в кормушки слонов.', event: 'hay', count: 2 },
+  { id: 'porridge', title: 'Каша', task: 'Запарьте кашу и накормите ею двух слонов.', event: 'porridgeServed', count: 2 },
   { id: 'cleaning', title: 'Уборка навоза', task: 'Уберите навоз лопатой в тачку.', event: 'shovel', count: 4 },
   { id: 'bedding', title: 'Подстилка', task: 'Разровняйте граблями свежую подстилку.', event: 'rake', count: 3 },
   { id: 'washing', title: 'Мойка шлангом', task: 'Помойте шлангом пол, поилки или слона.', event: 'spray', count: 5 },

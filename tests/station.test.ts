@@ -49,14 +49,14 @@ describe('сводка для станции', () => {
 });
 
 describe('задания выполнимы в настоящей смене', () => {
-  it('бот-кипер за день выполняет кормокухню, уборку и доверие', () => {
+  it('бот-кипер за день выполняет кормокухню, сено, кашу, уборку и доверие', () => {
     const s = createState({ seed: 1, herdSize: 3 });
     const bot = new AutoKeeper();
-    const runs = ['prep', 'cleaning', 'trust'].map((id) => new ScenarioRun(scenarioById(id)!));
+    const runs = ['prep', 'feeding', 'porridge', 'cleaning', 'trust'].map((id) => new ScenarioRun(scenarioById(id)!));
     while (s.t < 480 + 1440 && runs.some((r) => !r.complete)) {
       const events = step(s, bot.decide(s));
       for (const r of runs) r.push(events);
     }
-    expect(runs.map((r) => [r.scenario.id, r.complete])).toEqual([['prep', true], ['cleaning', true], ['trust', true]]);
+    expect(runs.map((r) => [r.scenario.id, r.complete])).toEqual([['prep', true], ['feeding', true], ['porridge', true], ['cleaning', true], ['trust', true]]);
   });
 });

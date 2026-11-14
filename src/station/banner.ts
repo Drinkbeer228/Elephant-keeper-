@@ -29,6 +29,23 @@ export class TaskBanner {
     root.append(this.el);
   }
 
+  /**
+   * Над подсказкой главного действия, а не поверх неё: подсказка внизу экрана и на касаниях ловит нажатия.
+   * Вызывается из кадра; положение пересчитывается не чаще раза в 250 мс.
+   */
+  place(prompt: HTMLElement | null, now: number): void {
+    if (now - this.placedAt < 250) return;
+    this.placedAt = now;
+    const r = prompt?.getBoundingClientRect();
+    const gap = 8;
+    const bottom = r && r.height > 0 ? window.innerHeight - r.top + gap : 112;
+    // Не выше середины экрана: на совсем низком экране лучше накрыть край мира, чем подсказку.
+    const px = `${Math.round(Math.min(bottom, window.innerHeight * 0.5))}px`;
+    if (this.el.style.bottom !== px) this.el.style.bottom = px;
+  }
+
+  private placedAt = -1e9;
+
   render(run: ScenarioRun): void {
     const s = run.scenario;
     (this.el.firstElementChild as HTMLElement).textContent = `Стажировка · ${s.title}`;
