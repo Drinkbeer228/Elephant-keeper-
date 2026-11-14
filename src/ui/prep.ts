@@ -502,7 +502,7 @@ export class PrepView {
       <header class="prep-head">
         <div class="prep-title"><b>Нарезка овощей</b><span data-p="who"></span></div>
         <div class="prep-chips" data-p="chips"></div>
-        <button class="btn small" data-p="exit">Отложить <kbd>Esc</kbd></button>
+        <button class="btn small" data-p="exit">Отложить <kbd class="k">Esc</kbd></button>
       </header>
       <div class="prep-sides">
         <div class="side" data-p="L"><kbd class="k">A</kbd><kbd class="k">←</kbd><span class="t">Левая рука</span><b data-p="Lt"></b></div>

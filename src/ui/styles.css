@@ -1577,7 +1577,9 @@ html[data-input='touch'] .key-help {
   pointer-events: none;
 }
 
-html[data-input='touch'] .side kbd.k {
+html[data-input='touch'] .side kbd.k,
+html[data-input='touch'] .prep kbd.k,
+html[data-input='keys'] .touch-only {
   display: none;
 }
 
