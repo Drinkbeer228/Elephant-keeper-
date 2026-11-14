@@ -47,6 +47,8 @@ import { BIND_LABEL, keyName, type BindAction } from '../input';
 import type { FocusView } from './focus';
 import { ICON } from './icons';
 import { portrait } from './portrait';
+import { INTERNSHIP_STAGES } from '../station/scenarios';
+import { readSummary } from '../station/link';
 
 export interface HudHandlers {
   action: (id: string) => void;
@@ -60,6 +62,7 @@ export interface HudHandlers {
   setPaused: (p: boolean) => void;
   newGame: (herd: number, seed: number | null) => void;
   continueGame: () => boolean;
+  startScenario: (id: string) => void;
   save: (slot: SlotId) => string;
   load: (slot: SlotId) => string | null;
   toggleSound: () => boolean;
@@ -849,6 +852,7 @@ export class Hud {
 
   private showModal(kind: 'title' | 'menu' | 'report', html: string): HTMLElement {
     this.modal = kind;
+    document.body.dataset.state = kind === 'title' ? 'title' : 'paused';
     const wrap = this.refs.modal;
     wrap.hidden = false;
     wrap.innerHTML = `<div class="modal ${kind}" role="dialog" aria-modal="true">${html}</div>`;
@@ -857,8 +861,38 @@ export class Hud {
 
   closeModal(): void {
     this.modal = null;
+    document.body.dataset.state = 'playing';
     this.refs.modal.hidden = true;
     this.refs.modal.innerHTML = '';
+  }
+
+  private internshipHtml(): string {
+    const summary = readSummary();
+    const fullDone = summary.items['internship']?.status === 'done';
+    const stages = INTERNSHIP_STAGES.map((st, idx) => {
+      const done = summary.items[st.id]?.status === 'done';
+      return `<button class="stage-btn ${done ? 'done' : ''}" data-scenario="${esc(st.id)}">
+        <span><b>Этап ${idx + 1}. ${esc(st.title.replace(/^Этап\s+[IVX]+\.\s*/i, ''))}</b><small>${esc(st.task)}</small></span>
+        <span class="stage-badge">${done ? '✓ пройден' : 'начать →'}</span>
+      </button>`;
+    }).join('');
+    return `<div class="internship-box">
+      <div class="internship-head">
+        <span><b>Кампания стажировки со старшим кипером</b> <small class="muted">${fullDone ? '· допуск получен ✓' : '· 4 этапа допуска'}</small></span>
+        <button class="btn small primary" data-scenario="internship">Вся стажировка (I–IV)</button>
+      </div>
+      <div class="internship-stages">${stages}</div>
+    </div>`;
+  }
+
+  private bindScenarioButtons(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>('[data-scenario]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const id = b.dataset.scenario!;
+        this.closeModal();
+        this.h.startScenario(id);
+      }),
+    );
   }
 
   private helpHtml(): string {
@@ -882,12 +916,13 @@ export class Hud {
       `<div class="title-mark">${ICON.logo}</div>
       <h1>Elephant Keeper</h1>
       <p class="lead">Смена смотрителя в небольшом слоновнике полного контакта: ты работаешь рядом со слонами, в одном зале с ними. Слоны живут своей жизнью: едят, пьют, играют, спят — и зовут тебя, когда без тебя не обойтись. У каждой свой характер, своё личное место и свои отношения с тобой — доверие, привычка, память о том, отвечаешь ли ты.</p>
-      ${hasContinue ? `<button class="btn primary wide" data-go="continue">${ICON.play}<span>Продолжить смену</span><small>${esc(hasContinue)}</small></button>` : ''}
+      ${hasContinue ? `<button class="btn primary wide" data-go="continue" data-start="true">${ICON.play}<span>Продолжить смену</span><small>${esc(hasContinue)}</small></button>` : ''}
       <div class="newgame">
         <span>Новое стадо:</span>
         <div class="seg" data-herd>${Array.from({ length: CAPACITY }, (_, i) => `<button data-n="${i + 1}" class="${i + 1 === this.herdChoice ? 'on' : ''}">${i + 1}</button>`).join('')}</div>
-        <button class="btn ${hasContinue ? '' : 'primary'}" data-go="new">Начать</button>
+        <button class="btn ${hasContinue ? '' : 'primary'}" data-go="new" ${hasContinue ? '' : 'data-start="true"'}>Начать</button>
       </div>
+      ${this.internshipHtml()}
       ${this.helpHtml()}
       ${legacy ? `<p class="legacy">Найдены сохранения старой пиксельной версии (${legacy}) — с новой игрой они несовместимы. <button class="link" data-legacy>Удалить их</button></p>` : ''}`,
     );
@@ -904,6 +939,7 @@ export class Hud {
     m.querySelector('[data-go="continue"]')?.addEventListener('click', () => {
       if (this.h.continueGame()) this.closeModal();
     });
+    this.bindScenarioButtons(m);
     m.querySelector('[data-legacy]')?.addEventListener('click', (e) => {
       this.h.clearLegacy();
       (e.target as HTMLElement).closest('.legacy')?.remove();
@@ -923,6 +959,7 @@ export class Hud {
     const m = this.showModal(
       'menu',
       `<div class="drawer-head"><h2>Пауза</h2><button class="btn icon small" data-close aria-label="Закрыть">${ICON.close}</button></div>
+      ${this.internshipHtml()}
       <h3>Сохранения</h3>
       <ul class="slots">${slots
         .map((id) => {
@@ -956,6 +993,7 @@ export class Hud {
       <p class="muted small-p">Текущая смена при этом не сохраняется — сначала сохрани её в слот.</p>
       <button class="btn primary wide" data-close>${ICON.play}<span>Продолжить</span></button>`,
     );
+    this.bindScenarioButtons(m);
     const status = (text: string) => this.toast(text, 'info');
     m.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => this.closeMenu()));
     m.querySelectorAll<HTMLElement>('[data-save]').forEach((b) =>

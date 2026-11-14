@@ -1850,7 +1850,7 @@ html[data-input='touch'] .panel {
   }
 }
 
-/* Плашка задания стажировки (?scenario=<id>, src/station/banner.ts) */
+/* Плашка задания и кампании стажировки (?scenario=<id>, src/station/banner.ts) */
 .task-banner {
   position: fixed;
   z-index: 30;
@@ -1859,18 +1859,21 @@ html[data-input='touch'] .panel {
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 14px;
+  gap: 3px 12px;
   align-items: center;
-  width: min(440px, calc(100vw - 24px - var(--safe-l) - var(--safe-r)));
+  width: min(520px, calc(100vw - 24px - var(--safe-l) - var(--safe-r)));
   padding: 10px 14px;
   border: 1.6px solid var(--ink);
   border-left: 6px solid var(--ochre);
   border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow);
-  font: 14px/1.35 var(--font);
+  font: 13.5px/1.35 var(--font);
   color: var(--ink);
   pointer-events: auto;
+}
+.task-banner[hidden] {
+  display: none;
 }
 .task-banner p {
   margin: 0;
@@ -1878,27 +1881,155 @@ html[data-input='touch'] .panel {
 }
 .task-head {
   font-weight: 700;
-  font-size: 12.5px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-muted);
 }
+.task-mentor {
+  font-size: 12.5px;
+  color: var(--sage);
+  background: var(--sage-soft);
+  padding: 4px 8px;
+  border-radius: 7px;
+  margin: 2px 0 !important;
+}
+.task-mentor[data-tone='warn'] {
+  color: #7c5614;
+  background: rgba(196, 154, 69, 0.18);
+}
+.task-mentor[data-tone='bad'] {
+  color: #8f412c;
+  background: var(--terra-soft);
+  font-weight: 600;
+}
+.task-text {
+  font-weight: 500;
+}
 .task-count {
   font-weight: 700;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 .task-banner.done {
   border-left-color: var(--sage);
 }
-.task-exit {
+.task-banner.warned {
+  border-left-color: #b88428;
+}
+.task-banner.failed {
+  border-left-color: var(--terra);
+  border-color: var(--terra);
+}
+.task-actions {
   grid-column: 2;
-  grid-row: 1 / span 3;
-  min-height: 44px;
-  padding: 0 14px;
-  border: 1.6px solid var(--ink);
+  grid-row: 1 / span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+.task-exit,
+.task-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1.5px solid var(--ink);
   border-radius: 10px;
   background: var(--stone);
-  font: 600 14px var(--font);
+  font: 600 13px var(--font);
   color: var(--ink);
   cursor: pointer;
+  white-space: nowrap;
+}
+.task-btn[hidden] {
+  display: none;
+}
+.task-btn.primary {
+  background: var(--sage);
+  color: var(--stone);
+}
+.task-btn.danger {
+  background: var(--terra);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+/* Выбор этапов стажировки в заставке и меню */
+.internship-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--stone-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  text-align: left;
+}
+.internship-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.internship-head b {
+  font-size: 13.5px;
+}
+.internship-stages {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.stage-btn {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1.5px solid var(--stone-line);
+  border-radius: 10px;
+  background: var(--stone);
+  font: 600 12px/1.25 var(--font);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.stage-btn:hover {
+  background: #fff;
+  border-color: var(--ink);
+}
+.stage-btn.done {
+  border-color: var(--sage-mid);
+  background: var(--sage-soft);
+}
+.stage-btn b {
+  display: block;
+  margin-bottom: 3px;
+}
+.stage-btn small {
+  display: block;
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-muted);
+}
+.stage-badge {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--sage);
+}
+@media (max-width: 520px) {
+  .internship-stages {
+    grid-template-columns: 1fr;
+  }
+  .task-banner {
+    grid-template-columns: 1fr;
+  }
+  .task-actions {
+    grid-column: 1;
+    grid-row: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
 }

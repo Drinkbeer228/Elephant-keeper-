@@ -31,9 +31,9 @@ import { connectStation, EMBEDDED, markScenario, postTitle, requestClose } from 
 import { TaskBanner } from './station/banner';
 
 const params = new URLSearchParams(location.search);
-// Задание стажировки по ссылке `?scenario=<id>`: свежая смена-песочница, которая не трогает автосохранение карьеры.
+// Задание стажировки по ссылке `?scenario=<id>` или из меню: свежая смена-песочница, которая не трогает автосохранение карьеры.
 const scenario = scenarioById(params.get('scenario'));
-const run = scenario ? new ScenarioRun(scenario) : null;
+let run: ScenarioRun | null = scenario ? new ScenarioRun(scenario) : null;
 function autosave(): void {
   if (!run) saveSlot(state, 'auto');
 }
@@ -92,14 +92,21 @@ const hud = new Hud(hudRoot, {
   focus: (x, y) => scene?.focus(x, y),
   speed: (v) => setSpeed(v),
   pauseToggle: () => setSpeed(speed === 0 ? 1 : 0),
-  setPaused: (p) => (paused = p),
+  setPaused: (p) => {
+    paused = p;
+    if (!hud.modalOpen) document.body.dataset.state = p ? 'paused' : 'playing';
+  },
   newGame: (herd, seed) => {
+    run = null;
+    banner.show(false);
     state = createState({ seed: seed ?? (seedParam || Math.floor(Math.random() * 1e9)), herdSize: herd });
     selected = null;
     focus.reset();
     paused = false;
+    document.body.dataset.state = 'playing';
     sound.unlock();
     autosave();
+    postTitle('Смена');
   },
   continueGame: () => {
     const res = loadSlot('auto');
@@ -107,12 +114,17 @@ const hud = new Hud(hudRoot, {
       hud.toast(res && !res.ok ? LOAD_FAILURE_TEXT[res.reason] : 'Автосохранения нет.', 'warn');
       return false;
     }
+    run = null;
+    banner.show(false);
     state = res.state;
     focus.reset();
     paused = false;
+    document.body.dataset.state = 'playing';
     sound.unlock();
+    postTitle('Смена');
     return true;
   },
+  startScenario: (id) => startScenario(id),
   save: (slot) => {
     const r = saveSlot(state, slot);
     return r.ok ? 'Смена сохранена.' : `Не удалось сохранить: ${r.error}`;
@@ -121,6 +133,8 @@ const hud = new Hud(hudRoot, {
     const res = loadSlot(slot);
     if (!res) return 'Слот пуст.';
     if (!res.ok) return LOAD_FAILURE_TEXT[res.reason];
+    run = null;
+    banner.show(false);
     state = res.state;
     selected = null;
     focus.reset();
@@ -325,14 +339,24 @@ function frame(dt: number): SimEvent[] {
     }
   }
   if (run && events.length) {
-    const before = run.done;
-    if (run.push(events)) {
-      markScenario(run.scenario.id, 'done');
-      hud.toast(`Задание «${run.scenario.title}» выполнено.`, 'good');
+    const beforeKey = run.stateKey;
+    const wasFailed = run.failed;
+    const finished = run.push(events);
+    for (const stId of run.drainCompletedStages()) {
+      markScenario(stId, 'done');
+      if (stId !== run.scenario.id) hud.toast(`Этап стажировки «${scenarioById(stId)?.title ?? stId}» зачтён старшим кипером.`, 'good');
     }
-    if (run.done !== before) banner?.render(run);
+    if (finished) {
+      markScenario(run.scenario.id, 'done');
+      hud.toast(`Задание «${run.scenario.title}» выполнено!`, 'good');
+    } else if (run.failed && !wasFailed) {
+      hud.toast(run.failReason ?? 'Смена остановлена старшим кипером за нарушение ТБ.', 'bad');
+    } else if (run.justWarned && run.lastWarning) {
+      hud.toast(run.lastWarning, 'warn');
+    }
+    if (run.stateKey !== beforeKey) banner.render(run);
   }
-  banner?.place(hudRoot.querySelector<HTMLElement>('[data-r="prompt"]'), performance.now());
+  if (run) banner.place(hudRoot.querySelector<HTMLElement>('[data-r="prompt"]'), performance.now());
   prep.update(state, events, dt);
   if (state.pendingReport !== null && !hud.modalOpen) {
     const r = state.reports[state.pendingReport];
@@ -414,12 +438,40 @@ function start(): void {
       get focus() {
         return focus.view;
       },
+      get run() {
+        return run;
+      },
+      startScenario,
     },
   });
 }
 start();
 
-const banner = run ? new TaskBanner(document.body, EMBEDDED ? requestClose : null) : null;
+const banner = new TaskBanner(document.body, EMBEDDED ? requestClose : null, {
+  onRetry: () => {
+    if (run) startScenario(run.scenario.id);
+  },
+  onNextStage: (nextId) => startScenario(nextId),
+});
+banner.show(Boolean(run));
+
+function startScenario(id: string | null): void {
+  const sc = scenarioById(id);
+  if (!sc) return;
+  state = createState({ seed: seedParam || Math.floor(Math.random() * 1e9), herdSize: herdParam || 3 });
+  selected = null;
+  focus.reset();
+  run = new ScenarioRun(sc);
+  paused = false;
+  document.body.dataset.state = 'playing';
+  sound.unlock();
+  markScenario(sc.id, 'started');
+  if (sc.stages?.[0]) markScenario(sc.stages[0].id, 'started');
+  banner.show(true);
+  banner.render(run);
+  postTitle(`Стажировка: ${sc.title}`);
+}
+
 connectStation(() => {
   if (!hud.modalOpen && !paused) hud.openMenu();
 });
@@ -427,11 +479,15 @@ connectStation(() => {
 const auto = slotInfo('auto');
 if (run) {
   paused = false;
+  document.body.dataset.state = 'playing';
   markScenario(run.scenario.id, 'started');
-  banner!.render(run);
+  if (run.scenario.stages?.[0]) markScenario(run.scenario.stages[0].id, 'started');
+  banner.show(true);
+  banner.render(run);
   postTitle(`Стажировка: ${run.scenario.title}`);
 } else if (params.get('autostart') === '1' || params.has('bot')) {
   paused = false;
+  document.body.dataset.state = 'playing';
   if (params.has('bot')) {
     void import('./dev/autokeeper').then((m) => {
       bot = new m.AutoKeeper();
