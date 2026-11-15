@@ -36,6 +36,15 @@ describe('уличный бункер станции', () => {
     expect(readSummary(s).items[WASTE_TANK_ITEM]).toEqual({ kind: 'event', status: 'done', at: '2026-11-15T10:05:00.000Z', score: 2 });
   });
 
+  it('бункер не сохранился — отметка для станции не публикуется, номер наполнения не повторится', () => {
+    const s = memory();
+    addBarrow(s, '2026-11-15T11:00:00.000Z');
+    addBarrow(s, '2026-11-15T11:01:00.000Z');
+    const failing = { getItem: s.getItem, setItem: (k: string, v: string) => { if (k === BUNKER_KEY) throw new Error('quota'); s.setItem(k, v); } };
+    expect(addBarrow(failing, '2026-11-15T11:02:00.000Z').full).toBe(true);
+    expect(readSummary(s).items[WASTE_TANK_ITEM]).toBeUndefined();
+  });
+
   it('мусор в памяти — пустой бункер; отказ записи не бросает', () => {
     const s = memory();
     s.data.set(BUNKER_KEY, '{"loads":99,"fills":-4}');

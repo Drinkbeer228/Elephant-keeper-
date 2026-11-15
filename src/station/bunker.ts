@@ -51,15 +51,20 @@ export function addBarrow(s: Store | null = storage(), now = new Date().toISOStr
     b.loads = 0;
     b.fills += 1;
     full = true;
+  }
+  // Сначала свой счётчик, потом отметка для станции: если запись бункера не удалась, станция не увидит
+  // номер наполнения, которого память Манежа не помнит (иначе следующее наполнение повторило бы тот же score).
+  let saved = true;
+  try {
+    s?.setItem(BUNKER_KEY, JSON.stringify(b));
+  } catch {
+    saved = false; // Нет места: бункер просто начнёт с нуля.
+  }
+  if (full && saved) {
     const sum = readSummary(s);
     sum.items[WASTE_TANK_ITEM] = { kind: 'event', status: 'done', at: now, score: b.fills };
     sum.updatedAt = now;
     writeSummary(sum, s);
-  }
-  try {
-    s?.setItem(BUNKER_KEY, JSON.stringify(b));
-  } catch {
-    // Нет места: бункер просто начнёт с нуля.
   }
   return { bunker: b, full };
 }
