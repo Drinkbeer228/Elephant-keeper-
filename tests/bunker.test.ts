@@ -21,12 +21,19 @@ describe('уличный бункер станции', () => {
     const third = addBarrow(s, '2026-11-15T09:20:00.000Z');
     expect(third.full).toBe(true);
     expect(third.bunker).toEqual({ loads: 0, fills: 1 });
-    const item = { kind: 'event', status: 'done', at: '2026-11-15T09:20:00.000Z' };
+    const item = { kind: 'event', status: 'done', at: '2026-11-15T09:20:00.000Z', score: 1 };
     expect(JSON.parse(s.data.get(SUMMARY_KEY)!).items[WASTE_TANK_ITEM]).toEqual(item);
     const legacy = JSON.parse(s.data.get(LEGACY_SUMMARY_KEY)!);
     expect(legacy.module).toBe('keeper');
     expect(legacy.items[WASTE_TANK_ITEM]).toEqual(item);
     expect(BARROWS_PER_BUNKER).toBe(3);
+  });
+
+  it('каждое наполнение — новая запись waste-tank с числом наполнений в score: станция шлёт по партии на каждое', () => {
+    const s = memory();
+    for (let i = 0; i < BARROWS_PER_BUNKER * 2; i++) addBarrow(s, `2026-11-15T10:0${i}:00.000Z`);
+    expect(readBunker(s)).toEqual({ loads: 0, fills: 2 });
+    expect(readSummary(s).items[WASTE_TANK_ITEM]).toEqual({ kind: 'event', status: 'done', at: '2026-11-15T10:05:00.000Z', score: 2 });
   });
 
   it('мусор в памяти — пустой бункер; отказ записи не бросает', () => {

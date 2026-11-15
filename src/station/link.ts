@@ -52,6 +52,8 @@ export interface SummaryItem {
   kind: 'scenario' | 'event';
   status: 'started' | 'done';
   at: string;
+  /** Для `waste-tank` — сколько раз бункер наполнялся с начала стажировки (research-station, CONTRACT.md §2.2). */
+  score?: number;
 }
 
 export interface Summary {
