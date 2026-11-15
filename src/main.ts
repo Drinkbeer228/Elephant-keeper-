@@ -27,7 +27,7 @@ import { Hud } from './ui/hud';
 import { PrepView } from './ui/prep';
 import './ui/styles.css';
 import { scenarioById, ScenarioRun } from './station/scenarios';
-import { connectStation, EMBEDDED, markScenario, postTitle, requestClose } from './station/link';
+import { connectStation, EMBEDDED, evaluateShiftCare, markScenario, postTitle, requestClose } from './station/link';
 import { addBarrow, readBunker } from './station/bunker';
 import { TaskBanner } from './station/banner';
 
@@ -35,6 +35,7 @@ const params = new URLSearchParams(location.search);
 // Задание стажировки по ссылке `?scenario=<id>` или из меню: свежая смена-песочница, которая не трогает автосохранение карьеры.
 const scenario = scenarioById(params.get('scenario'));
 let run: ScenarioRun | null = scenario ? new ScenarioRun(scenario) : null;
+let lastDoneFlagsKey = '';
 function autosave(): void {
   if (!run) saveSlot(state, 'auto');
 }
@@ -349,19 +350,28 @@ function frame(dt: number): SimEvent[] {
     const beforeKey = run.stateKey;
     const wasFailed = run.failed;
     const finished = run.push(events);
+    const care = evaluateShiftCare(state);
     for (const stId of run.drainCompletedStages()) {
-      markScenario(stId, 'done');
+      markScenario(stId, 'done', undefined, undefined, care.flags);
       if (stId !== run.scenario.id) hud.toast(`Этап стажировки «${scenarioById(stId)?.title ?? stId}» зачтён старшим кипером.`, 'good');
     }
     if (finished) {
-      markScenario(run.scenario.id, 'done');
+      lastDoneFlagsKey = care.flags.join(',');
+      markScenario(run.scenario.id, 'done', undefined, undefined, care.flags);
       hud.toast(`Задание «${run.scenario.title}» выполнено!`, 'good');
+    } else if (run.complete) {
+      const flagsKey = care.flags.join(',');
+      if (flagsKey !== lastDoneFlagsKey) {
+        lastDoneFlagsKey = flagsKey;
+        markScenario(run.scenario.id, 'done', undefined, undefined, care.flags);
+        banner.render(run, care);
+      }
     } else if (run.failed && !wasFailed) {
       hud.toast(run.failReason ?? 'Смена остановлена старшим кипером за нарушение ТБ.', 'bad');
     } else if (run.justWarned && run.lastWarning) {
       hud.toast(run.lastWarning, 'warn');
     }
-    if (run.stateKey !== beforeKey) banner.render(run);
+    if (run.stateKey !== beforeKey) banner.render(run, run.complete ? care : null);
   }
   if (run) banner.place(hudRoot.querySelector<HTMLElement>('[data-r="prompt"]'), performance.now());
   prep.update(state, events, dt);

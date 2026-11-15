@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { INTERNSHIP_STAGES, SCENARIOS, ScenarioRun, scenarioById } from '../src/station/scenarios';
-import { LEGACY_SUMMARY_KEY, markScenario, readSummary, SUMMARY_KEY } from '../src/station/link';
+import {
+  computeShiftFlags,
+  evaluateShiftCare,
+  LEGACY_SUMMARY_KEY,
+  markScenario,
+  readSummary,
+  SUMMARY_KEY,
+  targetOrigin,
+} from '../src/station/link';
+import { buildReport } from '../src/sim/report';
 import { createState, step, type SimEvent } from '../src/sim';
 import { AutoKeeper } from '../src/dev/autokeeper';
 
@@ -145,6 +154,104 @@ describe('задания и 4-этапная кампания стажировк
     ).toBe(true);
     expect(run.complete).toBe(true);
     expect(run.drainCompletedStages()).toEqual(['stage-4']);
+  });
+});
+
+describe('телеметрия качества смены и метки пропущенного ухода (flags)', () => {
+  it('формирует метки not-fed, no-water, not-cleaned при пропусках и пустой массив при чистой смене', () => {
+    const s = createState({ seed: 42, herdSize: 3 });
+
+    // На старте смены: на выгуле кормушка пуста и рацион ещё не выдан (not-fed), в денниках ночной навоз (not-cleaned), поилки с водой
+    expect(computeShiftFlags(s)).toEqual(['not-fed', 'not-cleaned']);
+
+    // Если опустошить поилку — добавляется no-water (все три метки)
+    s.world.troughs.barnWaterW.level = 0;
+    expect(computeShiftFlags(s)).toEqual(['not-fed', 'no-water', 'not-cleaned']);
+
+    // Убираем навоз из денников: остаются только not-fed и no-water
+    s.world.dung = [];
+    expect(computeShiftFlags(s)).toEqual(['not-fed', 'no-water']);
+
+    // Наполняем поилки чистой водой и кормушки сеном -> «чистая смена» без меток
+    s.world.troughs.barnWaterW.level = 85;
+    s.world.feeders.paddockFeeder.hay = 14;
+    const cleanCare = evaluateShiftCare(s);
+    expect(cleanCare.fed).toBe(true);
+    expect(cleanCare.watered).toBe(true);
+    expect(cleanCare.cleaned).toBe(true);
+    expect(cleanCare.flags).toEqual([]);
+    expect(cleanCare.items.every((i) => i.ok)).toBe(true);
+
+    // Если один из слонов остался голодным или кормушка в деннике опустела — снова not-fed
+    s.world.feeders.barnRackE.hay = 0;
+    expect(computeShiftFlags(s)).toEqual(['not-fed']);
+
+    // Полевой рапорт включается в итоговый отчёт смены buildReport
+    const report = buildReport(s);
+    expect(report.care?.flags).toEqual(['not-fed']);
+    expect(report.care?.items.length).toBe(3);
+  });
+
+  it('записывает flags в ers_progress_v1:keeper при status: done и снимает их при чистой смене', () => {
+    const m = memory();
+
+    // При status: "started" метки не добавляются
+    markScenario('feeding', 'started', m, '2026-11-14T09:00:00.000Z', ['not-fed', 'no-water']);
+    const startedKeeper = JSON.parse(m.data.get(LEGACY_SUMMARY_KEY)!);
+    expect(startedKeeper.items.feeding).toEqual({
+      kind: 'scenario',
+      status: 'started',
+      at: '2026-11-14T09:00:00.000Z',
+    });
+
+    // Завершение смены с пропусками ухода записывает flags в объект сценария внутри items[<scenarioId>]
+    markScenario('feeding', 'done', m, '2026-11-14T09:10:00.000Z', ['not-fed', 'no-water']);
+    const withFlagsKeeper = JSON.parse(m.data.get(LEGACY_SUMMARY_KEY)!);
+    expect(withFlagsKeeper).toEqual({
+      schema: 'ers.progress/1',
+      module: 'keeper',
+      updatedAt: '2026-11-14T09:10:00.000Z',
+      items: {
+        feeding: {
+          kind: 'scenario',
+          status: 'done',
+          at: '2026-11-14T09:10:00.000Z',
+          flags: ['not-fed', 'no-water'],
+        },
+      },
+    });
+
+    // Брошенная попытка поверх завершённой (status: "started") не затирает done и его flags
+    markScenario('feeding', 'started', m, '2026-11-14T09:15:00.000Z');
+    expect(JSON.parse(m.data.get(LEGACY_SUMMARY_KEY)!).items.feeding.flags).toEqual(['not-fed', 'no-water']);
+
+    // Повторное прохождение «чистой сменой» (flags = []) убирает поле flags, чтобы станция сняла выговор
+    markScenario('feeding', 'done', m, '2026-11-14T09:30:00.000Z', []);
+    const cleanKeeper = JSON.parse(m.data.get(LEGACY_SUMMARY_KEY)!);
+    expect(cleanKeeper.items.feeding).toEqual({
+      kind: 'scenario',
+      status: 'done',
+      at: '2026-11-14T09:30:00.000Z',
+    });
+    expect('flags' in cleanKeeper.items.feeding).toBe(false);
+  });
+
+  it('использует window.location.origin для postMessage при наличии window.location', () => {
+    const prevWindow = globalThis.window;
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        value: { location: { origin: 'http://localhost:3000' } },
+        configurable: true,
+        writable: true,
+      });
+      expect(targetOrigin()).toBe('http://localhost:3000');
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        value: prevWindow,
+        configurable: true,
+        writable: true,
+      });
+    }
   });
 });
 

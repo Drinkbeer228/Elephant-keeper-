@@ -4,6 +4,7 @@
 import { DELIVERY } from '../data/balance';
 import { FEEDER_IDS, STATIONS, TANK_HOME, TOOL_KINDS, TROUGH_IDS, type ToolKind } from '../data/facility';
 import { DIETS, DIET_IDS, MEALS, PORRIDGE_SACK_KG, VEG_KINDS, vegPlan } from '../data/rations';
+import { evaluateShiftCare } from '../station/link';
 import { contactDailyDrift } from './behavior/contact';
 import { dailyDrift } from './behavior/learning';
 import { bodyDirt, wellbeing } from './behavior/needs';
@@ -147,6 +148,7 @@ export function buildReport(s: State): DayReport {
         : score >= 55
           ? 'Смена прошла, но сменщику есть к чему придраться.'
           : 'Тяжёлая смена: слонам не хватало заботы.';
+  const care = evaluateShiftCare(s);
   return {
     day,
     score,
@@ -158,6 +160,7 @@ export function buildReport(s: State): DayReport {
     responseRate: Math.round(responseRate * 100),
     treats: s.dailyKeeper.treats,
     notes,
+    care,
   };
 }
 

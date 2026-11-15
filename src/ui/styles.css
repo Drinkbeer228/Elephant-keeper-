@@ -1923,11 +1923,62 @@ html[data-input='touch'] .panel {
 }
 .task-actions {
   grid-column: 2;
-  grid-row: 1 / span 4;
+  grid-row: 1 / span 5;
   display: flex;
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
+}
+.task-care {
+  grid-column: 1;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--stone-line);
+  font-size: 12px;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.task-care[hidden] {
+  display: none;
+}
+.task-care .care-ok,
+.care-report-list .care-ok {
+  color: var(--sage);
+}
+.task-care .care-miss,
+.care-report-list .care-miss {
+  color: var(--terra);
+  font-weight: 600;
+}
+.care-report {
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--stone-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
+  text-align: left;
+}
+.care-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.care-report-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
 }
 .task-exit,
 .task-btn {

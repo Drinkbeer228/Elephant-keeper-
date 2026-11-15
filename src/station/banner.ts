@@ -1,7 +1,9 @@
 // Плашка стажировки со старшим кипером: этап и шаг, реплика наставника, что сделать, прогресс,
+// полевой рапорт по трём обязательным пунктам ухода при завершении смены,
 // обработка ошибок/провала («Повторить этап»), переход к следующему этапу («Следующий этап →»)
 // и (внутри станции) кнопка «На станцию».
 
+import type { ShiftCare } from './link';
 import type { ScenarioRun } from './scenarios';
 
 export interface BannerCallbacks {
@@ -15,6 +17,7 @@ export class TaskBanner {
   private mentor: HTMLElement;
   private task: HTMLElement;
   private count: HTMLElement;
+  private careList: HTMLUListElement;
   private actions: HTMLElement;
   private retryBtn: HTMLButtonElement;
   private nextBtn: HTMLButtonElement;
@@ -37,6 +40,10 @@ export class TaskBanner {
 
     this.count = document.createElement('p');
     this.count.className = 'task-count';
+
+    this.careList = document.createElement('ul');
+    this.careList.className = 'task-care';
+    this.careList.hidden = true;
 
     this.actions = document.createElement('div');
     this.actions.className = 'task-actions';
@@ -68,7 +75,7 @@ export class TaskBanner {
       this.actions.append(b);
     }
 
-    this.el.append(this.head, this.mentor, this.task, this.count, this.actions);
+    this.el.append(this.head, this.mentor, this.task, this.count, this.careList, this.actions);
     root.append(this.el);
   }
 
@@ -93,13 +100,28 @@ export class TaskBanner {
 
   private placedAt = -1e9;
 
-  render(run: ScenarioRun): void {
+  render(run: ScenarioRun, care?: ShiftCare | null): void {
     this.el.hidden = false;
     this.head.textContent = run.headerText;
     this.mentor.textContent = run.mentorText;
     this.mentor.dataset.tone = run.mentorTone;
     this.task.textContent = run.taskText;
     this.count.textContent = run.countText;
+
+    if (run.complete && care) {
+      this.careList.hidden = false;
+      this.careList.replaceChildren(
+        ...care.items.map((item) => {
+          const li = document.createElement('li');
+          li.className = item.ok ? 'care-ok' : 'care-miss';
+          li.textContent = `${item.ok ? '✓' : '✕'} ${item.label}: ${item.detail}`;
+          return li;
+        }),
+      );
+    } else {
+      this.careList.hidden = true;
+      this.careList.replaceChildren();
+    }
 
     this.el.classList.toggle('done', run.complete);
     this.el.classList.toggle('failed', run.failed);

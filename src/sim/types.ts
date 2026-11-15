@@ -694,6 +694,18 @@ export interface DayReport {
   responseRate: number;
   treats: number;
   notes: string[];
+  care?: {
+    fed: boolean;
+    watered: boolean;
+    cleaned: boolean;
+    flags: ('not-fed' | 'no-water' | 'not-cleaned')[];
+    items: {
+      key: 'not-fed' | 'no-water' | 'not-cleaned';
+      label: string;
+      ok: boolean;
+      detail: string;
+    }[];
+  };
 }
 
 export interface DailyKeeper {

@@ -1073,11 +1073,28 @@ export class Hud {
           <td class="${e.trustDelta > 0 ? 'good-t' : e.trustDelta < 0 ? 'bad-t' : ''}">${e.trustDelta > 0 ? '+' : ''}${e.trustDelta}</td></tr>`,
       )
       .join('');
+    const careHtml = r.care
+      ? `<div class="care-report">
+          <div class="care-report-head">
+            <b>Полевой рапорт по уходу</b>
+            <span class="${r.care.flags.length === 0 ? 'good-t' : 'bad-t'}">${
+              r.care.flags.length === 0 ? 'Чистая смена — без пропусков' : `Замечаний по уходу: ${r.care.flags.length}`
+            }</span>
+          </div>
+          <ul class="care-report-list">${r.care.items
+            .map(
+              (item) =>
+                `<li class="${item.ok ? 'care-ok' : 'care-miss'}"><b>${item.ok ? '✓' : '✕'} ${esc(item.label)}:</b> ${esc(item.detail)}</li>`,
+            )
+            .join('')}</ul>
+        </div>`
+      : '';
     const m = this.showModal(
       'report',
       `<div class="kicker">Сдача смены · день ${r.day}</div>
       <h2>${r.score} <small>из 100</small></h2>
       <p class="lead">${esc(r.verdict)}</p>
+      ${careHtml}
       <table class="rep"><thead><tr><th>Слон</th><th>Самочувствие</th><th>Сон</th><th>Ответ на сигналы</th><th>Доверие</th></tr></thead><tbody>${rows}</tbody></table>
       <div class="facts"><span>Стойла чистые на ${r.barnClean}%</span><span>Выгул — ${r.paddockClean}%</span><span>Ответов на сигналы: ${r.responseRate}%</span><span>Лакомств: ${r.treats}</span></div>
       ${r.notes.length ? `<h3>Замечания сменщика</h3><ul class="notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
