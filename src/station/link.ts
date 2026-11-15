@@ -1,9 +1,12 @@
 // Связь с Research Station (research-station: docs/station/CONTRACT.md).
 // Встраивание: станция открывает игру в iframe с `?embedded=1`; игра отвечает `ready`, присылает заголовок,
 // по `pause` открывает меню (как при уходе со вкладки), а кнопка «На станцию» просит станцию закрыть «планшет».
+// Сообщения подписаны каноническим id станции `keeper` (CONTRACT.md §1).
 // Сводка: единый ключ `ers_progress_v1:elephantkeeper` (с дублированием в `ers_progress_v1:keeper` для обратной
 // совместимости), схема `ers.progress/1` — id задания/этапа, статус, время.
 
+/** Id модуля в протоколе postMessage: станция знает симулятор как `keeper`. */
+export const PROTOCOL_MODULE = 'keeper';
 const MODULE = 'elephantkeeper';
 const LEGACY_MODULE = 'keeper';
 const STATION_ORIGIN = 'https://drinkbeer228.github.io';
@@ -23,7 +26,7 @@ export const EMBEDDED: boolean = (() => {
 function post(type: string, extra: Record<string, unknown> = {}): void {
   if (!EMBEDDED) return;
   try {
-    window.parent.postMessage({ ers: 1, module: MODULE, type, ...extra }, STATION_ORIGIN);
+    window.parent.postMessage({ ers: 1, module: PROTOCOL_MODULE, type, ...extra }, STATION_ORIGIN);
   } catch {
     // Станции нет — сообщать некому.
   }
@@ -45,7 +48,8 @@ export function connectStation(onPause: () => void): void {
 }
 
 export interface SummaryItem {
-  kind: 'scenario';
+  /** `scenario` — задание или этап; `event` — событие смены для кампуса (полный бункер). */
+  kind: 'scenario' | 'event';
   status: 'started' | 'done';
   at: string;
 }
@@ -92,6 +96,16 @@ export function readSummary(s: Store | null = storage()): Summary {
   return empty;
 }
 
+/** Записывает обе копии сводки: каноническую и прежнюю. */
+export function writeSummary(sum: Summary, s: Store | null = storage()): void {
+  try {
+    s?.setItem(SUMMARY_KEY, JSON.stringify(sum));
+    s?.setItem(LEGACY_SUMMARY_KEY, JSON.stringify({ ...sum, module: LEGACY_MODULE }));
+  } catch {
+    // Нет места: станция просто не увидит отметку.
+  }
+}
+
 /** Отмечает задание или этап стажировки. `done` не откатывается в `started`. */
 export function markScenario(
   id: string,
@@ -111,12 +125,7 @@ export function markScenario(
       sum.items.internship = { kind: 'scenario', status: 'done', at: now };
     }
     sum.updatedAt = now;
-    try {
-      s?.setItem(SUMMARY_KEY, JSON.stringify(sum));
-      s?.setItem(LEGACY_SUMMARY_KEY, JSON.stringify({ ...sum, module: LEGACY_MODULE }));
-    } catch {
-      // Нет места: станция просто не увидит отметку.
-    }
+    writeSummary(sum, s);
   }
   return sum;
 }

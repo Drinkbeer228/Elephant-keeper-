@@ -28,6 +28,7 @@ import { PrepView } from './ui/prep';
 import './ui/styles.css';
 import { scenarioById, ScenarioRun } from './station/scenarios';
 import { connectStation, EMBEDDED, markScenario, postTitle, requestClose } from './station/link';
+import { addBarrow, readBunker } from './station/bunker';
 import { TaskBanner } from './station/banner';
 
 const params = new URLSearchParams(location.search);
@@ -169,6 +170,7 @@ const hud = new Hud(hudRoot, {
     }),
   resetBinds: () => input.resetBinds(),
 });
+hud.setBunker(readBunker());
 
 const prep = new PrepView(hudRoot, {
   act: (side) => pending.push(side === 'L' ? 'prepPick:L' : 'prepTrim:R'),
@@ -333,6 +335,11 @@ function frame(dt: number): SimEvent[] {
   if (events.length) {
     hud.pushEvents(events);
     for (const ev of events) {
+      if (ev.kind === 'dump' && ev.tag === 'barrow') {
+        const { bunker, full } = addBarrow();
+        hud.setBunker(bunker);
+        if (full) hud.toast('Уличный бункер полон: электрокар отвезёт партию в Био-лабораторию станции.', 'good');
+      }
       const near = Math.hypot(ev.x - state.keeper.x, ev.y - state.keeper.y) < 14 || ev.x === 0;
       sound.event(ev, near, nameOf);
       if (ev.text && (ev.severity === 'warn' || ev.severity === 'bad')) sound.chime(ev.severity);

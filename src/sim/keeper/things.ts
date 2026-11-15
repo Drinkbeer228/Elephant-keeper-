@@ -258,7 +258,8 @@ export function applyThing(s: State, ref: ActionRef): boolean {
       const put = Math.min(w.barrow.load, KEEPER.containerMax - w.container);
       w.container += put;
       w.barrow.load -= put;
-      fx('dump', w.barrow.x, w.barrow.y);
+      // `barrow` — непустая тачка ушла в контейнер: из них наполняется уличный бункер станции (station/bunker.ts)
+      fx('dump', w.barrow.x, w.barrow.y, null, put > 0 ? 'barrow' : '');
       return true;
     }
     case 'stow': {
