@@ -6,6 +6,7 @@
 // кнопкой-рукой (под пальцем её не видно). Её разметка создаётся один раз и дальше только
 // обновляется: кнопка не исчезает из-под пальца между касанием и отпусканием.
 
+import { BARROWS_PER_BUNKER, type Bunker } from '../station/bunker';
 import {
   bodyDirt,
   characterHints,
@@ -201,6 +202,13 @@ function bar(value: number, warn = 70, invert = false): string {
 }
 
 export class Hud {
+  /** Уличный бункер станции (station/bunker.ts): сколько тачек в текущей партии. */
+  private bunker: Bunker = { loads: 0, fills: 0 };
+
+  setBunker(b: Bunker): void {
+    this.bunker = { ...b };
+  }
+
   private refs: Record<string, HTMLElement> = {};
   private toasts: { el: HTMLElement; until: number }[] = [];
   private cardsKey = '';
@@ -444,6 +452,7 @@ export class Hud {
     if (k.held?.kind === 'tank' && s.elephants.some((e) => e.act.kind === 'urinate' && e.act.phase === 'do' && keeperCatching(s, e))) parts.push('<b>ловишь струю</b>');
     if (b.pushed || b.load > 0 || b.cargo.length) parts.push(`тачка ${b.load}/${KEEPER.barrowMax}${b.cargo.length ? ` +${b.cargo.length}` : ''}`);
     parts.push(`лакомства ${k.pouch}`);
+    parts.push(`<span title="Уличный бункер станции: каждая тачка в контейнер — треть, три — партия для Био-лаборатории">бункер ${this.bunker.loads}/${BARROWS_PER_BUNKER}</span>`);
     const html = parts.join('<span class="dot">·</span>');
     if (html !== this.heldHtml) {
       this.heldHtml = html;
