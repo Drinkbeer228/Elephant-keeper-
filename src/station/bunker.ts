@@ -2,6 +2,8 @@
 // в контейнер при уборке, наполняет его на треть; третья — 100 %. Полный бункер — событие для кампуса
 // Research Station: запись `waste-tank` в сводке, после выхода из Манежа к Био-лаборатории едет электрокар
 // (research-station: src/campus/worldEvents.ts). Бункер опустошается сразу — новая партия копится заново.
+// `score` записи — сколько раз бункер наполнялся: станция отправляет по партии на каждое новое наполнение,
+// даже если их было несколько за один заход в Манеж (CONTRACT.md §2.2 станции).
 
 import { readSummary, writeSummary } from './link';
 
@@ -49,15 +51,20 @@ export function addBarrow(s: Store | null = storage(), now = new Date().toISOStr
     b.loads = 0;
     b.fills += 1;
     full = true;
-    const sum = readSummary(s);
-    sum.items[WASTE_TANK_ITEM] = { kind: 'event', status: 'done', at: now };
-    sum.updatedAt = now;
-    writeSummary(sum, s);
   }
+  // Сначала свой счётчик, потом отметка для станции: если запись бункера не удалась, станция не увидит
+  // номер наполнения, которого память Манежа не помнит (иначе следующее наполнение повторило бы тот же score).
+  let saved = true;
   try {
     s?.setItem(BUNKER_KEY, JSON.stringify(b));
   } catch {
-    // Нет места: бункер просто начнёт с нуля.
+    saved = false; // Нет места: бункер просто начнёт с нуля.
+  }
+  if (full && saved) {
+    const sum = readSummary(s);
+    sum.items[WASTE_TANK_ITEM] = { kind: 'event', status: 'done', at: now, score: b.fills };
+    sum.updatedAt = now;
+    writeSummary(sum, s);
   }
   return { bunker: b, full };
 }
